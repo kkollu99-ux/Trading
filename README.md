@@ -87,3 +87,5 @@ MARKET_DATA_PROVIDER=twelvedata
 MARKET_DATA_API_KEY=<provider key>
 ALLOWED_SYMBOLS=XAU/USD,XAG/USD,BTC/USD,EUR/USD,GBP/USD,USOIL
 ```
+
+The backend also accepts `TWELVEDATA_API_KEY`, `TWELVEDATAAPI`, or `twelvedataAPI` as aliases for the Twelve Data key.

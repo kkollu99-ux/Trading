@@ -46,6 +46,13 @@ const allowedSymbols = (process.env.ALLOWED_SYMBOLS || "XAU/USD,XAG/USD,BTC/USD,
   .map((symbol) => symbol.trim().toUpperCase())
   .filter(Boolean);
 
+const marketDataApiKey =
+  process.env.MARKET_DATA_API_KEY ||
+  process.env.TWELVEDATA_API_KEY ||
+  process.env.TWELVEDATAAPI ||
+  process.env.twelvedataAPI ||
+  "";
+
 const defaultInstruments = [
   { symbol: "XAU/USD", displayName: "Gold / US Dollar", category: "metals", enabled: true, tradeEnabled: true },
   { symbol: "XAG/USD", displayName: "Silver / US Dollar", category: "metals", enabled: true, tradeEnabled: true },
@@ -378,7 +385,7 @@ app.get("/api/markets/quotes", async (request, response) => {
   if (!symbols.length) return response.status(400).json({ error: "No allowed symbols requested" });
 
   const provider = process.env.MARKET_DATA_PROVIDER || "mock";
-  const key = process.env.MARKET_DATA_API_KEY;
+  const key = marketDataApiKey;
   if (provider === "twelvedata" && key) {
     const url = new URL("https://api.twelvedata.com/quote");
     url.searchParams.set("symbol", symbols.join(","));
