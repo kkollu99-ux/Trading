@@ -529,7 +529,7 @@
                 <button type="button" data-watch-filter="stocks">Stocks</button>
                 <button type="button" data-watch-filter="commodities">Commodities</button>
               </div>
-              <div class="watch-table">
+              <div id="tradeWatchTable" class="watch-table">
                 <div class="watch-head"><span>Symbol</span><span>Bid</span><span>Chg%</span></div>
                 <button class="watch-row" type="button" data-watch-category="commodities" data-watch-symbol="NATGAS CMD"><span><strong>NATGAS</strong><small>CMD</small></span><em>2.35</em><b class="up">+0.12%</b></button>
                 <button class="watch-row" type="button" data-watch-category="commodities" data-watch-symbol="UKOIL CMD"><span><strong>UKOIL</strong><small>CMD</small></span><em>82.32</em><b class="down">-0.09%</b></button>
@@ -574,7 +574,7 @@
                 <button class="watch-row" type="button" data-watch-category="stocks" data-watch-symbol="MSFT STK"><span><strong>MSFT</strong><small>STK</small></span><em>497.82</em><b class="up">+0.18%</b></button>
                 <button class="watch-row" type="button" data-watch-category="stocks" data-watch-symbol="TSLA STK"><span><strong>TSLA</strong><small>STK</small></span><em>356.19</em><b class="down">-0.14%</b></button>
               </div>
-              <div class="watch-count">42 instruments</div>
+              <div id="tradeWatchCount" class="watch-count">Loading instruments</div>
             </aside>
 
             <section class="chart-terminal">
@@ -754,6 +754,18 @@
                   <button class="primary-action" type="submit">Create Account</button>
                   <p id="managedUserMessage" class="managed-user-message" role="status"></p>
                 </form>
+              </article>
+              <article class="clone-card managed-instrument-card">
+                <div class="managed-table-head">
+                  <div>
+                    <h3>Trade Controls</h3>
+                    <p>Select which markets users can see and trade in the Trade dashboard.</p>
+                  </div>
+                  <button id="refreshManagedInstruments" class="secondary-action compact-action" type="button">⟳ Sync</button>
+                </div>
+                <div id="managedInstrumentList" class="managed-instrument-list">
+                  <div class="instrument-control-row"><span>Loading instruments...</span></div>
+                </div>
               </article>
               <article class="clone-card managed-table-card">
                 <div class="managed-table-head">

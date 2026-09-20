@@ -1760,6 +1760,14 @@ select:focus {
   display: none;
 }
 
+.watch-empty-state {
+  border-top: 1px solid var(--trade-border);
+  color: var(--trade-muted);
+  padding: 1rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .watch-row strong,
 .watch-row small {
   display: block;
@@ -2585,6 +2593,51 @@ canvas {
 .managed-user-table input {
   max-width: 8rem;
   font-family: var(--font-mono);
+}
+
+.managed-instrument-card {
+  grid-column: 1 / -1;
+}
+
+.managed-instrument-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.instrument-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: rgba(20, 32, 51, 0.62);
+  padding: 0.85rem;
+}
+
+.instrument-control-row strong,
+.instrument-control-row small {
+  display: block;
+}
+
+.instrument-control-row small {
+  color: var(--muted);
+}
+
+.instrument-control-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.instrument-control-row input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--blue);
 }
 
 .managed-save-button {
@@ -4387,7 +4440,8 @@ input[type="checkbox"] {
   }
 
   .clone-management-grid,
-  .managed-table-head {
+  .managed-table-head,
+  .managed-instrument-list {
     grid-template-columns: 1fr;
   }
 

@@ -40,10 +40,13 @@ function updateRoleAccess() {
   });
   document.querySelector("#users")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector(".managed-form-card")?.classList.toggle("is-hidden", allowed && !editable);
+  document.querySelector(".managed-instrument-card")?.classList.toggle("is-hidden", !allowed);
 
   if (!allowed) {
     managedUsers = [];
+    managedInstruments = [];
     renderManagedUsers();
+    renderManagedInstruments();
     if (document.querySelector("#users")?.classList.contains("is-active")) moveSection("dashboard");
   }
 }
@@ -100,7 +103,10 @@ function moveSection(id) {
   if (sectionTitle) {
     sectionTitle.textContent = getNavLabel(navItems.find((item) => item.dataset.section === id)) || "Home";
   }
-  if (id === "users" && canManageUsers()) loadManagedUsers();
+  if (id === "users" && canManageUsers()) {
+    loadManagedUsers();
+    loadManagedInstruments();
+  }
   drawCharts();
   renderTradeCandles();
 }
@@ -744,6 +750,115 @@ document.querySelectorAll(".watch-tabs button").forEach((button) => {
   });
 });
 
+const instrumentFallbacks = {
+  "XAU/USD": { price: 4521.75, changePercent: 3.61 },
+  "XAG/USD": { price: 30.52, changePercent: 0.06 },
+  "BTC/USD": { price: 63971.13, changePercent: -21.03 },
+  "EUR/USD": { price: 1.0902, changePercent: 0.53 },
+  "GBP/USD": { price: 1.40467, changePercent: 10.43 },
+  USOIL: { price: 82.32, changePercent: -0.09 },
+};
+
+let tradeInstruments = [];
+let managedInstruments = [];
+
+function compactSymbol(symbol) {
+  return String(symbol || "").replace("/", "");
+}
+
+function displayCategory(category) {
+  const normalized = String(category || "markets").toLowerCase();
+  if (normalized === "metals") return "CMD";
+  if (normalized === "commodities") return "CMD";
+  if (normalized === "crypto") return "CRYPTO";
+  if (normalized === "forex") return "FX";
+  return normalized.toUpperCase();
+}
+
+function categoryFilter(category) {
+  const normalized = String(category || "commodities").toLowerCase();
+  return normalized === "metals" ? "commodities" : normalized;
+}
+
+function getQuotePayload(data, symbol) {
+  if (!data) return null;
+  if (data[symbol]) return data[symbol];
+  const compact = compactSymbol(symbol);
+  return data[compact] || data;
+}
+
+function quotePrice(quote, fallback) {
+  const value = quote?.price ?? quote?.close ?? quote?.bid ?? quote?.previous_close ?? fallback;
+  return Number(value) || fallback;
+}
+
+function quoteChange(quote, fallback) {
+  const value = quote?.percent_change ?? quote?.changePercent ?? quote?.change_percent ?? fallback;
+  return Number(value) || fallback;
+}
+
+async function fetchTradeQuotes(instruments) {
+  const symbols = instruments.map((instrument) => instrument.symbol).filter(Boolean);
+  if (!symbols.length) return {};
+  try {
+    const response = await fetch(`${apiBase}/api/markets/quotes?symbols=${encodeURIComponent(symbols.join(","))}`);
+    const payload = await response.json().catch(() => ({}));
+    return payload.data || {};
+  } catch {
+    return {};
+  }
+}
+
+function renderTradeWatchlist(instruments, quotes = {}) {
+  const table = document.querySelector("#tradeWatchTable");
+  const count = document.querySelector("#tradeWatchCount");
+  if (!table) return;
+
+  const head = `<div class="watch-head"><span>Symbol</span><span>Bid</span><span>Chg%</span></div>`;
+  if (!instruments.length) {
+    table.innerHTML = `${head}<div class="watch-empty-state">No markets enabled by admin.</div>`;
+    if (count) count.textContent = "0 instruments";
+    tradeChartState.candles = [];
+    renderTradeCandles();
+    return;
+  }
+
+  table.innerHTML = head + instruments
+    .map((instrument, index) => {
+      const fallback = instrumentFallbacks[instrument.symbol] || { price: 100 + index * 11, changePercent: 0.1 };
+      const quote = getQuotePayload(quotes, instrument.symbol);
+      const price = quotePrice(quote, fallback.price);
+      const changePercent = quoteChange(quote, fallback.changePercent);
+      const trendClass = changePercent >= 0 ? "up" : "down";
+      const symbol = compactSymbol(instrument.symbol);
+      const selected = symbol === tradeChartState.symbol || (!tradeChartState.symbol && index === 0);
+      return `<button class="watch-row ${selected ? "is-selected" : ""}" type="button" data-watch-category="${categoryFilter(instrument.category)}" data-watch-symbol="${symbol} ${displayCategory(instrument.category)}" data-api-symbol="${instrument.symbol}">
+        <span><strong>${symbol}</strong><small>${displayCategory(instrument.category)}</small></span>
+        <em>${formatTradeNumber(price)}</em>
+        <b class="${trendClass}">${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%</b>
+      </button>`;
+    })
+    .join("");
+
+  if (count) count.textContent = `${instruments.length} instruments`;
+  filterWatchlist();
+
+  const selectedRow = table.querySelector(".watch-row.is-selected") || table.querySelector(".watch-row");
+  if (selectedRow) selectTradeSymbol(selectedRow);
+}
+
+async function loadTradeInstruments() {
+  try {
+    const response = await fetch(`${apiBase}/api/tradable-instruments`);
+    const data = await response.json().catch(() => ({}));
+    tradeInstruments = data.instruments || [];
+    const quotes = await fetchTradeQuotes(tradeInstruments);
+    renderTradeWatchlist(tradeInstruments, quotes);
+  } catch {
+    renderTradeWatchlist([]);
+  }
+}
+
 const timeframeMinutes = {
   M1: 1,
   M5: 5,
@@ -931,10 +1046,10 @@ function selectTradeSymbol(row) {
   renderTradeTicket();
 }
 
-document.querySelectorAll(".watch-row").forEach((row) => {
-  row.addEventListener("click", () => {
-    selectTradeSymbol(row);
-  });
+document.querySelector("#tradeWatchTable")?.addEventListener("click", (event) => {
+  const row = event.target.closest(".watch-row");
+  if (!row) return;
+  selectTradeSymbol(row);
 });
 
 document.querySelectorAll(".timeframes button").forEach((button) => {
@@ -1127,6 +1242,30 @@ function renderManagedUsers() {
   }).join("");
 }
 
+function renderManagedInstruments() {
+  const list = document.querySelector("#managedInstrumentList");
+  if (!list) return;
+
+  if (!managedInstruments.length) {
+    list.innerHTML = `<div class="instrument-control-row"><span>No configured instruments.</span></div>`;
+    return;
+  }
+
+  list.innerHTML = managedInstruments
+    .map((instrument) => {
+      const disabled = canEditManagedUsers() ? "" : "disabled";
+      const symbol = compactSymbol(instrument.symbol);
+      return `<div class="instrument-control-row" data-instrument="${escapeHtml(instrument.id)}">
+        <div>
+          <strong>${escapeHtml(symbol)}</strong>
+          <small>${escapeHtml(instrument.displayName)} · ${escapeHtml(displayCategory(instrument.category))}</small>
+        </div>
+        <label><input type="checkbox" data-instrument-trade="${escapeHtml(instrument.id)}" ${instrument.tradeEnabled ? "checked" : ""} ${disabled} /> Trade</label>
+      </div>`;
+    })
+    .join("");
+}
+
 async function loadManagedUsers() {
   if (!document.querySelector("#managedUserTable")) return;
   if (!canManageUsers()) {
@@ -1144,8 +1283,26 @@ async function loadManagedUsers() {
   }
 }
 
+async function loadManagedInstruments() {
+  if (!document.querySelector("#managedInstrumentList")) return;
+  if (!canManageUsers()) {
+    managedInstruments = [];
+    renderManagedInstruments();
+    return;
+  }
+  try {
+    const data = await adminFetch("/api/admin/instruments");
+    managedInstruments = data.instruments || [];
+    renderManagedInstruments();
+  } catch (error) {
+    const list = document.querySelector("#managedInstrumentList");
+    if (list) list.innerHTML = `<div class="instrument-control-row"><span>${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
 document.querySelector("#managedUserSearch")?.addEventListener("input", renderManagedUsers);
 document.querySelector("#refreshManagedUsers")?.addEventListener("click", loadManagedUsers);
+document.querySelector("#refreshManagedInstruments")?.addEventListener("click", loadManagedInstruments);
 
 document.querySelector("#managedUserForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1192,6 +1349,33 @@ document.querySelector("#managedUserTable")?.addEventListener("click", async (ev
     renderManagedUsers();
     setManagedMessage(`Updated ${result.user.email}.`, "success");
   } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+});
+
+document.querySelector("#managedInstrumentList")?.addEventListener("change", async (event) => {
+  const input = event.target.closest("[data-instrument-trade]");
+  if (!input) return;
+  if (!canEditManagedUsers()) {
+    input.checked = !input.checked;
+    setManagedMessage("Only admin can change trade controls.", "error");
+    return;
+  }
+
+  const instrument = managedInstruments.find((item) => item.id === input.dataset.instrumentTrade);
+  if (!instrument) return;
+  const nextInstrument = { ...instrument, tradeEnabled: input.checked };
+  try {
+    const result = await adminFetch("/api/admin/instruments", {
+      method: "POST",
+      body: JSON.stringify(nextInstrument),
+    });
+    managedInstruments = managedInstruments.map((item) => (item.id === instrument.id ? result.instrument : item));
+    renderManagedInstruments();
+    await loadTradeInstruments();
+    setManagedMessage(`${compactSymbol(result.instrument.symbol)} trade access ${result.instrument.tradeEnabled ? "enabled" : "disabled"}.`, "success");
+  } catch (error) {
+    input.checked = instrument.tradeEnabled;
     setManagedMessage(error.message, "error");
   }
 });
@@ -1283,7 +1467,9 @@ renderUsers();
 renderChat();
 drawCharts();
 renderTradeCandles();
+loadTradeInstruments();
 loadManagedUsers();
+loadManagedInstruments();
 setInterval(tickMarkets, 1500);
 setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);

@@ -224,16 +224,16 @@ async function updateUser(id, patch) {
   return user;
 }
 
-async function listInstruments({ tradeOnly = false } = {}) {
+async function listInstruments({ tradeOnly = false, includeDisabled = false } = {}) {
   if (pool) {
     const rows = await query(
       `SELECT * FROM instruments
-       WHERE enabled = true ${tradeOnly ? "AND trade_enabled = true" : ""}
+       WHERE ${includeDisabled ? "true" : "enabled = true"} ${tradeOnly ? "AND trade_enabled = true" : ""}
        ORDER BY category, symbol`,
     );
     return rows.map(normalizeInstrument);
   }
-  return memory.instruments.filter((instrument) => instrument.enabled && (!tradeOnly || instrument.tradeEnabled));
+  return memory.instruments.filter((instrument) => (includeDisabled || instrument.enabled) && (!tradeOnly || instrument.tradeEnabled));
 }
 
 async function upsertInstrument(instrument) {
@@ -255,6 +255,29 @@ async function upsertInstrument(instrument) {
   if (existing) Object.assign(existing, instrument);
   else memory.instruments.push({ id: crypto.randomUUID(), ...instrument });
   return existing || memory.instruments.at(-1);
+}
+
+async function seedInstrument(instrument) {
+  if (pool) {
+    const rows = await query(
+      `INSERT INTO instruments (symbol, display_name, category, enabled, trade_enabled)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (symbol) DO UPDATE
+       SET display_name = EXCLUDED.display_name,
+           category = EXCLUDED.category
+       RETURNING *`,
+      [instrument.symbol, instrument.displayName, instrument.category, instrument.enabled, instrument.tradeEnabled],
+    );
+    return normalizeInstrument(rows[0]);
+  }
+  const existing = memory.instruments.find((item) => item.symbol === instrument.symbol);
+  if (existing) {
+    existing.displayName = instrument.displayName;
+    existing.category = instrument.category;
+    return existing;
+  }
+  memory.instruments.push({ id: crypto.randomUUID(), ...instrument });
+  return memory.instruments.at(-1);
 }
 
 async function createServiceRequest({ userId, type, amount, note, attachmentUrl }) {
@@ -352,7 +375,7 @@ async function seedDefaults() {
     const schemaPath = path.join(rootDir, "db", "schema.sql");
     await query(fs.readFileSync(schemaPath, "utf8"));
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
-    for (const instrument of defaultInstruments) await upsertInstrument(instrument);
+    for (const instrument of defaultInstruments) await seedInstrument(instrument);
   }
 
   if (!(await findUserByEmail("admin@fxcc.capital"))) {
@@ -436,6 +459,10 @@ app.get("/api/instruments", async (_request, response) => {
 
 app.get("/api/tradable-instruments", async (_request, response) => {
   response.json({ instruments: await listInstruments({ tradeOnly: true }) });
+});
+
+app.get("/api/admin/instruments", requireAuth, attachUser, requireRole("admin", "team"), async (_request, response) => {
+  response.json({ instruments: await listInstruments({ includeDisabled: true }) });
 });
 
 app.post("/api/admin/instruments", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
