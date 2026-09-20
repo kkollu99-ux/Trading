@@ -94,6 +94,7 @@ function normalizeUser(row) {
     email: row.email,
     name: row.name,
     role: row.role,
+    status: row.status || "active",
     referralCode: row.referral_code || row.referralCode,
     referredBy: row.referred_by || row.referredBy,
     kycStatus: row.kyc_status || row.kycStatus,
@@ -136,15 +137,15 @@ async function findUserById(id) {
   return memory.users.find((user) => user.id === id) || null;
 }
 
-async function createUser({ email, password, name, role = "user", referredBy = null }) {
+async function createUser({ email, password, name, role = "user", referredBy = null, kycStatus = "pending", balance = 0, status = "active" }) {
   const passwordHash = await bcrypt.hash(password, 12);
   const referralCode = crypto.randomBytes(4).toString("hex").toUpperCase();
   if (pool) {
     const rows = await query(
-      `INSERT INTO users (email, password_hash, name, role, referral_code, referred_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO users (email, password_hash, name, role, status, referral_code, referred_by, kyc_status, balance)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [email, passwordHash, name, role, referralCode, referredBy],
+      [email, passwordHash, name, role, status, referralCode, referredBy, kycStatus, balance],
     );
     return normalizeUser(rows[0]);
   }
@@ -155,10 +156,11 @@ async function createUser({ email, password, name, role = "user", referredBy = n
     passwordHash,
     name,
     role,
+    status,
     referralCode,
     referredBy,
-    kycStatus: "pending",
-    balance: 0,
+    kycStatus,
+    balance,
     createdAt: new Date().toISOString(),
   };
   memory.users.push(user);
@@ -179,6 +181,47 @@ async function listInvites(user) {
     return rows.map(normalizeUser);
   }
   return memory.users.filter((item) => item.referredBy === user.referralCode);
+}
+
+function normalizeManagedUserPatch(body) {
+  const patch = {};
+  if (body.name !== undefined) patch.name = String(body.name).trim();
+  if (body.role !== undefined) patch.role = String(body.role).toLowerCase();
+  if (body.status !== undefined) patch.status = String(body.status).toLowerCase();
+  if (body.kycStatus !== undefined) patch.kycStatus = String(body.kycStatus).toLowerCase();
+  if (body.balance !== undefined) patch.balance = Number(body.balance);
+  return patch;
+}
+
+function validateManagedUserPatch(patch) {
+  if (patch.name !== undefined && !patch.name) return "Name is required";
+  if (patch.role !== undefined && !["admin", "team", "user"].includes(patch.role)) return "Invalid role";
+  if (patch.status !== undefined && !["active", "pending", "suspended"].includes(patch.status)) return "Invalid status";
+  if (patch.kycStatus !== undefined && !["pending", "verified", "rejected"].includes(patch.kycStatus)) return "Invalid KYC status";
+  if (patch.balance !== undefined && (!Number.isFinite(patch.balance) || patch.balance < 0)) return "Invalid balance";
+  return null;
+}
+
+async function updateUser(id, patch) {
+  if (pool) {
+    const rows = await query(
+      `UPDATE users
+       SET name = COALESCE($2, name),
+           role = COALESCE($3, role),
+           status = COALESCE($4, status),
+           kyc_status = COALESCE($5, kyc_status),
+           balance = COALESCE($6, balance)
+       WHERE id = $1
+       RETURNING *`,
+      [id, patch.name ?? null, patch.role ?? null, patch.status ?? null, patch.kycStatus ?? null, patch.balance ?? null],
+    );
+    return normalizeUser(rows[0]);
+  }
+
+  const user = memory.users.find((item) => item.id === id);
+  if (!user) return null;
+  Object.assign(user, patch);
+  return user;
 }
 
 async function listInstruments({ tradeOnly = false } = {}) {
@@ -308,6 +351,7 @@ async function seedDefaults() {
     await query(`CREATE EXTENSION IF NOT EXISTS pgcrypto`);
     const schemaPath = path.join(rootDir, "db", "schema.sql");
     await query(fs.readFileSync(schemaPath, "utf8"));
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
     for (const instrument of defaultInstruments) await upsertInstrument(instrument);
   }
 
@@ -347,6 +391,38 @@ app.get("/api/me", requireAuth, attachUser, (request, response) => {
 app.get("/api/admin/users", requireAuth, attachUser, requireRole("admin", "team"), async (_request, response) => {
   const users = await listUsers();
   response.json({ users: users.map(publicUser) });
+});
+
+app.post("/api/admin/users", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
+  const email = String(request.body.email || "").trim().toLowerCase();
+  const password = String(request.body.password || "Client@12345");
+  const patch = normalizeManagedUserPatch(request.body);
+  const validationError = validateManagedUserPatch(patch);
+  if (!email || !patch.name) return response.status(400).json({ error: "Name and email are required" });
+  if (password.length < 6) return response.status(400).json({ error: "Password must be at least 6 characters" });
+  if (validationError) return response.status(400).json({ error: validationError });
+  if (await findUserByEmail(email)) return response.status(409).json({ error: "Email already registered" });
+
+  const user = await createUser({
+    email,
+    password,
+    name: patch.name,
+    role: patch.role || "user",
+    status: patch.status || "active",
+    kycStatus: patch.kycStatus || "pending",
+    balance: patch.balance || 0,
+  });
+  response.status(201).json({ user: publicUser(user), temporaryPassword: password });
+});
+
+app.patch("/api/admin/users/:id", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
+  const patch = normalizeManagedUserPatch(request.body);
+  const validationError = validateManagedUserPatch(patch);
+  if (validationError) return response.status(400).json({ error: validationError });
+
+  const user = await updateUser(request.params.id, patch);
+  if (!user) return response.status(404).json({ error: "User not found" });
+  response.json({ user: publicUser(user) });
 });
 
 app.get("/api/referrals", requireAuth, attachUser, async (request, response) => {

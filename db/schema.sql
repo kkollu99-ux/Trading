@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   name TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin', 'team', 'user')),
+  status TEXT NOT NULL DEFAULT 'active',
   referral_code TEXT UNIQUE NOT NULL,
   referred_by TEXT,
   kyc_status TEXT NOT NULL DEFAULT 'pending',

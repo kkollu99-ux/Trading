@@ -1915,6 +1915,38 @@ select:focus {
   background-size: 100% 3.65rem, 5.6rem 100%;
 }
 
+.trade-candle-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chart-price-scale {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.45rem;
+  bottom: 3.1rem;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--trade-muted);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.chart-price-scale span {
+  padding-left: 0.4rem;
+  background: rgba(19, 23, 34, 0.82);
+}
+
 .price-marker {
   position: absolute;
   top: 2.05rem;
@@ -2411,6 +2443,168 @@ canvas {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(20rem, 0.8fr);
   gap: 1rem;
+}
+
+.user-management-page {
+  width: min(68rem, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1.45rem 0 2rem;
+}
+
+.user-management-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.user-management-head span {
+  color: var(--blue);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.user-management-head h2 {
+  margin-top: 0.25rem;
+  font-size: 1.35rem;
+}
+
+.user-management-head p,
+.managed-table-head p,
+.managed-user-message {
+  color: var(--muted);
+}
+
+.user-management-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.user-management-metrics article {
+  border: 1px solid rgba(0, 115, 255, 0.32);
+  border-radius: 0.5rem;
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(9, 22, 42, 0.98));
+  padding: 0.9rem;
+}
+
+.user-management-metrics span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.user-management-metrics strong {
+  display: block;
+  margin-top: 0.25rem;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  color: var(--blue);
+}
+
+.clone-management-grid {
+  grid-template-columns: minmax(18rem, 0.54fr) minmax(0, 1.46fr);
+}
+
+.managed-form-card h3,
+.managed-table-head h3 {
+  font-size: 1rem;
+}
+
+.managed-form-card label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.managed-form-card input,
+.managed-form-card select,
+.managed-table-head input,
+.managed-user-table input,
+.managed-user-table select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.7rem 0.8rem;
+  font-weight: 800;
+}
+
+.managed-form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.managed-user-message {
+  min-height: 1.2rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.managed-user-message.is-success {
+  color: var(--green);
+}
+
+.managed-user-message.is-error {
+  color: var(--red);
+}
+
+.managed-table-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.42fr);
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 0.85rem;
+}
+
+.managed-user-table {
+  min-width: 52rem;
+}
+
+.managed-user-table td {
+  vertical-align: middle;
+}
+
+.managed-user-table strong {
+  display: block;
+}
+
+.managed-user-table small {
+  color: var(--muted);
+}
+
+.managed-user-table input {
+  max-width: 8rem;
+  font-family: var(--font-mono);
+}
+
+.managed-save-button {
+  border: 1px solid rgba(0, 115, 255, 0.6);
+  border-radius: 0.35rem;
+  background: var(--blue);
+  color: #fff;
+  padding: 0.55rem 0.8rem;
+  font-weight: 900;
+}
+
+.status-pill.is-pending {
+  background: rgba(255, 176, 0, 0.13);
+  color: var(--gold);
+}
+
+.status-pill.is-suspended,
+.status-pill.is-rejected {
+  background: rgba(232, 61, 48, 0.13);
+  color: var(--red);
 }
 
 .compact-form,
@@ -4191,6 +4385,15 @@ input[type="checkbox"] {
   .process-chat-launcher {
     bottom: 5.75rem;
   }
+
+  .clone-management-grid,
+  .managed-table-head {
+    grid-template-columns: 1fr;
+  }
+
+  .user-management-page {
+    width: min(100% - 1rem, 68rem);
+  }
 }
 
 @media (max-width: 680px) {
@@ -4218,6 +4421,17 @@ input[type="checkbox"] {
   .app-header .topbar-actions {
     align-items: center;
     flex-direction: row;
+  }
+
+  .user-management-head,
+  .managed-form-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .user-management-metrics {
+    grid-template-columns: 1fr;
   }
 
   .home-nav nav,

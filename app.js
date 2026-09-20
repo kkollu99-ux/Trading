@@ -5,6 +5,7 @@ const appView = document.querySelector("#appView");
 const sectionTitle = document.querySelector("#sectionTitle");
 const navItems = [...document.querySelectorAll(".nav-item")];
 const sections = [...document.querySelectorAll(".view-section")];
+const apiBase = "";
 
 const metals = {
   gold: { label: "Gold", symbol: "XAU/USD", price: 3672.4, spread: 0.26, color: "#ffb000", data: [] },
@@ -57,7 +58,9 @@ function moveSection(id) {
   if (sectionTitle) {
     sectionTitle.textContent = getNavLabel(navItems.find((item) => item.dataset.section === id)) || "Home";
   }
+  if (id === "users") loadManagedUsers();
   drawCharts();
+  renderTradeCandles();
 }
 
 function formatPrice(metal) {
@@ -664,15 +667,205 @@ document.querySelectorAll(".watch-tabs button").forEach((button) => {
   });
 });
 
+const timeframeMinutes = {
+  M1: 1,
+  M5: 5,
+  M15: 15,
+  M30: 30,
+  H1: 60,
+  H4: 240,
+  D1: 1440,
+};
+
+const tradeChartState = {
+  symbol: "BTCUSD",
+  category: "Crypto",
+  price: 63971.14,
+  changePercent: -21.03,
+  timeframe: "M1",
+  candles: [],
+  tick: 0,
+};
+
+function formatTradeNumber(value) {
+  const number = Number(value) || 0;
+  if (number >= 1000) return number.toFixed(2);
+  if (number >= 10) return number.toFixed(3);
+  return number.toFixed(5);
+}
+
+function hashSymbol(symbol) {
+  return [...symbol].reduce((total, letter) => total + letter.charCodeAt(0), 0);
+}
+
+function readTradeRow(row) {
+  const symbol = row.querySelector("strong")?.textContent.trim() || "BTCUSD";
+  const category = row.querySelector("small")?.textContent.trim() || "Crypto";
+  const price = Number(row.querySelector("em")?.textContent.replace(/,/g, "")) || tradeChartState.price;
+  const changePercent = Number(row.querySelector("b")?.textContent.replace("%", "")) || 0;
+  return { symbol, category, price, changePercent };
+}
+
+function buildTradeCandles({ symbol, price, timeframe }) {
+  const seed = hashSymbol(symbol) + timeframeMinutes[timeframe] * 13;
+  const spread = Math.max(price * (0.00055 + timeframeMinutes[timeframe] / 900000), 0.006);
+  let close = price - Math.sin(seed) * spread * 7;
+
+  return Array.from({ length: 74 }, (_, index) => {
+    const wave = Math.sin((index + seed) / 5.7) * spread * 2.4;
+    const pressure = Math.cos((index + seed) / 9.1) * spread * 1.8;
+    const open = close;
+    close = Math.max(0.00001, open + wave + pressure + (index > 55 ? -spread * 0.42 : 0));
+    const high = Math.max(open, close) + spread * (1.3 + Math.abs(Math.sin(index + seed)));
+    const low = Math.min(open, close) - spread * (1.1 + Math.abs(Math.cos(index + seed)));
+    const volume = 28 + Math.abs(Math.sin(index / 3 + seed)) * 70 + (index > 68 ? 65 : 0);
+    return { open, high, low: Math.max(0.00001, low), close, volume };
+  });
+}
+
+function setTradeText(selector, text) {
+  const element = document.querySelector(selector);
+  if (element) element.textContent = text;
+}
+
+function syncTradeTerminal() {
+  const latest = tradeChartState.candles.at(-1);
+  if (!latest) return;
+  const bid = latest.close - Math.max(latest.close * 0.00000016, 0.01);
+  const ask = latest.close + Math.max(latest.close * 0.00000016, 0.01);
+  const move = latest.close - tradeChartState.price;
+  const moveText = `${move >= 0 ? "+" : ""}${formatTradeNumber(move)} (${tradeChartState.changePercent >= 0 ? "+" : ""}${tradeChartState.changePercent.toFixed(3)}%)`;
+
+  setTradeText("#tradeSymbolName", tradeChartState.symbol);
+  setTradeText("#tradeSymbolCategory", tradeChartState.category[0] + tradeChartState.category.slice(1).toLowerCase());
+  setTradeText("#tradeSymbolPrice", formatTradeNumber(latest.close));
+  setTradeText("#tradeSymbolChange", moveText);
+  setTradeText("#tradeOpenValue", formatTradeNumber(latest.open));
+  setTradeText("#tradeHighValue", formatTradeNumber(latest.high));
+  setTradeText("#tradeLowValue", formatTradeNumber(latest.low));
+  setTradeText("#tradeCloseValue", formatTradeNumber(latest.close));
+  setTradeText("#tradeBidValue", formatTradeNumber(bid));
+  setTradeText("#tradeAskValue", formatTradeNumber(ask));
+  setTradeText("#tradeSpreadValue", formatTradeNumber(ask - bid));
+  setTradeText("#tradePriceMarker", formatTradeNumber(latest.close));
+  setTradeText("#tradeTimeframeLabel", tradeChartState.timeframe);
+  document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", tradeChartState.changePercent >= 0);
+  document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", tradeChartState.changePercent < 0);
+}
+
+function renderPriceScale(values) {
+  const scale = document.querySelector("#tradePriceScale");
+  if (!scale || !values.length) return;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  scale.innerHTML = Array.from({ length: 6 }, (_, index) => {
+    const value = max - ((max - min) / 5) * index;
+    return `<span>${formatTradeNumber(value)}</span>`;
+  }).join("");
+}
+
+function renderTradeCandles() {
+  const canvas = document.querySelector("#tradeCandleCanvas");
+  if (!canvas || !tradeChartState.candles.length) return;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(rect.width * dpr);
+  canvas.height = Math.floor(rect.height * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  const candles = tradeChartState.candles.slice(-62);
+  const chart = { left: 12, top: 18, right: 64, bottom: 66 };
+  const width = rect.width - chart.left - chart.right;
+  const height = rect.height - chart.top - chart.bottom;
+  const highs = candles.map((candle) => candle.high);
+  const lows = candles.map((candle) => candle.low);
+  const max = Math.max(...highs);
+  const min = Math.min(...lows);
+  const range = max - min || 1;
+  const volumeMax = Math.max(...candles.map((candle) => candle.volume));
+  const candleStep = width / candles.length;
+  const candleWidth = Math.max(4, Math.min(12, candleStep * 0.58));
+  const yFor = (value) => chart.top + ((max - value) / range) * height;
+
+  ctx.strokeStyle = "rgba(42, 46, 57, 0.82)";
+  ctx.lineWidth = 1;
+  for (let x = chart.left; x <= rect.width - chart.right; x += Math.max(68, candleStep * 8)) {
+    ctx.beginPath();
+    ctx.moveTo(x, chart.top);
+    ctx.lineTo(x, rect.height - chart.bottom + 38);
+    ctx.stroke();
+  }
+  for (let i = 0; i <= 5; i += 1) {
+    const y = chart.top + (height / 5) * i;
+    ctx.beginPath();
+    ctx.moveTo(chart.left, y);
+    ctx.lineTo(rect.width - chart.right + 8, y);
+    ctx.stroke();
+  }
+
+  candles.forEach((candle, index) => {
+    const x = chart.left + index * candleStep + candleStep / 2;
+    const isUp = candle.close >= candle.open;
+    const color = isUp ? "#25b15f" : "#e83d30";
+    const wickTop = yFor(candle.high);
+    const wickBottom = yFor(candle.low);
+    const bodyTop = yFor(Math.max(candle.open, candle.close));
+    const bodyBottom = yFor(Math.min(candle.open, candle.close));
+    const bodyHeight = Math.max(2, bodyBottom - bodyTop);
+
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, wickTop);
+    ctx.lineTo(x, wickBottom);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
+
+    const volumeHeight = (candle.volume / volumeMax) * 38;
+    ctx.globalAlpha = 0.42;
+    ctx.fillRect(x - candleWidth / 2, rect.height - 30 - volumeHeight, candleWidth, volumeHeight);
+    ctx.globalAlpha = 1;
+  });
+
+  const latest = candles.at(-1);
+  const priceY = yFor(latest.close);
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "#ffb000";
+  ctx.beginPath();
+  ctx.moveTo(chart.left, priceY);
+  ctx.lineTo(rect.width - chart.right + 8, priceY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  renderPriceScale([min, max]);
+  syncTradeTerminal();
+}
+
+function selectTradeSymbol(row) {
+  Object.assign(tradeChartState, readTradeRow(row));
+  tradeChartState.candles = buildTradeCandles(tradeChartState);
+  document.querySelectorAll(".watch-row").forEach((item) => item.classList.toggle("is-selected", item === row));
+  renderTradeCandles();
+  renderTradeTicket();
+}
+
 document.querySelectorAll(".watch-row").forEach((row) => {
   row.addEventListener("click", () => {
-    document.querySelectorAll(".watch-row").forEach((item) => item.classList.toggle("is-selected", item === row));
+    selectTradeSymbol(row);
   });
 });
 
 document.querySelectorAll(".timeframes button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".timeframes button").forEach((item) => item.classList.toggle("is-active", item === button));
+    tradeChartState.timeframe = button.dataset.timeframe || button.textContent.trim();
+    tradeChartState.candles = buildTradeCandles(tradeChartState);
+    renderTradeCandles();
   });
 });
 
@@ -703,10 +896,12 @@ const tradeTicketCopy = {
 function renderTradeTicket() {
   const ticket = tradeTicketCopy[tradeTicketState.kind];
   const isPending = tradeTicketState.mode === "pending";
+  const settlement = tradeTicketState.kind === "spot" ? "settlement" : "perpetual";
+  const symbol = tradeChartState.symbol;
 
-  document.querySelector("#ticketKindNote").textContent = ticket.note;
+  document.querySelector("#ticketKindNote").textContent = `${tradeTicketState.kind === "spot" ? "Spot" : "Futures"} order · ${symbol} ${settlement}`;
   document.querySelector("#ticketMultiplier").textContent = ticket.multiplier;
-  document.querySelector("#ticketLotValue").textContent = ticket.lot;
+  document.querySelector("#ticketLotValue").textContent = `1 Lots = 1 ${symbol}${tradeTicketState.kind === "futures" ? " Perp" : ""}`;
   document.querySelector("#ticketFeeValue").textContent = ticket.fee;
   document.querySelector("#ticketMarginValue").textContent = ticket.margin;
   document.querySelector("#ticketBalanceValue").textContent = ticket.balance;
@@ -732,7 +927,197 @@ document.querySelectorAll("[data-order-mode]").forEach((button) => {
   });
 });
 
+function tickTradeCandles() {
+  if (!tradeChartState.candles.length) return;
+  const last = tradeChartState.candles.at(-1);
+  const scale = Math.max(last.close * 0.00032, 0.004);
+  const delta = Math.sin(Date.now() / 1800 + hashSymbol(tradeChartState.symbol)) * scale + (Math.random() - 0.48) * scale;
+  last.close = Math.max(0.00001, last.close + delta);
+  last.high = Math.max(last.high, last.close + Math.abs(delta) * 0.8);
+  last.low = Math.min(last.low, last.close - Math.abs(delta) * 0.8);
+  last.volume = Math.min(180, last.volume + Math.abs(delta / scale) * 9);
+  tradeChartState.tick += 1;
+
+  if (tradeChartState.tick % 8 === 0) {
+    const open = last.close;
+    tradeChartState.candles.push({
+      open,
+      high: open + scale * 1.8,
+      low: Math.max(0.00001, open - scale * 1.6),
+      close: Math.max(0.00001, open + (Math.random() - 0.52) * scale * 2.4),
+      volume: 34 + Math.random() * 55,
+    });
+    tradeChartState.candles = tradeChartState.candles.slice(-84);
+  }
+
+  renderTradeCandles();
+}
+
+tradeChartState.candles = buildTradeCandles(tradeChartState);
 renderTradeTicket();
+renderTradeCandles();
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function setManagedMessage(message, type = "") {
+  const element = document.querySelector("#managedUserMessage");
+  if (!element) return;
+  element.textContent = message;
+  element.classList.toggle("is-success", type === "success");
+  element.classList.toggle("is-error", type === "error");
+}
+
+async function getAdminToken() {
+  const cachedToken = localStorage.getItem("fxccAdminToken");
+  if (cachedToken) return cachedToken;
+
+  const response = await fetch(`${apiBase}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "admin@fxcc.capital", password: "Admin@12345" }),
+  });
+  if (!response.ok) throw new Error("Admin login failed");
+  const data = await response.json();
+  localStorage.setItem("fxccAdminToken", data.token);
+  return data.token;
+}
+
+async function adminFetch(path, options = {}) {
+  const token = await getAdminToken();
+  const response = await fetch(`${apiBase}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options.headers || {}),
+    },
+  });
+
+  if (response.status === 401) {
+    localStorage.removeItem("fxccAdminToken");
+  }
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+let managedUsers = [];
+
+function renderManagedUsers() {
+  const table = document.querySelector("#managedUserTable");
+  if (!table) return;
+  const query = document.querySelector("#managedUserSearch")?.value.toLowerCase().trim() || "";
+  const visibleUsers = managedUsers.filter((user) => {
+    return [user.name, user.email, user.role, user.status, user.kycStatus].some((value) => String(value || "").toLowerCase().includes(query));
+  });
+
+  setTradeText("#managedTotalUsers", String(managedUsers.length));
+  setTradeText("#managedVerifiedUsers", String(managedUsers.filter((user) => user.kycStatus === "verified").length));
+  setTradeText("#managedPendingUsers", String(managedUsers.filter((user) => user.kycStatus === "pending").length));
+
+  if (!visibleUsers.length) {
+    table.innerHTML = `<tr><td colspan="6">No users found.</td></tr>`;
+    return;
+  }
+
+  table.innerHTML = visibleUsers.map((user) => {
+    const statusClass = user.status === "suspended" ? "is-suspended" : user.status === "pending" ? "is-pending" : "";
+    const kycClass = user.kycStatus === "rejected" ? "is-rejected" : user.kycStatus === "pending" ? "is-pending" : "";
+    return `
+      <tr data-managed-user-row="${escapeHtml(user.id)}">
+        <td><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.email)}</small></td>
+        <td>
+          <select data-user-field="role">
+            <option value="user" ${user.role === "user" ? "selected" : ""}>User</option>
+            <option value="team" ${user.role === "team" ? "selected" : ""}>Team</option>
+            <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
+          </select>
+        </td>
+        <td>
+          <select data-user-field="status">
+            <option value="active" ${user.status === "active" ? "selected" : ""}>Active</option>
+            <option value="pending" ${user.status === "pending" ? "selected" : ""}>Pending</option>
+            <option value="suspended" ${user.status === "suspended" ? "selected" : ""}>Suspended</option>
+          </select>
+          <span class="status-pill ${statusClass}">${escapeHtml(user.status || "active")}</span>
+        </td>
+        <td>
+          <select data-user-field="kycStatus">
+            <option value="pending" ${user.kycStatus === "pending" ? "selected" : ""}>Pending</option>
+            <option value="verified" ${user.kycStatus === "verified" ? "selected" : ""}>Verified</option>
+            <option value="rejected" ${user.kycStatus === "rejected" ? "selected" : ""}>Rejected</option>
+          </select>
+          <span class="status-pill ${kycClass}">${escapeHtml(user.kycStatus || "pending")}</span>
+        </td>
+        <td><input data-user-field="balance" type="number" min="0" step="0.01" value="${Number(user.balance || 0).toFixed(2)}" /></td>
+        <td><button class="managed-save-button" type="button" data-managed-user="${escapeHtml(user.id)}">Save</button></td>
+      </tr>`;
+  }).join("");
+}
+
+async function loadManagedUsers() {
+  if (!document.querySelector("#managedUserTable")) return;
+  try {
+    const data = await adminFetch("/api/admin/users");
+    managedUsers = data.users || [];
+    renderManagedUsers();
+    setManagedMessage("User list synced.", "success");
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+}
+
+document.querySelector("#managedUserSearch")?.addEventListener("input", renderManagedUsers);
+document.querySelector("#refreshManagedUsers")?.addEventListener("click", loadManagedUsers);
+
+document.querySelector("#managedUserForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  data.balance = Number(data.balance || 0);
+  try {
+    const result = await adminFetch("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    managedUsers = [result.user, ...managedUsers];
+    event.target.reset();
+    event.target.elements.password.value = "Client@12345";
+    event.target.elements.balance.value = "0";
+    renderManagedUsers();
+    setManagedMessage(`Created ${result.user.email}. Temporary password: ${result.temporaryPassword}`, "success");
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+});
+
+document.querySelector("#managedUserTable")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-managed-user]");
+  if (!button) return;
+  const row = button.closest("[data-managed-user-row]");
+  const id = button.dataset.managedUser;
+  const patch = Object.fromEntries([...row.querySelectorAll("[data-user-field]")].map((input) => [input.dataset.userField, input.value]));
+  patch.balance = Number(patch.balance || 0);
+
+  try {
+    const result = await adminFetch(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    managedUsers = managedUsers.map((user) => (user.id === id ? result.user : user));
+    renderManagedUsers();
+    setManagedMessage(`Updated ${result.user.email}.`, "success");
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+});
 
 document.querySelectorAll("[data-metal]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -804,5 +1189,8 @@ renderTeam();
 renderUsers();
 renderChat();
 drawCharts();
+renderTradeCandles();
+loadManagedUsers();
 setInterval(tickMarkets, 1500);
+setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);

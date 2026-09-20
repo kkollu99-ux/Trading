@@ -343,6 +343,7 @@
             <button class="nav-item" data-section="orders" data-label="Orders"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 6h1"/><path d="M4 12h1"/><path d="M4 18h1"/></svg></span><span class="nav-label">Orders</span></button>
             <button class="nav-item" data-section="news" data-label="News"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h14a2 2 0 0 1 2 2v12H6a2 2 0 0 1-2-2z"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></span><span class="nav-label">News</span></button>
             <button class="nav-item" data-section="copy" data-label="Copy"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-label">Copy</span></button>
+            <button class="nav-item" data-section="users" data-label="Users"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6"/><path d="M19 8v6"/></svg></span><span class="nav-label">Users</span></button>
             <button class="nav-item" data-section="profile" data-label="Profile"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 10h16"/><path d="M8 15h4"/></svg></span><span class="nav-label">Profile</span></button>
             <button class="nav-item" data-section="service" data-label="Online Service"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M5 13h3v6H5z"/><path d="M16 13h3v6h-3z"/><path d="M19 19a4 4 0 0 1-4 3h-3"/></svg></span><span class="nav-label">Online Service</span></button>
           </nav>
@@ -579,59 +580,29 @@
             <section class="chart-terminal">
               <header class="chart-symbol-head">
                 <div>
-                  <h2>BTCUSD <span>Crypto</span> <strong>63971.14</strong> <em>-17039.19 (-21.033%)</em></h2>
-                  <p>O <b>63971.14</b> H <b>63971.14</b> L <b>63949.37</b> C <b>63971.14</b></p>
+                  <h2><span id="tradeSymbolName">BTCUSD</span> <span id="tradeSymbolCategory">Crypto</span> <strong id="tradeSymbolPrice">63971.14</strong> <em id="tradeSymbolChange">-17039.19 (-21.033%)</em></h2>
+                  <p>O <b id="tradeOpenValue">63971.14</b> H <b id="tradeHighValue">63971.14</b> L <b id="tradeLowValue">63949.37</b> C <b id="tradeCloseValue">63971.14</b></p>
                 </div>
               </header>
               <div class="trade-stats">
-                <div><span>Bid</span><strong class="danger-text">63971.13</strong></div>
-                <div><span>Ask</span><strong class="positive">63971.15</strong></div>
-                <div><span>Spread</span><strong>0.02</strong></div>
+                <div><span>Bid</span><strong id="tradeBidValue" class="danger-text">63971.13</strong></div>
+                <div><span>Ask</span><strong id="tradeAskValue" class="positive">63971.15</strong></div>
+                <div><span>Spread</span><strong id="tradeSpreadValue">0.02</strong></div>
                 <div class="timeframes">
-                  <button class="is-active" type="button">M1</button>
-                  <button type="button">M5</button>
-                  <button type="button">M15</button>
-                  <button type="button">M30</button>
-                  <button type="button">H1</button>
-                  <button type="button">H4</button>
-                  <button type="button">D1</button>
+                  <button class="is-active" type="button" data-timeframe="M1">M1</button>
+                  <button type="button" data-timeframe="M5">M5</button>
+                  <button type="button" data-timeframe="M15">M15</button>
+                  <button type="button" data-timeframe="M30">M30</button>
+                  <button type="button" data-timeframe="H1">H1</button>
+                  <button type="button" data-timeframe="H4">H4</button>
+                  <button type="button" data-timeframe="D1">D1</button>
                 </div>
               </div>
               <div class="candlestick-chart" aria-label="BTCUSD candlestick chart">
-                <div class="price-marker">63971.14</div>
-                <div class="chart-note"><strong>M1</strong> · Scroll/drag to zoom &amp; pan</div>
-                <div class="candle-layer">
-                  <i class="candle red" style="--x:1;--top:40%;--h:14%;--body-top:45%;--body-h:7%"></i>
-                  <i class="candle green" style="--x:2;--top:39%;--h:16%;--body-top:42%;--body-h:6%"></i>
-                  <i class="candle green" style="--x:3;--top:36%;--h:15%;--body-top:38%;--body-h:7%"></i>
-                  <i class="candle green" style="--x:4;--top:32%;--h:21%;--body-top:35%;--body-h:9%"></i>
-                  <i class="candle red" style="--x:5;--top:31%;--h:22%;--body-top:35%;--body-h:8%"></i>
-                  <i class="candle red" style="--x:6;--top:41%;--h:10%;--body-top:43%;--body-h:3%"></i>
-                  <i class="candle red" style="--x:7;--top:43%;--h:7%;--body-top:45%;--body-h:2%"></i>
-                  <i class="candle green" style="--x:8;--top:31%;--h:20%;--body-top:39%;--body-h:6%"></i>
-                  <i class="candle red" style="--x:9;--top:38%;--h:12%;--body-top:42%;--body-h:4%"></i>
-                  <i class="candle green" style="--x:10;--top:37%;--h:13%;--body-top:40%;--body-h:4%"></i>
-                  <i class="candle green" style="--x:11;--top:24%;--h:24%;--body-top:30%;--body-h:9%"></i>
-                  <i class="candle green" style="--x:12;--top:21%;--h:20%;--body-top:27%;--body-h:8%"></i>
-                  <i class="candle red" style="--x:13;--top:22%;--h:28%;--body-top:31%;--body-h:11%"></i>
-                  <i class="candle red" style="--x:14;--top:28%;--h:22%;--body-top:35%;--body-h:6%"></i>
-                  <i class="candle green" style="--x:15;--top:31%;--h:17%;--body-top:34%;--body-h:6%"></i>
-                  <i class="candle red" style="--x:16;--top:30%;--h:18%;--body-top:34%;--body-h:6%"></i>
-                  <i class="candle green" style="--x:17;--top:29%;--h:15%;--body-top:33%;--body-h:5%"></i>
-                  <i class="candle red" style="--x:18;--top:23%;--h:29%;--body-top:34%;--body-h:9%"></i>
-                  <i class="candle red" style="--x:19;--top:35%;--h:19%;--body-top:39%;--body-h:8%"></i>
-                  <i class="candle red" style="--x:20;--top:38%;--h:18%;--body-top:43%;--body-h:6%"></i>
-                  <i class="candle green" style="--x:21;--top:39%;--h:12%;--body-top:43%;--body-h:4%"></i>
-                  <i class="candle red" style="--x:22;--top:40%;--h:19%;--body-top:45%;--body-h:7%"></i>
-                  <i class="candle red" style="--x:23;--top:48%;--h:17%;--body-top:53%;--body-h:5%"></i>
-                  <i class="candle red" style="--x:24;--top:53%;--h:21%;--body-top:58%;--body-h:8%"></i>
-                  <i class="candle red" style="--x:25;--top:57%;--h:16%;--body-top:61%;--body-h:7%"></i>
-                  <i class="candle red" style="--x:26;--top:61%;--h:17%;--body-top:65%;--body-h:6%"></i>
-                  <i class="candle green last" style="--x:27;--top:15%;--h:72%;--body-top:15%;--body-h:57%"></i>
-                </div>
-                <div class="volume-bars">
-                  <span style="height: 17%"></span><span style="height: 8%"></span><span style="height: 9%"></span><span style="height: 21%"></span><span style="height: 5%"></span><span style="height: 10%"></span><span style="height: 4%"></span><span style="height: 13%"></span><span style="height: 8%"></span><span style="height: 6%"></span><span style="height: 7%"></span><span style="height: 13%"></span><span style="height: 10%"></span><span style="height: 9%"></span><span style="height: 8%"></span><span style="height: 12%"></span><span style="height: 7%"></span><span style="height: 5%"></span><span style="height: 9%"></span><span style="height: 8%"></span><span style="height: 7%"></span><span style="height: 12%"></span><span style="height: 9%"></span><span style="height: 8%"></span><span style="height: 10%"></span><span style="height: 9%"></span><span style="height: 42%"></span>
-                </div>
+                <canvas id="tradeCandleCanvas" class="trade-candle-canvas" width="900" height="520" aria-label="Live candlestick chart"></canvas>
+                <div id="tradePriceScale" class="chart-price-scale" aria-hidden="true"></div>
+                <div id="tradePriceMarker" class="price-marker">63971.14</div>
+                <div class="chart-note"><strong id="tradeTimeframeLabel">M1</strong> · Scroll/drag to zoom &amp; pan</div>
                 <div class="chart-times"><span>56 PM</span><span>10:03 PM</span><span>10:10 PM</span><span>10:17 PM</span><span>10:24 PM</span><span>10:31 PM</span><span>10:38 PM</span></div>
               </div>
             </section>
@@ -749,6 +720,56 @@
 
             <div class="copy-empty-panel">
               <h3>🏅 Top Signal Providers</h3>
+            </div>
+          </div>
+        </section>
+
+        <section id="users" class="view-section">
+          <div class="user-management-page">
+            <header class="user-management-head">
+              <div>
+                <span>User Management</span>
+                <h2>Admin Control Center</h2>
+                <p>Create clients, assign team access, update balances, and review KYC state.</p>
+              </div>
+              <button id="refreshManagedUsers" class="secondary-action compact-action" type="button">⟳ Refresh</button>
+            </header>
+            <div class="user-management-metrics">
+              <article><span>Total Users</span><strong id="managedTotalUsers">0</strong></article>
+              <article><span>Verified KYC</span><strong id="managedVerifiedUsers">0</strong></article>
+              <article><span>Pending Review</span><strong id="managedPendingUsers">0</strong></article>
+            </div>
+            <div class="management-grid clone-management-grid">
+              <article class="clone-card managed-form-card">
+                <h3>Create User</h3>
+                <form id="managedUserForm" class="compact-form">
+                  <label>Full Name<input name="name" type="text" placeholder="Client name" required /></label>
+                  <label>Email Address<input name="email" type="email" placeholder="client@example.com" required /></label>
+                  <label>Temporary Password<input name="password" type="text" value="Client@12345" minlength="6" required /></label>
+                  <div class="managed-form-row">
+                    <label>Role<select name="role"><option value="user">User</option><option value="team">Team</option><option value="admin">Admin</option></select></label>
+                    <label>KYC<select name="kycStatus"><option value="pending">Pending</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select></label>
+                  </div>
+                  <label>Balance<input name="balance" type="number" min="0" step="0.01" value="0" /></label>
+                  <button class="primary-action" type="submit">Create Account</button>
+                  <p id="managedUserMessage" class="managed-user-message" role="status"></p>
+                </form>
+              </article>
+              <article class="clone-card managed-table-card">
+                <div class="managed-table-head">
+                  <div>
+                    <h3>Users</h3>
+                    <p>Admin and support team can review the client book here.</p>
+                  </div>
+                  <input id="managedUserSearch" type="search" placeholder="Search users..." />
+                </div>
+                <div class="table-wrap managed-user-table-wrap">
+                  <table class="managed-user-table">
+                    <thead><tr><th>User</th><th>Role</th><th>Status</th><th>KYC</th><th>Balance</th><th></th></tr></thead>
+                    <tbody id="managedUserTable"><tr><td colspan="6">Loading users...</td></tr></tbody>
+                  </table>
+                </div>
+              </article>
             </div>
           </div>
         </section>
