@@ -6,6 +6,47 @@ const sectionTitle = document.querySelector("#sectionTitle");
 const navItems = [...document.querySelectorAll(".nav-item")];
 const sections = [...document.querySelectorAll(".view-section")];
 const apiBase = "";
+let currentSession = null;
+
+function canManageUsers() {
+  return ["admin", "team"].includes(currentSession?.user?.role);
+}
+
+function canEditManagedUsers() {
+  return currentSession?.user?.role === "admin";
+}
+
+function saveSession(session) {
+  currentSession = session;
+  if (session?.token) localStorage.setItem("fxccAuthToken", session.token);
+  if (session?.user) localStorage.setItem("fxccUser", JSON.stringify(session.user));
+  updateRoleAccess();
+}
+
+function clearSession() {
+  currentSession = null;
+  localStorage.removeItem("fxccAuthToken");
+  localStorage.removeItem("fxccUser");
+  localStorage.removeItem("fxccAdminToken");
+  updateRoleAccess();
+}
+
+function updateRoleAccess() {
+  const allowed = canManageUsers();
+  const editable = canEditManagedUsers();
+  document.querySelectorAll('[data-section="users"]').forEach((item) => {
+    item.hidden = !allowed;
+    item.classList.toggle("is-hidden", !allowed);
+  });
+  document.querySelector("#users")?.classList.toggle("is-role-hidden", !allowed);
+  document.querySelector(".managed-form-card")?.classList.toggle("is-hidden", allowed && !editable);
+
+  if (!allowed) {
+    managedUsers = [];
+    renderManagedUsers();
+    if (document.querySelector("#users")?.classList.contains("is-active")) moveSection("dashboard");
+  }
+}
 
 const metals = {
   gold: { label: "Gold", symbol: "XAU/USD", price: 3672.4, spread: 0.26, color: "#ffb000", data: [] },
@@ -53,12 +94,13 @@ function getNavLabel(item) {
 }
 
 function moveSection(id) {
+  if (id === "users" && !canManageUsers()) id = "dashboard";
   navItems.forEach((item) => item.classList.toggle("is-active", item.dataset.section === id));
   sections.forEach((section) => section.classList.toggle("is-active", section.id === id));
   if (sectionTitle) {
     sectionTitle.textContent = getNavLabel(navItems.find((item) => item.dataset.section === id)) || "Home";
   }
-  if (id === "users") loadManagedUsers();
+  if (id === "users" && canManageUsers()) loadManagedUsers();
   drawCharts();
   renderTradeCandles();
 }
@@ -303,11 +345,14 @@ function showHomeView() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function enterWorkspace() {
+function enterWorkspace(session = null) {
+  if (session) saveSession(session);
+  else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital" } });
   homeView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
   appView.classList.remove("is-hidden");
+  updateRoleAccess();
   drawCharts();
   updateDashboardTime();
 }
@@ -318,12 +363,25 @@ function updateDashboardTime() {
   time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-document.querySelector("#loginForm").addEventListener("submit", (event) => {
+document.querySelector("#loginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  enterWorkspace();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  try {
+    const response = await fetch(`${apiBase}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Invalid email or password");
+    enterWorkspace(result);
+  } catch (error) {
+    enterWorkspace({ token: null, user: { role: "user", name: data.email?.split("@")[0] || "Client", email: data.email } });
+  }
 });
 
 document.querySelector("#signOut").addEventListener("click", () => {
+  clearSession();
   showHomeView();
 });
 
@@ -445,7 +503,7 @@ document.querySelectorAll(".ghost-icon").forEach((button) => {
   });
 });
 
-document.querySelector("#registerForm").addEventListener("submit", (event) => {
+document.querySelector("#registerForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(event.target);
   const password = data.get("password");
@@ -459,19 +517,38 @@ document.querySelector("#registerForm").addEventListener("submit", (event) => {
 
   error.textContent = "";
   const email = data.get("email");
-  users = [
-    {
-      name: String(email).split("@")[0] || "New Client",
-      email,
-      tier: data.get("referral") ? "Referred" : "Standard",
-      status: "Active",
-      exposure: "$0",
-    },
-    ...users,
-  ];
-  renderUsers();
-  event.target.reset();
-  enterWorkspace();
+  const fallbackUser = { role: "user", name: String(email).split("@")[0] || "New Client", email };
+
+  try {
+    const response = await fetch(`${apiBase}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        password,
+        name: fallbackUser.name,
+        referralCode: data.get("referral") || null,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Registration failed");
+    event.target.reset();
+    enterWorkspace(result);
+  } catch (requestError) {
+    users = [
+      {
+        name: fallbackUser.name,
+        email,
+        tier: data.get("referral") ? "Referred" : "Standard",
+        status: "Active",
+        exposure: "$0",
+      },
+      ...users,
+    ];
+    renderUsers();
+    event.target.reset();
+    enterWorkspace({ token: null, user: fallbackUser });
+  }
 });
 
 navItems.forEach((item) => item.addEventListener("click", () => moveSection(item.dataset.section)));
@@ -974,34 +1051,19 @@ function setManagedMessage(message, type = "") {
   element.classList.toggle("is-error", type === "error");
 }
 
-async function getAdminToken() {
-  const cachedToken = localStorage.getItem("fxccAdminToken");
-  if (cachedToken) return cachedToken;
-
-  const response = await fetch(`${apiBase}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: "admin@fxcc.capital", password: "Admin@12345" }),
-  });
-  if (!response.ok) throw new Error("Admin login failed");
-  const data = await response.json();
-  localStorage.setItem("fxccAdminToken", data.token);
-  return data.token;
-}
-
 async function adminFetch(path, options = {}) {
-  const token = await getAdminToken();
+  if (!canManageUsers() || !currentSession?.token) throw new Error("Admin or team access required");
   const response = await fetch(`${apiBase}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${currentSession.token}`,
       ...(options.headers || {}),
     },
   });
 
   if (response.status === 401) {
-    localStorage.removeItem("fxccAdminToken");
+    clearSession();
   }
 
   const data = await response.json().catch(() => ({}));
@@ -1031,18 +1093,20 @@ function renderManagedUsers() {
   table.innerHTML = visibleUsers.map((user) => {
     const statusClass = user.status === "suspended" ? "is-suspended" : user.status === "pending" ? "is-pending" : "";
     const kycClass = user.kycStatus === "rejected" ? "is-rejected" : user.kycStatus === "pending" ? "is-pending" : "";
+    const disabled = canEditManagedUsers() ? "" : "disabled";
+    const actionCell = canEditManagedUsers() ? `<button class="managed-save-button" type="button" data-managed-user="${escapeHtml(user.id)}">Save</button>` : `<span class="status-pill">view only</span>`;
     return `
       <tr data-managed-user-row="${escapeHtml(user.id)}">
         <td><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.email)}</small></td>
         <td>
-          <select data-user-field="role">
+          <select data-user-field="role" ${disabled}>
             <option value="user" ${user.role === "user" ? "selected" : ""}>User</option>
             <option value="team" ${user.role === "team" ? "selected" : ""}>Team</option>
             <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
           </select>
         </td>
         <td>
-          <select data-user-field="status">
+          <select data-user-field="status" ${disabled}>
             <option value="active" ${user.status === "active" ? "selected" : ""}>Active</option>
             <option value="pending" ${user.status === "pending" ? "selected" : ""}>Pending</option>
             <option value="suspended" ${user.status === "suspended" ? "selected" : ""}>Suspended</option>
@@ -1050,21 +1114,26 @@ function renderManagedUsers() {
           <span class="status-pill ${statusClass}">${escapeHtml(user.status || "active")}</span>
         </td>
         <td>
-          <select data-user-field="kycStatus">
+          <select data-user-field="kycStatus" ${disabled}>
             <option value="pending" ${user.kycStatus === "pending" ? "selected" : ""}>Pending</option>
             <option value="verified" ${user.kycStatus === "verified" ? "selected" : ""}>Verified</option>
             <option value="rejected" ${user.kycStatus === "rejected" ? "selected" : ""}>Rejected</option>
           </select>
           <span class="status-pill ${kycClass}">${escapeHtml(user.kycStatus || "pending")}</span>
         </td>
-        <td><input data-user-field="balance" type="number" min="0" step="0.01" value="${Number(user.balance || 0).toFixed(2)}" /></td>
-        <td><button class="managed-save-button" type="button" data-managed-user="${escapeHtml(user.id)}">Save</button></td>
+        <td><input data-user-field="balance" type="number" min="0" step="0.01" value="${Number(user.balance || 0).toFixed(2)}" ${disabled} /></td>
+        <td>${actionCell}</td>
       </tr>`;
   }).join("");
 }
 
 async function loadManagedUsers() {
   if (!document.querySelector("#managedUserTable")) return;
+  if (!canManageUsers()) {
+    managedUsers = [];
+    renderManagedUsers();
+    return;
+  }
   try {
     const data = await adminFetch("/api/admin/users");
     managedUsers = data.users || [];
@@ -1080,6 +1149,10 @@ document.querySelector("#refreshManagedUsers")?.addEventListener("click", loadMa
 
 document.querySelector("#managedUserForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!canEditManagedUsers()) {
+    setManagedMessage("Only admin can create users.", "error");
+    return;
+  }
   const data = Object.fromEntries(new FormData(event.target).entries());
   data.balance = Number(data.balance || 0);
   try {
@@ -1101,6 +1174,10 @@ document.querySelector("#managedUserForm")?.addEventListener("submit", async (ev
 document.querySelector("#managedUserTable")?.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-managed-user]");
   if (!button) return;
+  if (!canEditManagedUsers()) {
+    setManagedMessage("Only admin can update users.", "error");
+    return;
+  }
   const row = button.closest("[data-managed-user-row]");
   const id = button.dataset.managedUser;
   const patch = Object.fromEntries([...row.querySelectorAll("[data-user-field]")].map((input) => [input.dataset.userField, input.value]));
@@ -1181,7 +1258,23 @@ document.querySelector("#globalSearch")?.addEventListener("input", (event) => {
   });
 });
 
+function hydrateSession() {
+  const token = localStorage.getItem("fxccAuthToken");
+  const userJson = localStorage.getItem("fxccUser");
+  if (!token || !userJson) {
+    updateRoleAccess();
+    return;
+  }
+  try {
+    currentSession = { token, user: JSON.parse(userJson) };
+  } catch {
+    clearSession();
+  }
+  updateRoleAccess();
+}
+
 seedMetalData();
+hydrateSession();
 renderTickers();
 renderBook();
 renderActivity();

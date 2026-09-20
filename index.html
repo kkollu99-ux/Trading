@@ -216,12 +216,12 @@
           </div>
           <label>
             Email Address
-            <input type="email" placeholder="you@example.com" required />
+            <input name="email" type="email" placeholder="you@example.com" required />
           </label>
           <label>
             Password
             <span class="password-line">
-              <input type="password" placeholder="Enter your password" required />
+              <input name="password" type="password" placeholder="Enter your password" required />
               <button class="ghost-icon" type="button" aria-label="Show password">◎</button>
             </span>
           </label>
@@ -343,7 +343,7 @@
             <button class="nav-item" data-section="orders" data-label="Orders"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 6h1"/><path d="M4 12h1"/><path d="M4 18h1"/></svg></span><span class="nav-label">Orders</span></button>
             <button class="nav-item" data-section="news" data-label="News"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h14a2 2 0 0 1 2 2v12H6a2 2 0 0 1-2-2z"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></span><span class="nav-label">News</span></button>
             <button class="nav-item" data-section="copy" data-label="Copy"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-label">Copy</span></button>
-            <button class="nav-item" data-section="users" data-label="Users"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6"/><path d="M19 8v6"/></svg></span><span class="nav-label">Users</span></button>
+            <button class="nav-item role-restricted-nav" data-section="users" data-label="Users" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6"/><path d="M19 8v6"/></svg></span><span class="nav-label">Users</span></button>
             <button class="nav-item" data-section="profile" data-label="Profile"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 10h16"/><path d="M8 15h4"/></svg></span><span class="nav-label">Profile</span></button>
             <button class="nav-item" data-section="service" data-label="Online Service"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M5 13h3v6H5z"/><path d="M16 13h3v6h-3z"/><path d="M19 19a4 4 0 0 1-4 3h-3"/></svg></span><span class="nav-label">Online Service</span></button>
           </nav>
