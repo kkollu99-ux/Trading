@@ -631,6 +631,47 @@ async function pollLiveQuotesOnce() {
   }
 }
 
+// Neither the WS price stream's tick payloads nor pollLiveQuotesOnce (which stops
+// running once the stream is connected) ever say whether the market is actually
+// open — a closed market just goes quiet, indistinguishable from a stalled feed.
+// Twelve Data's REST /quote response carries an explicit is_market_open flag, so
+// a slow, always-on poller (independent of stream state) tracks it separately and
+// broadcasts only on change. It's cheap enough to never skip: one call every few
+// minutes for a handful of symbols is a rounding error against the credit cap.
+const marketStatusPollIntervalMs = Math.max(60000, Number(process.env.MARKET_DATA_STATUS_POLL_INTERVAL_MS) || 300000);
+const marketStatusBySymbol = new Map();
+
+async function pollMarketStatusOnce() {
+  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
+  const key = marketDataApiKey;
+  if (provider !== "twelvedata" || !key || !quoteLiveSymbols.length) return;
+
+  try {
+    const url = new URL("https://api.twelvedata.com/quote");
+    url.searchParams.set("symbol", quoteLiveSymbols.join(","));
+    url.searchParams.set("timezone", "UTC");
+    url.searchParams.set("apikey", key);
+    const upstream = await fetch(url);
+    const data = await upstream.json();
+    if (data?.status === "error") {
+      console.warn("Market status poll error:", data.message);
+      return;
+    }
+    const quotesBySymbol = quoteLiveSymbols.length === 1 ? { [quoteLiveSymbols[0]]: data } : data;
+    for (const symbol of quoteLiveSymbols) {
+      const quote = quotesBySymbol[symbol];
+      if (!quote || typeof quote.is_market_open !== "boolean") continue;
+      const previous = marketStatusBySymbol.get(symbol);
+      marketStatusBySymbol.set(symbol, quote.is_market_open);
+      if (previous !== quote.is_market_open) {
+        broadcast({ type: "market-status", symbol, isOpen: quote.is_market_open });
+      }
+    }
+  } catch (error) {
+    console.warn("Market status poll failed:", error.message);
+  }
+}
+
 // True push-based streaming: Twelve Data's WebSocket relays ticks the instant they
 // happen, at no REST credit cost, so this is the preferred path whenever the plan
 // supports it. It's proxied here (rather than opened directly from the browser) so
@@ -867,6 +908,11 @@ function broadcast(payload) {
 
 wss.on("connection", (socket) => {
   socket.send(JSON.stringify({ type: "connected", message: "FXCC realtime channel connected" }));
+  // A freshly-connected client would otherwise wait up to marketStatusPollIntervalMs
+  // for its first market-status update, so hand it whatever's already known now.
+  for (const [symbol, isOpen] of marketStatusBySymbol.entries()) {
+    socket.send(JSON.stringify({ type: "market-status", symbol, isOpen }));
+  }
 });
 
 seedDefaults()
@@ -879,6 +925,8 @@ seedDefaults()
     connectTwelveDataStream();
     pollLiveQuotesOnce();
     setInterval(pollLiveQuotesOnce, quoteLivePollIntervalMs);
+    pollMarketStatusOnce();
+    setInterval(pollMarketStatusOnce, marketStatusPollIntervalMs);
   })
   .catch((error) => {
     console.error("Failed to start FXCC platform", error);

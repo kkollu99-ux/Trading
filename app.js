@@ -1474,18 +1474,34 @@ async function loadRealCandles(symbol, range) {
 function setStreamStatus(state) {
   const dot = document.querySelector("#tradeStreamStatus");
   if (!dot) return;
-  dot.classList.remove("is-live", "is-polling", "is-offline");
+  dot.classList.remove("is-live", "is-polling", "is-offline", "is-closed");
   if (state === "live") {
     dot.classList.add("is-live");
     dot.title = "Live price stream connected";
   } else if (state === "polling") {
     dot.classList.add("is-polling");
     dot.title = "Polling for price updates";
+  } else if (state === "closed") {
+    dot.classList.add("is-closed");
+    dot.title = "Market closed — showing last traded price";
   } else if (state === "offline") {
     dot.classList.add("is-offline");
     dot.title = "Live feed disconnected";
   } else {
     dot.title = "Connecting…";
+  }
+}
+
+// Server-pushed { type: "market-status" } messages, keyed by symbol - a closed
+// market just goes quiet (no more ticks), which on its own is indistinguishable
+// from a stalled feed, so this is tracked separately from the tick-driven status.
+const marketOpenBySymbol = new Map();
+
+function applyMarketStatus(payload) {
+  if (!payload.symbol) return;
+  marketOpenBySymbol.set(payload.symbol, payload.isOpen);
+  if (payload.symbol === tradeChartState.apiSymbol && tradeChartState.isLiveChart) {
+    setStreamStatus(payload.isOpen ? "live" : "closed");
   }
 }
 
@@ -1503,6 +1519,7 @@ async function loadChartForCurrentSymbol() {
       tradeChartState.isLiveChart = true;
       resetTradeChartView();
       renderTradeCandles();
+      if (marketOpenBySymbol.get(tradeChartState.apiSymbol) === false) setStreamStatus("closed");
       return;
     }
     if (loadingToken !== candleRequestToken) return;
@@ -1613,7 +1630,10 @@ function applyLiveTick(tick) {
   const price = Number(tick.price);
   if (!Number.isFinite(price)) return;
 
-  setStreamStatus(tick.source === "stream" ? "live" : "polling");
+  // A stray tick around the open/close boundary shouldn't flip the dot back
+  // to live/polling if the market's already known closed for this symbol.
+  const isMarketClosed = marketOpenBySymbol.get(tick.symbol) === false;
+  setStreamStatus(isMarketClosed ? "closed" : tick.source === "stream" ? "live" : "polling");
   if (typeof tick.bid === "number") tradeChartState.liveBid = tick.bid;
   if (typeof tick.ask === "number") tradeChartState.liveAsk = tick.ask;
 
@@ -1676,6 +1696,7 @@ function connectPriceStream() {
       return;
     }
     if (payload.type === "price-tick") applyLiveTick(payload);
+    else if (payload.type === "market-status") applyMarketStatus(payload);
   });
 
   priceStreamSocket.addEventListener("close", () => {
