@@ -1081,10 +1081,12 @@ async function loadTradeInstruments() {
 }
 
 const timeframeMinutes = {
+  "1M": 1,
+  "5M": 5,
+  "15M": 15,
+  "30M": 30,
   "1H": 60,
   "1D": 1440,
-  "1M": 43200,
-  "1Y": 525600,
 };
 
 const liveCandleSymbols = new Set(["XAU/USD"]);
@@ -1095,7 +1097,7 @@ const tradeChartState = {
   apiSymbol: "XAU/USD",
   price: 4521.75,
   changePercent: 3.61,
-  timeframe: "1D",
+  timeframe: "1H",
   candles: [],
   tick: 0,
   isLiveChart: false,

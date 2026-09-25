@@ -620,23 +620,25 @@ app.get("/api/markets/quotes", async (request, response) => {
 
 // Historical OHLC candles for the chart. Twelve Data's time_series endpoint is
 // ~1 credit per call regardless of outputsize, so unlike /quote this is cheap enough
-// to fetch on demand (range switch) rather than needing a background poller — but it's
-// still scoped to quoteLiveSymbols (Gold only, for now) and short-cached so a user
-// rapidly clicking between ranges can't spam the upstream API.
+// to fetch on demand (timeframe switch) rather than needing a background poller — but
+// it's still scoped to quoteLiveSymbols (Gold only, for now) and short-cached so a user
+// rapidly clicking between timeframes can't spam the upstream API.
 const candleRangeConfig = {
-  "1H": { interval: "1min", outputsize: 70 },
-  "1D": { interval: "15min", outputsize: 70 },
-  "1M": { interval: "1day", outputsize: 40 },
-  "1Y": { interval: "1week", outputsize: 60 },
+  "1M": { interval: "1min", outputsize: 70 },
+  "5M": { interval: "5min", outputsize: 70 },
+  "15M": { interval: "15min", outputsize: 70 },
+  "30M": { interval: "30min", outputsize: 70 },
+  "1H": { interval: "1h", outputsize: 70 },
+  "1D": { interval: "1day", outputsize: 70 },
 };
 const candleCacheTtlMs = Number(process.env.MARKET_DATA_CANDLE_CACHE_TTL_MS || 30000);
 const candleCache = new Map();
 
 app.get("/api/markets/candles", async (request, response) => {
   const symbol = String(request.query.symbol || "").trim().toUpperCase();
-  const range = String(request.query.range || "1D").trim().toUpperCase();
+  const range = String(request.query.range || "1H").trim().toUpperCase();
   const rangeSpec = candleRangeConfig[range];
-  if (!rangeSpec) return response.status(400).json({ error: "Invalid range. Use 1H, 1D, 1M, or 1Y." });
+  if (!rangeSpec) return response.status(400).json({ error: "Invalid range. Use 1M, 5M, 15M, 30M, 1H, or 1D." });
   if (!quoteLiveSymbols.includes(symbol)) {
     return response.status(400).json({ error: "Historical candles are only available for live-enabled symbols right now." });
   }
