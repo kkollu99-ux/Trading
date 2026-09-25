@@ -1111,6 +1111,7 @@ const tradeChartState = {
   liveAsk: null,
   slideAnim: null,
   hover: null,
+  logScale: false,
 };
 
 function resetTradeChartView() {
@@ -1224,13 +1225,22 @@ function syncTradeTerminal(ohlcCandle) {
   document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", tradeChartState.changePercent < 0);
 }
 
-function renderPriceScale(values) {
+function renderPriceScale(values, isLog) {
   const scale = document.querySelector("#tradePriceScale");
   if (!scale || !values.length) return;
   const min = Math.min(...values);
   const max = Math.max(...values);
+  // The scale's tick labels lean on the flex container's own even visual
+  // spacing (space-between), so ticks just need their VALUES interpolated
+  // to match whichever scale is active: equal price steps for linear, equal
+  // log steps (so each tick represents the same % move) for log.
+  const canLog = isLog && min > 0;
+  const logMin = canLog ? Math.log(min) : 0;
+  const logMax = canLog ? Math.log(max) : 0;
   scale.innerHTML = Array.from({ length: 6 }, (_, index) => {
-    const value = max - ((max - min) / 5) * index;
+    const value = canLog
+      ? Math.exp(logMax - ((logMax - logMin) / 5) * index)
+      : max - ((max - min) / 5) * index;
     return `<span>${formatTradeNumber(value)}</span>`;
   }).join("");
 }
@@ -1267,7 +1277,23 @@ function renderTradeCandles() {
   const volumeMax = Math.max(...candles.map((candle) => candle.volume));
   const candleStep = width / candles.length;
   const candleWidth = Math.max(4, Math.min(12, candleStep * 0.58));
-  const yFor = (value) => chart.top + ((max - value) / range) * height;
+  // Log mode maps price through log() before the linear pixel interpolation,
+  // so equal on-screen distances represent equal percentage moves instead of
+  // equal absolute ones. Falls back to linear if min isn't positive (log of
+  // zero/negative is undefined) — shouldn't happen for real prices, but a
+  // synthetic/demo symbol could theoretically dip there.
+  const isLog = tradeChartState.logScale && min > 0;
+  const logMin = isLog ? Math.log(min) : 0;
+  const logMax = isLog ? Math.log(max) : 0;
+  const logRange = logMax - logMin || 1;
+  const yFor = (value) => {
+    if (isLog) return chart.top + ((logMax - Math.log(Math.max(value, 1e-9))) / logRange) * height;
+    return chart.top + ((max - value) / range) * height;
+  };
+  const priceForY = (y) => {
+    const ratio = (y - chart.top) / height;
+    return isLog ? Math.exp(logMax - ratio * logRange) : max - ratio * range;
+  };
 
   // A newly opened candle (real tick crossing a timeframe bucket, or the
   // synthetic demo tick) starts one full candle-width off to the right and
@@ -1378,7 +1404,7 @@ function renderTradeCandles() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    hoverPriceLabel = { y: hoverY, text: formatTradeNumber(max - ((hoverY - chart.top) / height) * range) };
+    hoverPriceLabel = { y: hoverY, text: formatTradeNumber(priceForY(hoverY)) };
 
     const timeLabel = formatChartTime(hoverCandle.time, tradeChartState.timeframe);
     if (timeLabel) {
@@ -1408,7 +1434,7 @@ function renderTradeCandles() {
     ctx.textBaseline = "alphabetic";
   }
 
-  renderPriceScale([min, max]);
+  renderPriceScale([min, max], isLog);
   renderTimeScale(candles);
   syncTradeTerminal(hoverCandle);
 
@@ -1766,6 +1792,14 @@ connectPriceStream();
   document.querySelector("#chartZoomOut")?.addEventListener("click", () => zoomTradeChart(1.3));
   document.querySelector("#chartZoomReset")?.addEventListener("click", () => {
     resetTradeChartView();
+    renderTradeCandles();
+  });
+
+  const logToggle = document.querySelector("#chartLogToggle");
+  logToggle?.addEventListener("click", () => {
+    tradeChartState.logScale = !tradeChartState.logScale;
+    logToggle.classList.toggle("is-active", tradeChartState.logScale);
+    logToggle.setAttribute("aria-pressed", String(tradeChartState.logScale));
     renderTradeCandles();
   });
 })();

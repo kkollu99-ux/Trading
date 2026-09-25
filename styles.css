@@ -2170,6 +2170,12 @@ select:focus {
   background: var(--trade-panel-soft);
 }
 
+.chart-zoom-controls button.is-active {
+  background: rgba(255, 176, 0, 0.18);
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
 .candle-layer {
   position: absolute;
   inset: 3.3rem 1.9rem 4.2rem 0.3rem;
