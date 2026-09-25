@@ -41,7 +41,17 @@ const upload = multer({
   },
 });
 
-const allowedSymbols = (process.env.ALLOWED_SYMBOLS || "XAU/USD,XAG/USD,BTC/USD,EUR/USD,GBP/USD,USOIL")
+const defaultAllowedSymbols = [
+  "XAU/USD", "XAG/USD", "BTC/USD", "EUR/USD", "GBP/USD", "USOIL",
+  "AUD/JPY", "AUD/CAD", "EUR/JPY", "AUD/NZD", "AUD/CHF", "USD/JPY", "AUD/USD", "GBP/JPY", "EUR/AUD",
+  "CAD/JPY", "EUR/CAD", "GBP/AUD", "CHF/JPY", "EUR/CHF", "GBP/CAD", "NZD/USD", "NZD/CHF", "GBP/NZD",
+  "USD/CHF", "USD/CAD", "EUR/GBP", "NZD/JPY", "GBP/CHF", "CAD/CHF", "EUR/NZD",
+  "XRP/USD", "ETH/USD", "SOL/USDC", "BNB/USD",
+  "AAPL", "TSLA", "GOOGL", "MSFT",
+  "UKOIL", "NATGAS",
+].join(",");
+
+const allowedSymbols = (process.env.ALLOWED_SYMBOLS || defaultAllowedSymbols)
   .split(",")
   .map((symbol) => symbol.trim().toUpperCase())
   .filter(Boolean);
@@ -57,9 +67,44 @@ const defaultInstruments = [
   { symbol: "XAU/USD", displayName: "Gold / US Dollar", category: "metals", enabled: true, tradeEnabled: true },
   { symbol: "XAG/USD", displayName: "Silver / US Dollar", category: "metals", enabled: true, tradeEnabled: true },
   { symbol: "BTC/USD", displayName: "Bitcoin / US Dollar", category: "crypto", enabled: true, tradeEnabled: true },
-  { symbol: "EUR/USD", displayName: "Euro / US Dollar", category: "forex", enabled: true, tradeEnabled: false },
-  { symbol: "GBP/USD", displayName: "British Pound / US Dollar", category: "forex", enabled: true, tradeEnabled: false },
+  { symbol: "EUR/USD", displayName: "Euro / US Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "GBP/USD", displayName: "British Pound / US Dollar", category: "forex", enabled: true, tradeEnabled: true },
   { symbol: "USOIL", displayName: "Crude Oil WTI", category: "commodities", enabled: true, tradeEnabled: true },
+  { symbol: "AUD/JPY", displayName: "Australian Dollar / Japanese Yen", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "AUD/CAD", displayName: "Australian Dollar / Canadian Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "EUR/JPY", displayName: "Euro / Japanese Yen", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "AUD/NZD", displayName: "Australian Dollar / New Zealand Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "AUD/CHF", displayName: "Australian Dollar / Swiss Franc", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "USD/JPY", displayName: "US Dollar / Japanese Yen", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "AUD/USD", displayName: "Australian Dollar / US Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "GBP/JPY", displayName: "British Pound / Japanese Yen", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "EUR/AUD", displayName: "Euro / Australian Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "CAD/JPY", displayName: "Canadian Dollar / Japanese Yen", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "EUR/CAD", displayName: "Euro / Canadian Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "GBP/AUD", displayName: "British Pound / Australian Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "CHF/JPY", displayName: "Swiss Franc / Japanese Yen", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "EUR/CHF", displayName: "Euro / Swiss Franc", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "GBP/CAD", displayName: "British Pound / Canadian Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "NZD/USD", displayName: "New Zealand Dollar / US Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "NZD/CHF", displayName: "New Zealand Dollar / Swiss Franc", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "GBP/NZD", displayName: "British Pound / New Zealand Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "USD/CHF", displayName: "US Dollar / Swiss Franc", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "USD/CAD", displayName: "US Dollar / Canadian Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "EUR/GBP", displayName: "Euro / British Pound", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "NZD/JPY", displayName: "New Zealand Dollar / Japanese Yen", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "GBP/CHF", displayName: "British Pound / Swiss Franc", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "CAD/CHF", displayName: "Canadian Dollar / Swiss Franc", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "EUR/NZD", displayName: "Euro / New Zealand Dollar", category: "forex", enabled: true, tradeEnabled: true },
+  { symbol: "XRP/USD", displayName: "XRP / US Dollar", category: "crypto", enabled: true, tradeEnabled: true },
+  { symbol: "ETH/USD", displayName: "Ethereum / US Dollar", category: "crypto", enabled: true, tradeEnabled: true },
+  { symbol: "SOL/USDC", displayName: "Solana / USD Coin", category: "crypto", enabled: true, tradeEnabled: true },
+  { symbol: "BNB/USD", displayName: "BNB / US Dollar", category: "crypto", enabled: true, tradeEnabled: true },
+  { symbol: "AAPL", displayName: "Apple Inc.", category: "stocks", enabled: true, tradeEnabled: true },
+  { symbol: "TSLA", displayName: "Tesla Inc.", category: "stocks", enabled: true, tradeEnabled: true },
+  { symbol: "GOOGL", displayName: "Alphabet Inc.", category: "stocks", enabled: true, tradeEnabled: true },
+  { symbol: "MSFT", displayName: "Microsoft Corporation", category: "stocks", enabled: true, tradeEnabled: true },
+  { symbol: "UKOIL", displayName: "Crude Oil Brent", category: "commodities", enabled: true, tradeEnabled: true },
+  { symbol: "NATGAS", displayName: "Natural Gas", category: "commodities", enabled: true, tradeEnabled: true },
 ].filter((instrument) => allowedSymbols.includes(instrument.symbol));
 
 const memory = {
@@ -478,6 +523,9 @@ app.post("/api/admin/instruments", requireAuth, attachUser, requireRole("admin")
   response.status(201).json({ instrument });
 });
 
+const quoteCacheTtlMs = 4000;
+const quoteCache = new Map();
+
 app.get("/api/markets/quotes", async (request, response) => {
   const requestedSymbols = String(request.query.symbols || "")
     .split(",")
@@ -490,11 +538,18 @@ app.get("/api/markets/quotes", async (request, response) => {
   const provider = process.env.MARKET_DATA_PROVIDER || "mock";
   const key = marketDataApiKey;
   if (provider === "twelvedata" && key) {
+    const cacheKey = [...symbols].sort().join(",");
+    const cached = quoteCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < quoteCacheTtlMs) {
+      return response.json({ provider, symbols, data: cached.data, cached: true });
+    }
+
     const url = new URL("https://api.twelvedata.com/quote");
     url.searchParams.set("symbol", symbols.join(","));
     url.searchParams.set("apikey", key);
     const upstream = await fetch(url);
     const data = await upstream.json();
+    quoteCache.set(cacheKey, { data, at: Date.now() });
     return response.json({ provider, symbols, data });
   }
 

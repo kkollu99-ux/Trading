@@ -263,6 +263,9 @@ function moveSection(id) {
     loadManagedUsers();
     loadManagedInstruments();
   }
+  if (id === "markets") {
+    refreshMarketsQuotes();
+  }
   drawCharts();
   renderTradeCandles();
 }
@@ -706,6 +709,77 @@ document.querySelector("#registerForm").addEventListener("submit", async (event)
 
 navItems.forEach((item) => item.addEventListener("click", () => moveSection(item.dataset.section)));
 
+let marketsInstruments = [];
+
+const marketsRowContainers = {
+  forex: "#marketsForexRows",
+  crypto: "#marketsCryptoRows",
+  stocks: "#marketsStocksRows",
+  commodities: "#marketsCommoditiesRows",
+};
+
+const marketsCountEls = {
+  forex: "#marketsForexCount",
+  crypto: "#marketsCryptoCount",
+  stocks: "#marketsStocksCount",
+  commodities: "#marketsCommoditiesCount",
+};
+
+function renderMarketInstrumentRow(instrument, quotes) {
+  const fallback = instrumentFallbacks[instrument.symbol] || { price: 100, changePercent: 0.1 };
+  const quote = getQuotePayload(quotes, instrument.symbol);
+  const price = quotePrice(quote, fallback.price);
+  const changePercent = quoteChange(quote, fallback.changePercent);
+  const trendClass = changePercent >= 0 ? "up" : "down";
+  const arrow = changePercent >= 0 ? "↗" : "↘";
+  const symbol = compactSymbol(instrument.symbol);
+  const group = categoryFilter(instrument.category);
+  return `<div class="instrument-row" data-category="${group}" data-symbol="${escapeHtml(`${symbol} ${instrument.displayName}`)}"><div><strong>${escapeHtml(symbol)}</strong><small>${escapeHtml(instrument.displayName)}</small></div><em>${formatTradeNumber(price)} <b class="${trendClass}">${arrow} ${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%</b></em><button type="button">Trade</button></div>`;
+}
+
+function renderMarketsList(instruments, quotes = {}) {
+  const groups = { forex: [], crypto: [], stocks: [], commodities: [] };
+  instruments.forEach((instrument) => {
+    const group = categoryFilter(instrument.category);
+    (groups[group] || groups.commodities).push(instrument);
+  });
+
+  Object.entries(marketsRowContainers).forEach(([group, selector]) => {
+    const container = document.querySelector(selector);
+    if (!container) return;
+    const rows = groups[group];
+    container.innerHTML = rows.length
+      ? rows.map((instrument) => renderMarketInstrumentRow(instrument, quotes)).join("")
+      : '<div class="watch-empty-state">No markets enabled by admin.</div>';
+    const countEl = document.querySelector(marketsCountEls[group]);
+    if (countEl) countEl.textContent = String(rows.length);
+  });
+
+  const totalEl = document.querySelector("#marketsInstrumentCount");
+  if (totalEl) totalEl.textContent = `${instruments.length} instruments`;
+
+  filterMarkets();
+}
+
+async function loadMarketsInstruments() {
+  try {
+    const response = await fetch(`${apiBase}/api/instruments`);
+    const data = await response.json().catch(() => ({}));
+    marketsInstruments = data.instruments || [];
+  } catch {
+    marketsInstruments = [];
+  }
+  const quotes = await fetchTradeQuotes(marketsInstruments);
+  renderMarketsList(marketsInstruments, quotes);
+}
+
+async function refreshMarketsQuotes() {
+  if (!marketsInstruments.length) return;
+  if (!document.querySelector("#markets")?.classList.contains("is-active")) return;
+  const quotes = await fetchTradeQuotes(marketsInstruments);
+  renderMarketsList(marketsInstruments, quotes);
+}
+
 function filterMarkets() {
   const search = document.querySelector("#marketSearch")?.value.toLowerCase().trim() || "";
   const activeFilter = document.querySelector(".market-filter-tabs button.is-active")?.dataset.filter || "all";
@@ -731,14 +805,14 @@ document.querySelectorAll(".market-filter-tabs button").forEach((button) => {
   });
 });
 
-document.querySelectorAll(".instrument-row button").forEach((button) => {
-  button.addEventListener("click", () => {
-    moveSection("trade");
-    button.textContent = "Opening";
-    window.setTimeout(() => {
-      button.textContent = "Trade";
-    }, 900);
-  });
+document.querySelector(".markets-page")?.addEventListener("click", (event) => {
+  const button = event.target.closest(".instrument-row button");
+  if (!button) return;
+  moveSection("trade");
+  button.textContent = "Opening";
+  window.setTimeout(() => {
+    button.textContent = "Trade";
+  }, 900);
 });
 
 document.querySelector("#openTradeTerminal")?.addEventListener("click", () => {
@@ -1613,8 +1687,10 @@ renderChat();
 drawCharts();
 renderTradeCandles();
 loadTradeInstruments();
+loadMarketsInstruments();
 loadManagedUsers();
 loadManagedInstruments();
 setInterval(tickMarkets, 1500);
+setInterval(refreshMarketsQuotes, 7000);
 setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);
