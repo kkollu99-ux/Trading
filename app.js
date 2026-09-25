@@ -1081,23 +1081,26 @@ async function loadTradeInstruments() {
 }
 
 const timeframeMinutes = {
-  M1: 1,
-  M5: 5,
-  M15: 15,
-  M30: 30,
-  H1: 60,
-  H4: 240,
-  D1: 1440,
+  "1M": 1,
+  "5M": 5,
+  "15M": 15,
+  "30M": 30,
+  "1H": 60,
+  "1D": 1440,
 };
 
+const liveCandleSymbols = new Set(["XAU/USD"]);
+
 const tradeChartState = {
-  symbol: "BTCUSD",
-  category: "Crypto",
-  price: 63971.14,
-  changePercent: -21.03,
-  timeframe: "M1",
+  symbol: "XAUUSD",
+  category: "CMD",
+  apiSymbol: "XAU/USD",
+  price: 4521.75,
+  changePercent: 3.61,
+  timeframe: "1H",
   candles: [],
   tick: 0,
+  isLiveChart: false,
 };
 
 function formatTradeNumber(value) {
@@ -1116,7 +1119,8 @@ function readTradeRow(row) {
   const category = row.querySelector("small")?.textContent.trim() || "Crypto";
   const price = Number(row.querySelector("em")?.textContent.replace(/,/g, "")) || tradeChartState.price;
   const changePercent = Number(row.querySelector("b")?.textContent.replace("%", "")) || 0;
-  return { symbol, category, price, changePercent };
+  const apiSymbol = row.dataset.apiSymbol || symbol;
+  return { symbol, category, price, changePercent, apiSymbol };
 }
 
 function buildTradeCandles({ symbol, price, timeframe }) {
@@ -1259,11 +1263,49 @@ function renderTradeCandles() {
   syncTradeTerminal();
 }
 
+let candleRequestToken = 0;
+
+async function loadRealCandles(symbol, range) {
+  const token = ++candleRequestToken;
+  try {
+    const response = await fetch(`${apiBase}/api/markets/candles?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`);
+    const payload = await response.json().catch(() => ({}));
+    if (token !== candleRequestToken) return false;
+    if (!response.ok || !payload.candles?.length) return false;
+    tradeChartState.candles = payload.candles.map((candle) => ({
+      open: Number(candle.open),
+      high: Number(candle.high),
+      low: Number(candle.low),
+      close: Number(candle.close),
+      volume: Number(candle.volume || 0),
+    }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function loadChartForCurrentSymbol() {
+  const isLive = liveCandleSymbols.has(tradeChartState.apiSymbol);
+  if (isLive) {
+    const loadingToken = candleRequestToken;
+    const ok = await loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe);
+    if (ok) {
+      tradeChartState.isLiveChart = true;
+      renderTradeCandles();
+      return;
+    }
+    if (loadingToken !== candleRequestToken) return;
+  }
+  tradeChartState.isLiveChart = false;
+  tradeChartState.candles = buildTradeCandles(tradeChartState);
+  renderTradeCandles();
+}
+
 function selectTradeSymbol(row) {
   Object.assign(tradeChartState, readTradeRow(row));
-  tradeChartState.candles = buildTradeCandles(tradeChartState);
   document.querySelectorAll(".watch-row").forEach((item) => item.classList.toggle("is-selected", item === row));
-  renderTradeCandles();
+  loadChartForCurrentSymbol();
   renderTradeTicket();
 }
 
@@ -1277,8 +1319,7 @@ document.querySelectorAll(".timeframes button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".timeframes button").forEach((item) => item.classList.toggle("is-active", item === button));
     tradeChartState.timeframe = button.dataset.timeframe || button.textContent.trim();
-    tradeChartState.candles = buildTradeCandles(tradeChartState);
-    renderTradeCandles();
+    loadChartForCurrentSymbol();
   });
 });
 
@@ -1338,8 +1379,34 @@ document.querySelectorAll("[data-order-mode]").forEach((button) => {
   });
 });
 
+async function tickLiveCandle() {
+  if (!document.querySelector("#trade")?.classList.contains("is-active")) return;
+  const quotes = await fetchTradeQuotes([{ symbol: tradeChartState.apiSymbol }]);
+  const quote = getQuotePayload(quotes, tradeChartState.apiSymbol);
+  const price = quotePrice(quote, 0);
+  if (!price) return;
+  const last = tradeChartState.candles.at(-1);
+  if (!last) return;
+  last.close = price;
+  last.high = Math.max(last.high, price);
+  last.low = Math.min(last.low, price);
+  renderTradeCandles();
+}
+
+let liveCandleRefreshTick = 0;
+
 function tickTradeCandles() {
   if (!tradeChartState.candles.length) return;
+  if (tradeChartState.isLiveChart) {
+    tickLiveCandle();
+    liveCandleRefreshTick += 1;
+    if (liveCandleRefreshTick % 40 === 0 && document.querySelector("#trade")?.classList.contains("is-active")) {
+      loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe).then((ok) => {
+        if (ok) renderTradeCandles();
+      });
+    }
+    return;
+  }
   const last = tradeChartState.candles.at(-1);
   const scale = Math.max(last.close * 0.00032, 0.004);
   const delta = Math.sin(Date.now() / 1800 + hashSymbol(tradeChartState.symbol)) * scale + (Math.random() - 0.48) * scale;
