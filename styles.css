@@ -1712,19 +1712,19 @@ select:focus {
   }
 
   .panel-toggle-left {
-    left: calc(16rem - 0.65rem);
+    left: calc(16rem - 1.3rem);
   }
 
   .trade-terminal.is-watch-collapsed .panel-toggle-left {
-    left: -0.15rem;
+    left: 0rem;
   }
 
   .panel-toggle-right {
-    right: calc(20rem - 0.65rem);
+    right: calc(20rem - 1.3rem);
   }
 
   .trade-terminal.is-ticket-collapsed .panel-toggle-right {
-    right: -0.15rem;
+    right: 0rem;
   }
 }
 
@@ -2080,6 +2080,34 @@ select:focus {
 
 .chart-note strong {
   color: var(--gold);
+}
+
+.chart-zoom-controls {
+  position: absolute;
+  left: 0.7rem;
+  top: 0.6rem;
+  z-index: 4;
+  display: flex;
+  gap: 0.3rem;
+}
+
+.chart-zoom-controls button {
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--trade-border);
+  border-radius: 0.35rem;
+  background: rgba(19, 23, 34, 0.85);
+  color: var(--trade-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.chart-zoom-controls button:hover {
+  color: var(--text);
+  background: var(--trade-panel-soft);
 }
 
 .candle-layer {
