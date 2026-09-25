@@ -563,14 +563,8 @@
               </div>
               <div class="candlestick-chart" aria-label="Candlestick chart">
                 <canvas id="tradeCandleCanvas" class="trade-candle-canvas" width="900" height="520" aria-label="Live candlestick chart"></canvas>
-                <div id="tradePriceScale" class="chart-price-scale" aria-hidden="true"></div>
+                <div id="tradePriceScale" class="chart-price-scale" title="Drag to zoom price range · Scroll to pan by $5 · Double-click to reset"></div>
                 <div id="tradePriceMarker" class="price-marker">63971.14</div>
-                <button id="tradeSellFloat" class="price-float-btn sell-float" type="button" aria-label="Sell at bid price">
-                  <span class="price-float-label">SELL</span><span id="tradeFloatBidValue">63971.13</span>
-                </button>
-                <button id="tradeBuyFloat" class="price-float-btn buy-float" type="button" aria-label="Buy at ask price">
-                  <span class="price-float-label">BUY</span><span id="tradeFloatAskValue">63971.15</span>
-                </button>
                 <div class="chart-note"><strong id="tradeTimeframeLabel">M1</strong> · Scroll/drag to zoom &amp; pan</div>
                 <div class="chart-zoom-controls" aria-label="Chart zoom controls">
                   <button id="chartZoomOut" type="button" aria-label="Zoom out">−</button>
