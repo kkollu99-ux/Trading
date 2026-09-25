@@ -1315,6 +1315,26 @@ document.querySelector("#tradeWatchTable")?.addEventListener("click", (event) =>
   selectTradeSymbol(row);
 });
 
+function toggleTradePanel(panel, button, collapsedGlyph, expandedGlyph, label) {
+  const terminal = document.querySelector(".trade-terminal");
+  if (!terminal) return;
+  const cssClass = panel === "watch" ? "is-watch-collapsed" : "is-ticket-collapsed";
+  const collapsed = terminal.classList.toggle(cssClass);
+  if (button) {
+    button.textContent = collapsed ? expandedGlyph : collapsedGlyph;
+    button.setAttribute("aria-label", `${collapsed ? "Show" : "Hide"} ${label}`);
+  }
+  window.setTimeout(renderTradeCandles, 300);
+}
+
+document.querySelector("#toggleWatchPanel")?.addEventListener("click", (event) => {
+  toggleTradePanel("watch", event.currentTarget, "‹", "›", "market watch");
+});
+
+document.querySelector("#toggleOrderTicket")?.addEventListener("click", (event) => {
+  toggleTradePanel("ticket", event.currentTarget, "›", "‹", "order ticket");
+});
+
 document.querySelectorAll(".timeframes button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".timeframes button").forEach((item) => item.classList.toggle("is-active", item === button));
