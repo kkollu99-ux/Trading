@@ -567,6 +567,7 @@ async function pollQuotesOnce() {
   try {
     const url = new URL("https://api.twelvedata.com/quote");
     url.searchParams.set("symbol", batch.join(","));
+    url.searchParams.set("timezone", "UTC");
     url.searchParams.set("apikey", key);
     const upstream = await fetch(url);
     const data = await upstream.json();
@@ -660,6 +661,7 @@ app.get("/api/markets/candles", async (request, response) => {
     url.searchParams.set("symbol", symbol);
     url.searchParams.set("interval", rangeSpec.interval);
     url.searchParams.set("outputsize", String(rangeSpec.outputsize));
+    url.searchParams.set("timezone", "UTC");
     url.searchParams.set("apikey", key);
     const upstream = await fetch(url);
     const payload = await upstream.json();
