@@ -559,6 +559,21 @@
                   <button type="button" data-timeframe="30M">30M</button>
                   <button class="is-active" type="button" data-timeframe="1H">1H</button>
                   <button type="button" data-timeframe="1D">1D</button>
+                  <button type="button" data-timeframe="5D">5D</button>
+                  <button type="button" data-timeframe="1MO">1Mo</button>
+                  <button type="button" data-timeframe="5MO">5Mo</button>
+                  <button type="button" data-timeframe="1Y">1Y</button>
+                  <button type="button" data-timeframe="ALL">All</button>
+                  <button id="tradeCalendarToggle" type="button" class="calendar-toggle" aria-label="Choose a custom date range" aria-expanded="false" aria-haspopup="dialog">📅</button>
+                </div>
+                <div id="tradeCalendarPopover" class="calendar-popover is-hidden" role="dialog" aria-label="Custom date range" aria-modal="false">
+                  <label>From<input id="tradeCalendarStart" type="date"></label>
+                  <label>To<input id="tradeCalendarEnd" type="date"></label>
+                  <p id="tradeCalendarError" class="calendar-error is-hidden"></p>
+                  <div class="calendar-popover-actions">
+                    <button id="tradeCalendarCancel" type="button">Cancel</button>
+                    <button id="tradeCalendarApply" type="button" class="calendar-apply">Apply</button>
+                  </div>
                 </div>
               </div>
               <div class="candlestick-chart" aria-label="Candlestick chart">
