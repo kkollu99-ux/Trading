@@ -537,12 +537,25 @@ const quotePollIntervalMs = Number(process.env.MARKET_DATA_POLL_INTERVAL_MS || 6
 const quoteStore = new Map();
 let quotePollCursor = 0;
 
+// The full instrument catalog (ALLOWED_SYMBOLS) covers 40+ markets, but until the
+// Twelve Data plan is upgraded past its ~8-credit/minute cap, only this smaller set
+// is actually kept live so the limited credits aren't spread thin across everything.
+// Widen this (or drop it to fall back to the full tradable list) once the plan has
+// more headroom — no other code change needed, the poller already rotates/batches.
+const quoteLiveSymbols = (process.env.MARKET_DATA_LIVE_SYMBOLS || "XAU/USD")
+  .split(",")
+  .map((symbol) => symbol.trim().toUpperCase())
+  .filter(Boolean);
+
 async function pollQuotesOnce() {
   const provider = process.env.MARKET_DATA_PROVIDER || "mock";
   const key = marketDataApiKey;
   if (provider !== "twelvedata" || !key) return;
 
-  const symbols = (await listInstruments({ tradeOnly: true })).map((instrument) => instrument.symbol);
+  const tradableSymbols = (await listInstruments({ tradeOnly: true })).map((instrument) => instrument.symbol);
+  const symbols = quoteLiveSymbols.length
+    ? tradableSymbols.filter((symbol) => quoteLiveSymbols.includes(symbol))
+    : tradableSymbols;
   if (!symbols.length) return;
 
   const batch = [];
