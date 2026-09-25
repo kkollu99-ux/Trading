@@ -1112,11 +1112,13 @@ const tradeChartState = {
   slideAnim: null,
   hover: null,
   logScale: false,
+  manualPriceRange: null,
 };
 
 function resetTradeChartView() {
   tradeChartState.viewCount = Math.min(defaultTradeViewCount, tradeChartState.candles.length) || defaultTradeViewCount;
   tradeChartState.viewOffset = 0;
+  tradeChartState.manualPriceRange = null;
 }
 
 function formatTradeNumber(value) {
@@ -1218,8 +1220,6 @@ function syncTradeTerminal(ohlcCandle) {
   setTradeText("#tradeAskValue", formatTradeNumber(ask));
   setTradeText("#tradeSpreadValue", formatTradeNumber(ask - bid));
   setTradeText("#tradePriceMarker", formatTradeNumber(latest.close));
-  setTradeText("#tradeFloatBidValue", formatTradeNumber(bid));
-  setTradeText("#tradeFloatAskValue", formatTradeNumber(ask));
   setTradeText("#tradeTimeframeLabel", tradeChartState.timeframe);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", tradeChartState.changePercent >= 0);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", tradeChartState.changePercent < 0);
@@ -1271,8 +1271,13 @@ function renderTradeCandles() {
   const height = rect.height - chart.top - chart.bottom;
   const highs = candles.map((candle) => candle.high);
   const lows = candles.map((candle) => candle.low);
-  const max = Math.max(...highs);
-  const min = Math.min(...lows);
+  // Auto-scale by default (fits the visible candles' high/low), but a manual
+  // drag/scroll on the price axis (see setupPriceAxisInteractions) overrides
+  // this with a fixed range until the user double-clicks it or the view resets.
+  const autoMax = Math.max(...highs);
+  const autoMin = Math.min(...lows);
+  const max = tradeChartState.manualPriceRange?.max ?? autoMax;
+  const min = tradeChartState.manualPriceRange?.min ?? autoMin;
   const range = max - min || 1;
   const volumeMax = Math.max(...candles.map((candle) => candle.volume));
   const candleStep = width / candles.length;
@@ -1358,17 +1363,6 @@ function renderTradeCandles() {
   const priceY = yFor(latest.close);
   const priceMarker = document.querySelector("#tradePriceMarker");
   if (priceMarker) priceMarker.style.top = `${Math.max(chart.top, Math.min(chart.top + height, priceY))}px`;
-
-  // Bid/ask float buttons stack just above/below the price marker. The real
-  // bid/ask spread is usually a fraction of a pixel at typical chart zoom
-  // (a few cents against a chart spanning hundreds of dollars), so anchoring
-  // them at their exact yFor(bid)/yFor(ask) position would draw them right
-  // on top of each other and the price marker — a small fixed offset instead
-  // keeps both readable, matching how MT4/cTrader-style tickets do it.
-  const sellFloat = document.querySelector("#tradeSellFloat");
-  const buyFloat = document.querySelector("#tradeBuyFloat");
-  if (sellFloat) sellFloat.style.top = `${Math.max(chart.top, Math.min(chart.top + height, priceY + 21))}px`;
-  if (buyFloat) buyFloat.style.top = `${Math.max(chart.top, Math.min(chart.top + height, priceY - 21))}px`;
 
   ctx.setLineDash([4, 4]);
   ctx.strokeStyle = "#ffb000";
@@ -1563,16 +1557,6 @@ document.querySelector("#toggleOrderTicket")?.addEventListener("click", (event) 
   toggleTradePanel("ticket", event.currentTarget, "›", "‹", "order ticket");
 });
 
-document.querySelectorAll("#tradeSellFloat, #tradeBuyFloat").forEach((button) => {
-  button.addEventListener("click", () => {
-    const terminal = document.querySelector(".trade-terminal");
-    if (terminal?.classList.contains("is-ticket-collapsed")) {
-      document.querySelector("#toggleOrderTicket")?.click();
-    }
-    document.querySelector(".order-ticket")?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
-  });
-});
-
 document.querySelectorAll(".timeframes button").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".timeframes button").forEach((item) => item.classList.toggle("is-active", item === button));
@@ -1718,6 +1702,7 @@ connectPriceStream();
 
 (function setupTradeChartInteractions() {
   const canvas = document.querySelector("#tradeCandleCanvas");
+  const chartContainer = document.querySelector(".candlestick-chart");
   if (!canvas) return;
 
   canvas.addEventListener(
@@ -1733,7 +1718,28 @@ connectPriceStream();
 
   let drag = null;
 
+  // Hovering near the chart's left/right edge keeps revealing older/newer
+  // candles for as long as the cursor stays there, like map-style edge
+  // scrolling — a repeating nudge rather than a one-shot jump.
+  const edgeScrollZonePx = 36;
+  const edgeScrollIntervalMs = 90;
+  let edgeScrollTimer = null;
+  let edgeScrollDirection = 0;
+
+  const stopEdgeScroll = () => {
+    if (edgeScrollTimer) window.clearInterval(edgeScrollTimer);
+    edgeScrollTimer = null;
+    edgeScrollDirection = 0;
+  };
+  const startEdgeScroll = (direction) => {
+    if (edgeScrollDirection === direction) return;
+    stopEdgeScroll();
+    edgeScrollDirection = direction;
+    edgeScrollTimer = window.setInterval(() => panTradeChart(direction), edgeScrollIntervalMs);
+  };
+
   const beginDrag = (clientX) => {
+    stopEdgeScroll();
     drag = { startX: clientX, startOffset: tradeChartState.viewOffset || 0 };
     canvas.classList.add("is-panning");
   };
@@ -1759,8 +1765,14 @@ connectPriceStream();
   window.addEventListener("mouseup", endDrag);
 
   // Crosshair hover: only while not actively dragging/panning, so the two
-  // don't fight over what the cursor means.
-  canvas.addEventListener("mousemove", (event) => {
+  // don't fight over what the cursor means. Bound to the chart CONTAINER
+  // rather than the canvas itself: the price marker and bid/ask float badges
+  // are separate elements stacked on top of the canvas near the right edge,
+  // and since a covered element never receives mouse events for the pixels
+  // another element sits on top of, a canvas-only listener would go dead in
+  // that whole column. mousemove bubbles, so listening on the container
+  // still gets every move regardless of which child is directly underneath.
+  (chartContainer || canvas).addEventListener("mousemove", (event) => {
     if (drag) return;
     const rect = canvas.getBoundingClientRect();
     const viewCount = tradeChartState.viewCount || defaultTradeViewCount;
@@ -1772,8 +1784,19 @@ connectPriceStream();
     const index = Math.round((relX - tradeChartMargins.left - candleStep / 2) / candleStep);
     tradeChartState.hover = { index, y: relY };
     scheduleTradeRender();
+
+    const plotLeft = tradeChartMargins.left;
+    const plotRight = rect.width - tradeChartMargins.right;
+    if (relX <= plotLeft + edgeScrollZonePx) {
+      startEdgeScroll(1); // near the left edge: reveal older candles
+    } else if (relX >= plotRight - edgeScrollZonePx) {
+      startEdgeScroll(-1); // near the right edge: reveal newer/live candles
+    } else {
+      stopEdgeScroll();
+    }
   });
-  canvas.addEventListener("mouseleave", () => {
+  (chartContainer || canvas).addEventListener("mouseleave", () => {
+    stopEdgeScroll();
     if (!tradeChartState.hover) return;
     tradeChartState.hover = null;
     scheduleTradeRender();
@@ -1821,6 +1844,83 @@ connectPriceStream();
     tradeChartState.logScale = !tradeChartState.logScale;
     logToggle.classList.toggle("is-active", tradeChartState.logScale);
     logToggle.setAttribute("aria-pressed", String(tradeChartState.logScale));
+    renderTradeCandles();
+  });
+})();
+
+// Dragging or scrolling on the price axis itself manually overrides the
+// otherwise-always-auto-scaled price range, mirroring how TradingView's own
+// price scale works: drag to zoom the visible range, scroll to pan it in
+// fixed $5 steps, double-click to hand control back to auto-scale.
+(function setupPriceAxisInteractions() {
+  const scale = document.querySelector("#tradePriceScale");
+  if (!scale) return;
+
+  function visiblePriceRange() {
+    const total = tradeChartState.candles.length;
+    if (!total) return null;
+    const viewCount = Math.min(tradeChartState.viewCount || defaultTradeViewCount, total);
+    const viewOffset = Math.min(tradeChartState.viewOffset || 0, Math.max(0, total - viewCount));
+    const viewEnd = total - viewOffset;
+    const visible = tradeChartState.candles.slice(Math.max(0, viewEnd - viewCount), viewEnd);
+    return {
+      max: Math.max(...visible.map((candle) => candle.high)),
+      min: Math.min(...visible.map((candle) => candle.low)),
+    };
+  }
+
+  function currentRange() {
+    return tradeChartState.manualPriceRange || visiblePriceRange();
+  }
+
+  let dragStartY = null;
+  let dragStartRange = null;
+
+  scale.addEventListener("mousedown", (event) => {
+    const range = currentRange();
+    if (!range) return;
+    dragStartY = event.clientY;
+    dragStartRange = range;
+    scale.classList.add("is-dragging");
+    event.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (event) => {
+    if (dragStartY === null || !dragStartRange) return;
+    const rect = scale.getBoundingClientRect();
+    if (!rect.height) return;
+    const deltaY = event.clientY - dragStartY;
+    // Dragging down stretches the range (zoom out), dragging up compresses it
+    // (zoom in), anchored on the range's center so the mid price stays put.
+    const factor = Math.exp(deltaY / rect.height);
+    const span = Math.max(1e-6, dragStartRange.max - dragStartRange.min);
+    const center = (dragStartRange.max + dragStartRange.min) / 2;
+    const newSpan = Math.max(span * 0.1, Math.min(span * 8, span * factor));
+    tradeChartState.manualPriceRange = { min: center - newSpan / 2, max: center + newSpan / 2 };
+    renderTradeCandles();
+  });
+
+  window.addEventListener("mouseup", () => {
+    dragStartY = null;
+    dragStartRange = null;
+    scale.classList.remove("is-dragging");
+  });
+
+  scale.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      const range = currentRange();
+      if (!range) return;
+      const step = event.deltaY > 0 ? -5 : 5;
+      tradeChartState.manualPriceRange = { min: range.min + step, max: range.max + step };
+      renderTradeCandles();
+    },
+    { passive: false },
+  );
+
+  scale.addEventListener("dblclick", () => {
+    tradeChartState.manualPriceRange = null;
     renderTradeCandles();
   });
 })();

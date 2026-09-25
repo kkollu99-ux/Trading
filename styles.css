@@ -2068,7 +2068,12 @@ select:focus {
   color: var(--trade-muted);
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
-  pointer-events: none;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.chart-price-scale.is-dragging {
+  color: var(--gold);
 }
 
 .chart-price-scale span {
@@ -2098,41 +2103,6 @@ select:focus {
   width: 31rem;
   border-top: 1px dashed var(--gold);
   content: "";
-}
-
-.price-float-btn {
-  position: absolute;
-  right: 0;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  border: 0;
-  border-radius: 0.2rem 0 0 0.2rem;
-  padding: 0.16rem 0.4rem;
-  font-family: var(--font-body);
-  font-size: 0.64rem;
-  font-weight: 800;
-  color: white;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transform: translateY(-50%);
-  transition: top 0.12s linear;
-}
-
-.price-float-label {
-  font-size: 0.6rem;
-  font-weight: 900;
-  opacity: 0.85;
-  letter-spacing: 0.03em;
-}
-
-.sell-float {
-  background: var(--trade-sell);
-}
-
-.buy-float {
-  background: var(--trade-buy);
 }
 
 .chart-note {
