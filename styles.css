@@ -3659,6 +3659,22 @@ input[type="checkbox"] {
   font-weight: 1000;
 }
 
+.transaction-row.is-debit > span {
+  background: rgba(232, 61, 48, 0.14);
+  color: var(--red);
+}
+
+.transaction-row.is-debit em {
+  color: var(--red);
+}
+
+.transaction-empty-state {
+  padding: 1rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
 .referral-summary-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr)) auto;

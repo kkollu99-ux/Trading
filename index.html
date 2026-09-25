@@ -793,14 +793,14 @@
               <article class="clone-card">
                 <h3>Profile Information</h3>
                 <div class="clone-list">
-                  <div class="clone-info-row"><span>♙</span><div><small>Full Name</small><strong><em>Not set</em></strong></div><button type="button">✎</button></div>
-                  <div class="clone-info-row"><span>✉</span><div><small>Email</small><strong>harilalharsha23@gmail.com</strong></div><button type="button">▣</button></div>
-                  <div class="clone-info-row"><span>#</span><div><small>Account ID</small><strong class="mono">42686700</strong></div><button type="button">▣</button></div>
-                  <div class="clone-info-row"><span>✓</span><div><small>KYC Status</small><strong class="positive">Verified ✓</strong></div></div>
+                  <div class="clone-info-row"><span>♙</span><div><small>Full Name</small><strong id="profileFullName"><em>Not set</em></strong></div><button type="button">✎</button></div>
+                  <div class="clone-info-row"><span>✉</span><div><small>Email</small><strong id="profileEmail">—</strong></div><button type="button">▣</button></div>
+                  <div class="clone-info-row"><span>#</span><div><small>Account ID</small><strong class="mono" id="profileAccountId">—</strong></div><button type="button">▣</button></div>
+                  <div class="clone-info-row"><span>✓</span><div><small>KYC Status</small><strong id="profileKycStatus">Pending</strong></div></div>
                 </div>
               </article>
               <article class="clone-card account-balance-row">
-                <div><small>Account Balance</small><strong>$389,201.37</strong></div>
+                <div><small>Account Balance</small><strong id="profileBalance">$0.00</strong></div>
                 <div class="wallet-actions">
                   <button class="deposit-btn" type="button" data-chat-topic="deposit">↓ Deposit</button>
                   <button class="withdraw-btn" type="button" data-chat-topic="withdrawal">↑ Withdraw</button>
@@ -808,12 +808,12 @@
               </article>
               <article class="clone-card">
                 <h3>⟳ Transaction History</h3>
-                <div class="transaction-row"><span>↓</span><div><strong>deposit</strong><small>7/7/2026</small></div><em>+$256,484.00<small>approved</small></em></div>
+                <div id="transactionHistoryList"><div class="transaction-empty-state">No transactions yet.</div></div>
               </article>
               <article class="clone-card">
                 <h3>♙ Invited Friends</h3>
                 <div class="referral-summary-row">
-                  <div><small>Your Referral Code</small><strong>42686700</strong></div>
+                  <div><small>Your Referral Code</small><strong id="profileReferralCode">—</strong></div>
                   <div><small>Total Invited</small><strong id="invitedFriendsTotal">0</strong></div>
                   <button id="copyReferralCode" type="button">▣ Copy</button>
                 </div>
@@ -828,7 +828,7 @@
                 <div class="clone-list service-list clone-service-list">
                   <button type="button" data-chat-topic="deposit"><span class="green">↓</span><div><strong>Deposit Funds</strong><small>Fund your trading account</small></div><i>›</i></button>
                   <button type="button" data-chat-topic="withdrawal"><span>↑</span><div><strong>Withdraw Funds</strong><small>Request a withdrawal</small></div><i>›</i></button>
-                  <button type="button" data-chat-topic="verification"><span class="green">◈</span><div><strong>Identity Verification (KYC) <b>Verified ✓</b></strong><small>Verification complete</small></div><i>›</i></button>
+                  <button type="button" data-chat-topic="verification"><span class="green">◈</span><div><strong>Identity Verification (KYC) <b id="profileKycBadge">Pending</b></strong><small>Verification complete</small></div><i>›</i></button>
                   <button type="button"><span class="purple">▥</span><div><strong>Add Bank Account</strong><small>Link a bank for withdrawals</small></div><i>›</i></button>
                 </div>
               </article>
