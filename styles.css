@@ -687,6 +687,50 @@ select:focus {
   transform: translateY(-50%);
 }
 
+.password-line:has(.otp-send-button) {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.password-line:has(.otp-send-button) input {
+  flex: 1;
+  min-width: 0;
+}
+
+.otp-send-button {
+  position: static;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  padding: 0 1.1rem;
+  background: var(--blue);
+  color: white;
+  font-weight: 700;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transform: none;
+}
+
+.otp-send-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.otp-status {
+  margin: -0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.otp-status.is-error {
+  color: var(--red);
+}
+
+.otp-status.is-success {
+  color: var(--green);
+}
+
 .primary-action,
 .secondary-action,
 .demo-action {
@@ -700,6 +744,12 @@ select:focus {
 
 .primary-action {
   background: var(--blue);
+}
+
+.primary-action:disabled {
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 .secondary-action {

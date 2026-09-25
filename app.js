@@ -659,6 +659,101 @@ document.querySelectorAll(".ghost-icon").forEach((button) => {
   });
 });
 
+// Email OTP verification, gating the Register button until the code the
+// user typed is confirmed against the one just emailed to them.
+(function setupRegisterOtp() {
+  const form = document.querySelector("#registerForm");
+  const emailInput = form?.querySelector('input[name="email"]');
+  const otpInput = document.querySelector("#registerOtpInput");
+  const sendButton = document.querySelector("#sendOtpButton");
+  const submitButton = document.querySelector("#registerSubmitButton");
+  const statusEl = document.querySelector("#otpStatus");
+  if (!form || !emailInput || !otpInput || !sendButton || !submitButton) return;
+
+  let verified = false;
+  let cooldownTimer = null;
+
+  function setStatus(message, kind) {
+    if (!statusEl) return;
+    statusEl.textContent = message || "";
+    statusEl.classList.toggle("is-error", kind === "error");
+    statusEl.classList.toggle("is-success", kind === "success");
+  }
+
+  function setVerified(value) {
+    verified = value;
+    submitButton.disabled = !value;
+    submitButton.title = value ? "" : "Verify your email first";
+  }
+
+  function resetVerification() {
+    if (!verified && !otpInput.value) return;
+    setVerified(false);
+    otpInput.value = "";
+    setStatus("");
+  }
+
+  emailInput.addEventListener("input", resetVerification);
+
+  sendButton.addEventListener("click", async () => {
+    const email = emailInput.value.trim();
+    if (!email) return setStatus("Enter your email address first.", "error");
+    setVerified(false);
+    sendButton.disabled = true;
+    setStatus("Sending code…");
+    try {
+      const response = await fetch(`${apiBase}/api/auth/send-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Could not send verification code");
+      setStatus(result.devOtp ? `Dev mode — OTP: ${result.devOtp}` : "Code sent — check your email.", "success");
+      otpInput.focus();
+      let seconds = 30;
+      sendButton.textContent = `Resend (${seconds}s)`;
+      cooldownTimer = window.setInterval(() => {
+        seconds -= 1;
+        if (seconds <= 0) {
+          window.clearInterval(cooldownTimer);
+          sendButton.textContent = "Send";
+          sendButton.disabled = false;
+        } else {
+          sendButton.textContent = `Resend (${seconds}s)`;
+        }
+      }, 1000);
+    } catch (error) {
+      setStatus(error.message, "error");
+      sendButton.disabled = false;
+    }
+  });
+
+  otpInput.addEventListener("input", async () => {
+    otpInput.value = otpInput.value.replace(/\D/g, "").slice(0, 6);
+    if (otpInput.value.length !== 6) {
+      if (verified) setVerified(false);
+      return;
+    }
+    const email = emailInput.value.trim();
+    setStatus("Verifying…");
+    try {
+      const response = await fetch(`${apiBase}/api/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, otp: otpInput.value }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.verified) throw new Error(result.error || "Incorrect code");
+      setVerified(true);
+      setStatus("Email verified ✓", "success");
+    } catch (error) {
+      setVerified(false);
+      setStatus(error.message, "error");
+    }
+  });
+})();
+
 document.querySelector("#registerForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(event.target);
@@ -673,7 +768,7 @@ document.querySelector("#registerForm").addEventListener("submit", async (event)
 
   error.textContent = "";
   const email = data.get("email");
-  const fallbackUser = { role: "user", name: String(email).split("@")[0] || "New Client", email };
+  const name = String(email).split("@")[0] || "New Client";
 
   try {
     const response = await fetch(`${apiBase}/api/auth/register`, {
@@ -682,18 +777,29 @@ document.querySelector("#registerForm").addEventListener("submit", async (event)
       body: JSON.stringify({
         email,
         password,
-        name: fallbackUser.name,
+        name,
         referralCode: data.get("referral") || null,
       }),
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || "Registration failed");
+    if (!response.ok) {
+      // A real validation error (unverified email, duplicate account, etc.) —
+      // show it and stop, rather than silently logging the user into a fake
+      // local session as if registration had actually succeeded.
+      error.textContent = result.error || "Registration failed";
+      return;
+    }
     event.target.reset();
+    document.querySelector("#registerSubmitButton").disabled = true;
     enterWorkspace(result);
   } catch (requestError) {
+    // A genuine network failure (server unreachable) — fall back to a local
+    // demo session so the UI doesn't just dead-end, matching this app's
+    // existing offline-friendly behavior elsewhere.
+    const fallbackUser = { role: "user", name, email };
     users = [
       {
-        name: fallbackUser.name,
+        name,
         email,
         tier: data.get("referral") ? "Referred" : "Standard",
         status: "Active",
