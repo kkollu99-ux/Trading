@@ -1136,6 +1136,8 @@ function readTradeRow(row) {
 function buildTradeCandles({ symbol, price, timeframe }) {
   const seed = hashSymbol(symbol) + timeframeMinutes[timeframe] * 13;
   const spread = Math.max(price * (0.00055 + timeframeMinutes[timeframe] / 900000), 0.006);
+  const stepMs = (timeframeMinutes[timeframe] || 60) * 60000;
+  const now = Date.now();
   let close = price - Math.sin(seed) * spread * 7;
 
   return Array.from({ length: 74 }, (_, index) => {
@@ -1146,8 +1148,34 @@ function buildTradeCandles({ symbol, price, timeframe }) {
     const high = Math.max(open, close) + spread * (1.3 + Math.abs(Math.sin(index + seed)));
     const low = Math.min(open, close) - spread * (1.1 + Math.abs(Math.cos(index + seed)));
     const volume = 28 + Math.abs(Math.sin(index / 3 + seed)) * 70 + (index > 68 ? 65 : 0);
-    return { open, high, low: Math.max(0.00001, low), close, volume };
+    const time = new Date(now - (73 - index) * stepMs).toISOString();
+    return { time, open, high, low: Math.max(0.00001, low), close, volume };
   });
+}
+
+function formatChartTime(timeStr, timeframe) {
+  if (!timeStr) return "";
+  const hasTimeOfDay = timeStr.includes(":");
+  const isoLike = hasTimeOfDay ? timeStr.replace(" ", "T") : `${timeStr}T00:00:00`;
+  const withZone = /[zZ]|[+-]\d\d:\d\d$/.test(isoLike) ? isoLike : `${isoLike}Z`;
+  const date = new Date(withZone);
+  if (Number.isNaN(date.getTime())) return timeStr;
+  if (!hasTimeOfDay || timeframe === "1D") {
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function renderTimeScale(candles) {
+  const container = document.querySelector(".chart-times");
+  if (!container || !candles.length) return;
+  const labelCount = Math.min(7, candles.length);
+  const step = (candles.length - 1) / Math.max(1, labelCount - 1);
+  const labels = Array.from({ length: labelCount }, (_, index) => {
+    const candle = candles[Math.round(index * step)];
+    return formatChartTime(candle?.time, tradeChartState.timeframe);
+  });
+  container.innerHTML = labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("");
 }
 
 function setTradeText(selector, text) {
@@ -1277,6 +1305,7 @@ function renderTradeCandles() {
   ctx.setLineDash([]);
 
   renderPriceScale([min, max]);
+  renderTimeScale(candles);
   syncTradeTerminal();
 }
 
@@ -1290,6 +1319,7 @@ async function loadRealCandles(symbol, range) {
     if (token !== candleRequestToken) return false;
     if (!response.ok || !payload.candles?.length) return false;
     tradeChartState.candles = payload.candles.map((candle) => ({
+      time: candle.time,
       open: Number(candle.open),
       high: Number(candle.high),
       low: Number(candle.low),
@@ -1451,6 +1481,13 @@ function panTradeChart(candleDelta) {
   canvas.addEventListener("touchend", endDrag);
 
   canvas.addEventListener("dblclick", () => {
+    resetTradeChartView();
+    renderTradeCandles();
+  });
+
+  document.querySelector("#chartZoomIn")?.addEventListener("click", () => zoomTradeChart(1 / 1.3));
+  document.querySelector("#chartZoomOut")?.addEventListener("click", () => zoomTradeChart(1.3));
+  document.querySelector("#chartZoomReset")?.addEventListener("click", () => {
     resetTradeChartView();
     renderTradeCandles();
   });
