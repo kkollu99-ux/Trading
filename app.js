@@ -1108,6 +1108,7 @@ const tradeChartState = {
   viewOffset: 0,
   liveBid: null,
   liveAsk: null,
+  slideAnim: null,
 };
 
 function resetTradeChartView() {
@@ -1255,6 +1256,24 @@ function renderTradeCandles() {
   const candleWidth = Math.max(4, Math.min(12, candleStep * 0.58));
   const yFor = (value) => chart.top + ((max - value) / range) * height;
 
+  // A newly opened candle (real tick crossing a timeframe bucket, or the
+  // synthetic demo tick) starts one full candle-width off to the right and
+  // eases back to its resting position, so the whole plot visibly scrolls
+  // left to make room for it instead of just popping into place.
+  let slideOffsetPx = 0;
+  if (tradeChartState.slideAnim) {
+    const { startTime, duration } = tradeChartState.slideAnim;
+    const progress = Math.min(1, (performance.now() - startTime) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    slideOffsetPx = (1 - eased) * candleStep;
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(chart.left, 0, width, rect.height);
+  ctx.clip();
+  ctx.translate(slideOffsetPx, 0);
+
   ctx.strokeStyle = "rgba(42, 46, 57, 0.82)";
   ctx.lineWidth = 1;
   for (let x = chart.left; x <= rect.width - chart.right; x += Math.max(68, candleStep * 8)) {
@@ -1306,9 +1325,20 @@ function renderTradeCandles() {
   ctx.stroke();
   ctx.setLineDash([]);
 
+  ctx.restore();
+
   renderPriceScale([min, max]);
   renderTimeScale(candles);
   syncTradeTerminal();
+
+  if (tradeChartState.slideAnim) {
+    const finished = performance.now() - tradeChartState.slideAnim.startTime >= tradeChartState.slideAnim.duration;
+    if (finished) {
+      tradeChartState.slideAnim = null;
+    } else {
+      requestAnimationFrame(renderTradeCandles);
+    }
+  }
 }
 
 let candleRequestToken = 0;
@@ -1355,6 +1385,7 @@ function setStreamStatus(state) {
 async function loadChartForCurrentSymbol() {
   tradeChartState.liveBid = null;
   tradeChartState.liveAsk = null;
+  tradeChartState.slideAnim = null;
   const isLive = liveCandleSymbols.has(tradeChartState.apiSymbol);
   if (!isLive) setStreamStatus(null);
   if (isLive) {
@@ -1489,7 +1520,10 @@ function applyLiveTick(tick) {
     });
     const maxCandles = 600;
     if (candles.length > maxCandles) candles.splice(0, candles.length - maxCandles);
-    if (isFollowingLive) tradeChartState.viewOffset = 0;
+    if (isFollowingLive) {
+      tradeChartState.viewOffset = 0;
+      tradeChartState.slideAnim = { startTime: performance.now(), duration: 260 };
+    }
   } else {
     last.close = price;
     last.high = Math.max(last.high, price);
@@ -1727,7 +1761,9 @@ function tickTradeCandles() {
 
   if (tradeChartState.tick % 8 === 0) {
     const open = last.close;
+    const wasFollowingLive = (tradeChartState.viewOffset || 0) === 0;
     tradeChartState.candles.push({
+      time: new Date().toISOString(),
       open,
       high: open + scale * 1.8,
       low: Math.max(0.00001, open - scale * 1.6),
@@ -1735,6 +1771,7 @@ function tickTradeCandles() {
       volume: 34 + Math.random() * 55,
     });
     tradeChartState.candles = tradeChartState.candles.slice(-84);
+    if (wasFollowingLive) tradeChartState.slideAnim = { startTime: performance.now(), duration: 260 };
   }
 
   renderTradeCandles();
