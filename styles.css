@@ -2082,6 +2082,8 @@ select:focus {
   font-size: 0.72rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
+  transform: translateY(-50%);
+  transition: top 0.12s linear;
 }
 
 .price-marker::before {

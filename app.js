@@ -1317,6 +1317,8 @@ function renderTradeCandles() {
 
   const latest = candles.at(-1);
   const priceY = yFor(latest.close);
+  const priceMarker = document.querySelector("#tradePriceMarker");
+  if (priceMarker) priceMarker.style.top = `${Math.max(chart.top, Math.min(chart.top + height, priceY))}px`;
   ctx.setLineDash([4, 4]);
   ctx.strokeStyle = "#ffb000";
   ctx.beginPath();
