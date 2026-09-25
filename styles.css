@@ -1977,6 +1977,7 @@ select:focus {
 }
 
 .trade-stats {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) 1.2fr;
   border-top: 1px solid var(--trade-border);
@@ -2002,8 +2003,11 @@ select:focus {
 .timeframes {
   display: flex !important;
   flex-direction: row;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 0.35rem;
+  row-gap: 0.3rem;
+  padding: 0.3rem 0;
   border-right: 0 !important;
   text-transform: none !important;
 }
@@ -2015,6 +2019,81 @@ select:focus {
   color: var(--trade-muted);
   padding: 0.35rem 0.5rem;
   font-weight: 900;
+}
+
+.calendar-toggle {
+  font-size: 0.85rem !important;
+  line-height: 1;
+}
+
+.calendar-popover {
+  position: absolute;
+  top: 100%;
+  right: 0.5rem;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 13.5rem;
+  margin-top: 0.3rem;
+  padding: 0.75rem;
+  background: var(--trade-panel);
+  border: 1px solid var(--trade-border);
+  border-radius: var(--radius);
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.4);
+}
+
+.calendar-popover.is-hidden {
+  display: none;
+}
+
+.calendar-popover label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--trade-muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.calendar-popover input[type="date"] {
+  padding: 0.35rem 0.5rem;
+  background: var(--trade-chart);
+  border: 1px solid var(--trade-border);
+  border-radius: 0.3rem;
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+.calendar-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 0.68rem;
+}
+
+.calendar-error.is-hidden {
+  display: none;
+}
+
+.calendar-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.calendar-popover-actions button {
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0.35rem 0.7rem;
+  background: transparent;
+  color: var(--trade-muted);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.calendar-popover-actions button.calendar-apply {
+  background: var(--gold);
+  color: #0c1424;
 }
 
 .timeframes button.is-active {

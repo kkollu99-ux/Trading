@@ -1087,6 +1087,12 @@ const timeframeMinutes = {
   "30M": 30,
   "1H": 60,
   "1D": 1440,
+  "5D": 60,
+  "1MO": 1440,
+  "5MO": 1440,
+  "1Y": 1440 * 7,
+  ALL: 1440 * 30,
+  CUSTOM: 1440,
 };
 
 const liveCandleSymbols = new Set(["XAU/USD"]);
@@ -1113,6 +1119,7 @@ const tradeChartState = {
   hover: null,
   logScale: false,
   manualPriceRange: null,
+  customRange: null, // { start, end } ISO dates — set when the calendar picker is applied
 };
 
 function resetTradeChartView() {
@@ -1444,10 +1451,17 @@ function renderTradeCandles() {
 
 let candleRequestToken = 0;
 
-async function loadRealCandles(symbol, range) {
+async function loadRealCandles(symbol, range, customRange) {
   const token = ++candleRequestToken;
   try {
-    const response = await fetch(`${apiBase}/api/markets/candles?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`);
+    const params = new URLSearchParams({ symbol });
+    if (customRange?.start && customRange?.end) {
+      params.set("start", customRange.start);
+      params.set("end", customRange.end);
+    } else {
+      params.set("range", range);
+    }
+    const response = await fetch(`${apiBase}/api/markets/candles?${params.toString()}`);
     const payload = await response.json().catch(() => ({}));
     if (token !== candleRequestToken) return false;
     if (!response.ok || !payload.candles?.length) return false;
@@ -1508,7 +1522,7 @@ async function loadChartForCurrentSymbol() {
   if (!isLive) setStreamStatus(null);
   if (isLive) {
     const loadingToken = candleRequestToken;
-    const ok = await loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe);
+    const ok = await loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe, tradeChartState.customRange);
     if (ok) {
       tradeChartState.isLiveChart = true;
       resetTradeChartView();
@@ -1557,13 +1571,68 @@ document.querySelector("#toggleOrderTicket")?.addEventListener("click", (event) 
   toggleTradePanel("ticket", event.currentTarget, "›", "‹", "order ticket");
 });
 
-document.querySelectorAll(".timeframes button").forEach((button) => {
+document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll(".timeframes button").forEach((item) => item.classList.toggle("is-active", item === button));
-    tradeChartState.timeframe = button.dataset.timeframe || button.textContent.trim();
+    document.querySelectorAll(".timeframes button[data-timeframe]").forEach((item) => item.classList.toggle("is-active", item === button));
+    tradeChartState.timeframe = button.dataset.timeframe;
+    tradeChartState.customRange = null;
     loadChartForCurrentSymbol();
   });
 });
+
+// Calendar date-range picker: lets the user view candles for an arbitrary
+// [start, end] window instead of one of the fixed canned ranges above.
+(function setupCalendarPopover() {
+  const toggle = document.querySelector("#tradeCalendarToggle");
+  const popover = document.querySelector("#tradeCalendarPopover");
+  const startInput = document.querySelector("#tradeCalendarStart");
+  const endInput = document.querySelector("#tradeCalendarEnd");
+  const errorEl = document.querySelector("#tradeCalendarError");
+  const applyButton = document.querySelector("#tradeCalendarApply");
+  const cancelButton = document.querySelector("#tradeCalendarCancel");
+  if (!toggle || !popover) return;
+
+  function showError(message) {
+    if (!errorEl) return;
+    errorEl.textContent = message || "";
+    errorEl.classList.toggle("is-hidden", !message);
+  }
+  function closePopover() {
+    popover.classList.add("is-hidden");
+    toggle.setAttribute("aria-expanded", "false");
+  }
+  function openPopover() {
+    popover.classList.remove("is-hidden");
+    toggle.setAttribute("aria-expanded", "true");
+    showError(null);
+  }
+
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (popover.classList.contains("is-hidden")) openPopover();
+    else closePopover();
+  });
+  cancelButton?.addEventListener("click", closePopover);
+  popover.addEventListener("click", (event) => event.stopPropagation());
+  document.addEventListener("click", () => {
+    if (!popover.classList.contains("is-hidden")) closePopover();
+  });
+
+  applyButton?.addEventListener("click", () => {
+    const start = startInput?.value;
+    const end = endInput?.value;
+    if (!start || !end) return showError("Pick both a start and end date.");
+    if (new Date(`${start}T00:00:00Z`) >= new Date(`${end}T00:00:00Z`)) {
+      return showError("Start date must be before the end date.");
+    }
+    showError(null);
+    document.querySelectorAll(".timeframes button[data-timeframe]").forEach((item) => item.classList.remove("is-active"));
+    tradeChartState.timeframe = "CUSTOM";
+    tradeChartState.customRange = { start, end };
+    loadChartForCurrentSymbol();
+    closePopover();
+  });
+})();
 
 function zoomTradeChart(factor, anchorRatio = 0.5) {
   const total = tradeChartState.candles.length;
@@ -2012,7 +2081,7 @@ function tickTradeCandles() {
     if (!isPriceStreamOpen()) tickLiveCandle();
     liveCandleRefreshTick += 1;
     if (liveCandleRefreshTick % 40 === 0 && document.querySelector("#trade")?.classList.contains("is-active")) {
-      loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe).then((ok) => {
+      loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe, tradeChartState.customRange).then((ok) => {
         if (ok) renderTradeCandles();
       });
     }

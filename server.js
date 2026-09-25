@@ -805,15 +805,56 @@ const candleRangeConfig = {
   "30M": { interval: "30min", outputsize: 70 },
   "1H": { interval: "1h", outputsize: 70 },
   "1D": { interval: "1day", outputsize: 70 },
+  "5D": { interval: "1h", outputsize: 120 },
+  "1MO": { interval: "1day", outputsize: 30 },
+  "5MO": { interval: "1day", outputsize: 150 },
+  "1Y": { interval: "1week", outputsize: 52 },
+  // Twelve Data has no literal "give me everything" mode - this is a practical
+  // stand-in (5 years of monthly bars) rather than a true unbounded history.
+  ALL: { interval: "1month", outputsize: 60 },
 };
+const candleRangeErrorMessage = `Invalid range. Use ${Object.keys(candleRangeConfig).join(", ")}.`;
 const candleCacheTtlMs = Number(process.env.MARKET_DATA_CANDLE_CACHE_TTL_MS || 30000);
 const candleCache = new Map();
 
+// The calendar/date-range picker needs an arbitrary [start, end] window rather
+// than one of the fixed canned ranges above, so interval can't be looked up from
+// a table - it's picked from the span itself, coarsening as the window widens to
+// keep the response size (and Twelve Data's own per-call limits) reasonable.
+function intervalForSpan(days) {
+  if (days <= 7) return "1h";
+  if (days <= 90) return "1day";
+  if (days <= 730) return "1week";
+  return "1month";
+}
+
 app.get("/api/markets/candles", async (request, response) => {
   const symbol = String(request.query.symbol || "").trim().toUpperCase();
-  const range = String(request.query.range || "1H").trim().toUpperCase();
-  const rangeSpec = candleRangeConfig[range];
-  if (!rangeSpec) return response.status(400).json({ error: "Invalid range. Use 1M, 5M, 15M, 30M, 1H, or 1D." });
+  const startParam = String(request.query.start || "").trim();
+  const endParam = String(request.query.end || "").trim();
+  const isCustomRange = Boolean(startParam && endParam);
+
+  let range;
+  let rangeSpec;
+  let cacheKey;
+
+  if (isCustomRange) {
+    const startDate = new Date(`${startParam}T00:00:00Z`);
+    const endDate = new Date(`${endParam}T23:59:59Z`);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || startDate >= endDate) {
+      return response.status(400).json({ error: "Invalid date range. Use start/end as YYYY-MM-DD with start before end." });
+    }
+    const spanDays = (endDate - startDate) / 86400000;
+    range = "CUSTOM";
+    rangeSpec = { interval: intervalForSpan(spanDays) };
+    cacheKey = `${symbol}:CUSTOM:${startParam}:${endParam}`;
+  } else {
+    range = String(request.query.range || "1H").trim().toUpperCase();
+    rangeSpec = candleRangeConfig[range];
+    if (!rangeSpec) return response.status(400).json({ error: candleRangeErrorMessage });
+    cacheKey = `${symbol}:${range}`;
+  }
+
   if (!quoteLiveSymbols.includes(symbol)) {
     return response.status(400).json({ error: "Historical candles are only available for live-enabled symbols right now." });
   }
@@ -824,7 +865,6 @@ app.get("/api/markets/candles", async (request, response) => {
     return response.status(400).json({ error: "Market data provider not configured" });
   }
 
-  const cacheKey = `${symbol}:${range}`;
   const cached = candleCache.get(cacheKey);
   if (cached && Date.now() - cached.at < candleCacheTtlMs) {
     return response.json({ symbol, range, candles: cached.candles });
@@ -834,7 +874,12 @@ app.get("/api/markets/candles", async (request, response) => {
     const url = new URL("https://api.twelvedata.com/time_series");
     url.searchParams.set("symbol", symbol);
     url.searchParams.set("interval", rangeSpec.interval);
-    url.searchParams.set("outputsize", String(rangeSpec.outputsize));
+    if (isCustomRange) {
+      url.searchParams.set("start_date", startParam);
+      url.searchParams.set("end_date", endParam);
+    } else {
+      url.searchParams.set("outputsize", String(rangeSpec.outputsize));
+    }
     url.searchParams.set("timezone", "UTC");
     url.searchParams.set("apikey", key);
     const upstream = await fetch(url);
