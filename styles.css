@@ -2020,6 +2020,12 @@ select:focus {
   border: 0;
   border-radius: 0;
   background: transparent;
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.trade-candle-canvas.is-panning {
+  cursor: grabbing;
 }
 
 .chart-price-scale {

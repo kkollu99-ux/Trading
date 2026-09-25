@@ -1091,6 +1091,9 @@ const timeframeMinutes = {
 
 const liveCandleSymbols = new Set(["XAU/USD"]);
 
+const defaultTradeViewCount = 62;
+const minTradeViewCount = 12;
+
 const tradeChartState = {
   symbol: "XAUUSD",
   category: "CMD",
@@ -1101,7 +1104,14 @@ const tradeChartState = {
   candles: [],
   tick: 0,
   isLiveChart: false,
+  viewCount: defaultTradeViewCount,
+  viewOffset: 0,
 };
+
+function resetTradeChartView() {
+  tradeChartState.viewCount = Math.min(defaultTradeViewCount, tradeChartState.candles.length) || defaultTradeViewCount;
+  tradeChartState.viewOffset = 0;
+}
 
 function formatTradeNumber(value) {
   const number = Number(value) || 0;
@@ -1194,7 +1204,14 @@ function renderTradeCandles() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
 
-  const candles = tradeChartState.candles.slice(-62);
+  const total = tradeChartState.candles.length;
+  const viewCount = Math.max(minTradeViewCount, Math.min(tradeChartState.viewCount || defaultTradeViewCount, total));
+  const maxOffset = Math.max(0, total - viewCount);
+  const viewOffset = Math.max(0, Math.min(tradeChartState.viewOffset || 0, maxOffset));
+  tradeChartState.viewCount = viewCount;
+  tradeChartState.viewOffset = viewOffset;
+  const viewEnd = total - viewOffset;
+  const candles = tradeChartState.candles.slice(Math.max(0, viewEnd - viewCount), viewEnd);
   const chart = { left: 12, top: 18, right: 64, bottom: 66 };
   const width = rect.width - chart.left - chart.right;
   const height = rect.height - chart.top - chart.bottom;
@@ -1292,6 +1309,7 @@ async function loadChartForCurrentSymbol() {
     const ok = await loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe);
     if (ok) {
       tradeChartState.isLiveChart = true;
+      resetTradeChartView();
       renderTradeCandles();
       return;
     }
@@ -1299,6 +1317,7 @@ async function loadChartForCurrentSymbol() {
   }
   tradeChartState.isLiveChart = false;
   tradeChartState.candles = buildTradeCandles(tradeChartState);
+  resetTradeChartView();
   renderTradeCandles();
 }
 
@@ -1342,6 +1361,100 @@ document.querySelectorAll(".timeframes button").forEach((button) => {
     loadChartForCurrentSymbol();
   });
 });
+
+function zoomTradeChart(factor, anchorRatio = 0.5) {
+  const total = tradeChartState.candles.length;
+  if (!total) return;
+  const currentCount = tradeChartState.viewCount || defaultTradeViewCount;
+  const currentEnd = total - (tradeChartState.viewOffset || 0);
+  const anchorIndex = currentEnd - currentCount * (1 - anchorRatio);
+  const newCount = Math.max(minTradeViewCount, Math.min(total, Math.round(currentCount * factor)));
+  const newEnd = Math.max(newCount, Math.min(total, Math.round(anchorIndex + newCount * (1 - anchorRatio))));
+  tradeChartState.viewCount = newCount;
+  tradeChartState.viewOffset = Math.max(0, Math.min(total - newCount, total - newEnd));
+  renderTradeCandles();
+}
+
+function panTradeChart(candleDelta) {
+  const total = tradeChartState.candles.length;
+  const viewCount = tradeChartState.viewCount || defaultTradeViewCount;
+  const maxOffset = Math.max(0, total - viewCount);
+  tradeChartState.viewOffset = Math.max(0, Math.min(maxOffset, (tradeChartState.viewOffset || 0) + candleDelta));
+  renderTradeCandles();
+}
+
+(function setupTradeChartInteractions() {
+  const canvas = document.querySelector("#tradeCandleCanvas");
+  if (!canvas) return;
+
+  canvas.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const anchorRatio = rect.width ? 1 - (event.clientX - rect.left) / rect.width : 0.5;
+      zoomTradeChart(event.deltaY > 0 ? 1.15 : 1 / 1.15, anchorRatio);
+    },
+    { passive: false },
+  );
+
+  let drag = null;
+
+  const beginDrag = (clientX) => {
+    drag = { startX: clientX, startOffset: tradeChartState.viewOffset || 0 };
+    canvas.classList.add("is-panning");
+  };
+  const continueDrag = (clientX) => {
+    if (!drag) return;
+    const rect = canvas.getBoundingClientRect();
+    const viewCount = tradeChartState.viewCount || defaultTradeViewCount;
+    const candleStep = rect.width / viewCount;
+    if (!candleStep) return;
+    const deltaCandles = Math.round((clientX - drag.startX) / candleStep);
+    const total = tradeChartState.candles.length;
+    const maxOffset = Math.max(0, total - viewCount);
+    tradeChartState.viewOffset = Math.max(0, Math.min(maxOffset, drag.startOffset + deltaCandles));
+    renderTradeCandles();
+  };
+  const endDrag = () => {
+    drag = null;
+    canvas.classList.remove("is-panning");
+  };
+
+  canvas.addEventListener("mousedown", (event) => beginDrag(event.clientX));
+  window.addEventListener("mousemove", (event) => continueDrag(event.clientX));
+  window.addEventListener("mouseup", endDrag);
+
+  canvas.addEventListener(
+    "touchstart",
+    (event) => {
+      if (event.touches.length === 1) beginDrag(event.touches[0].clientX);
+    },
+    { passive: true },
+  );
+  canvas.addEventListener(
+    "touchmove",
+    (event) => {
+      if (event.touches.length === 1) {
+        continueDrag(event.touches[0].clientX);
+      } else if (event.touches.length === 2) {
+        const [a, b] = event.touches;
+        const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        if (drag?.pinchDistance) {
+          zoomTradeChart(drag.pinchDistance / distance);
+        }
+        drag = { pinchDistance: distance };
+      }
+    },
+    { passive: true },
+  );
+  canvas.addEventListener("touchend", endDrag);
+
+  canvas.addEventListener("dblclick", () => {
+    resetTradeChartView();
+    renderTradeCandles();
+  });
+})();
 
 const tradeTicketState = {
   kind: "spot",
