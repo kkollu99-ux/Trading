@@ -523,8 +523,52 @@ app.post("/api/admin/instruments", requireAuth, attachUser, requireRole("admin")
   response.status(201).json({ instrument });
 });
 
-const quoteCacheTtlMs = 4000;
-const quoteCache = new Map();
+// Twelve Data's free/basic tier caps at ~8 credits/minute (1 credit per symbol per
+// call), but the app needs quotes for 40+ symbols. A single big batched call would
+// blow the whole minute's budget in one request no matter how rarely it's made, and
+// per-request caching doesn't help either, because every browser tab would still
+// need its own eventual upstream fetch. So instead of fetching on request, a single
+// background poller owns the upstream budget: it rotates through the tradable
+// instrument list in small batches, staying under the credit cap, and writes results
+// into a shared in-memory store. Every client request just reads that store — free,
+// instant, and its cost is fixed regardless of how many tabs or users are watching.
+const quotePollBatchSize = Number(process.env.MARKET_DATA_POLL_BATCH_SIZE || 7);
+const quotePollIntervalMs = Number(process.env.MARKET_DATA_POLL_INTERVAL_MS || 60000);
+const quoteStore = new Map();
+let quotePollCursor = 0;
+
+async function pollQuotesOnce() {
+  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
+  const key = marketDataApiKey;
+  if (provider !== "twelvedata" || !key) return;
+
+  const symbols = (await listInstruments({ tradeOnly: true })).map((instrument) => instrument.symbol);
+  if (!symbols.length) return;
+
+  const batch = [];
+  for (let i = 0; i < Math.min(quotePollBatchSize, symbols.length); i += 1) {
+    batch.push(symbols[quotePollCursor % symbols.length]);
+    quotePollCursor += 1;
+  }
+
+  try {
+    const url = new URL("https://api.twelvedata.com/quote");
+    url.searchParams.set("symbol", batch.join(","));
+    url.searchParams.set("apikey", key);
+    const upstream = await fetch(url);
+    const data = await upstream.json();
+    if (data?.status === "error") {
+      console.warn("Market data poll error:", data.message);
+      return;
+    }
+    const quotesBySymbol = batch.length === 1 ? { [batch[0]]: data } : data;
+    for (const symbol of batch) {
+      if (quotesBySymbol[symbol]) quoteStore.set(symbol, { data: quotesBySymbol[symbol], at: Date.now() });
+    }
+  } catch (error) {
+    console.warn("Market data poll failed:", error.message);
+  }
+}
 
 app.get("/api/markets/quotes", async (request, response) => {
   const requestedSymbols = String(request.query.symbols || "")
@@ -538,18 +582,11 @@ app.get("/api/markets/quotes", async (request, response) => {
   const provider = process.env.MARKET_DATA_PROVIDER || "mock";
   const key = marketDataApiKey;
   if (provider === "twelvedata" && key) {
-    const cacheKey = [...symbols].sort().join(",");
-    const cached = quoteCache.get(cacheKey);
-    if (cached && Date.now() - cached.at < quoteCacheTtlMs) {
-      return response.json({ provider, symbols, data: cached.data, cached: true });
+    const data = {};
+    for (const symbol of symbols) {
+      const entry = quoteStore.get(symbol);
+      if (entry) data[symbol] = entry.data;
     }
-
-    const url = new URL("https://api.twelvedata.com/quote");
-    url.searchParams.set("symbol", symbols.join(","));
-    url.searchParams.set("apikey", key);
-    const upstream = await fetch(url);
-    const data = await upstream.json();
-    quoteCache.set(cacheKey, { data, at: Date.now() });
     return response.json({ provider, symbols, data });
   }
 
@@ -619,6 +656,8 @@ seedDefaults()
     server.listen(port, () => {
       console.log(`FXCC platform running on http://127.0.0.1:${port}`);
     });
+    pollQuotesOnce();
+    setInterval(pollQuotesOnce, quotePollIntervalMs);
   })
   .catch((error) => {
     console.error("Failed to start FXCC platform", error);
