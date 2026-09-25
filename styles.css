@@ -1971,6 +1971,11 @@ select:focus {
   background: #e83d30 !important;
 }
 
+.stream-status.is-closed {
+  background: #6c85b3 !important;
+  box-shadow: 0 0 0.4rem rgba(108, 133, 179, 0.55);
+}
+
 .trade-stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) 1.2fr;
