@@ -12,6 +12,159 @@ function canManageUsers() {
   return ["admin", "team"].includes(currentSession?.user?.role);
 }
 
+function formatCurrency(value) {
+  return `$${Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good Morning";
+  if (hour < 18) return "Good Afternoon";
+  return "Good Evening";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+
+function currentDisplayName() {
+  const user = currentSession?.user;
+  return user?.name || user?.email?.split("@")[0] || "Guest";
+}
+
+function formatKycStatus(status) {
+  const value = String(status || "pending").toLowerCase();
+  if (value === "verified") return { text: "Verified ✓", className: "positive" };
+  if (value === "rejected") return { text: "Rejected ✕", className: "danger-text" };
+  return { text: "Pending", className: "gold-text" };
+}
+
+async function authFetch(path) {
+  if (!currentSession?.token) return null;
+  try {
+    const response = await fetch(`${apiBase}${path}`, {
+      headers: { Authorization: `Bearer ${currentSession.token}` },
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function renderDashboardGreeting() {
+  if (!sectionTitle) return;
+  sectionTitle.innerHTML = `${getGreeting()}, <strong>${escapeHtml(currentDisplayName())}</strong> 👋`;
+}
+
+function renderAccountSummary() {
+  const user = currentSession?.user;
+  const balance = Number(user?.balance || 0);
+  const uid = user?.referralCode || user?.id || "—";
+  const name = currentDisplayName();
+
+  const dateLabel = document.querySelector("#dashboardDateLabel");
+  if (dateLabel) dateLabel.textContent = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+
+  const uidPill = document.querySelector("#dashboardUid");
+  if (uidPill) uidPill.textContent = uid;
+
+  const avatar = document.querySelector("#dashboardAvatar");
+  if (avatar) avatar.textContent = name.charAt(0).toUpperCase() || "?";
+
+  const balanceValue = document.querySelector("#dashboardBalance");
+  if (balanceValue) balanceValue.textContent = formatCurrency(balance);
+
+  const equityValue = document.querySelector("#dashboardEquity");
+  if (equityValue) equityValue.textContent = formatCurrency(balance);
+
+  const marginValue = document.querySelector("#dashboardAvailableMargin");
+  if (marginValue) marginValue.textContent = formatCurrency(balance);
+
+  const marginUsedValue = document.querySelector("#dashboardMarginUsed");
+  if (marginUsedValue) marginUsedValue.textContent = formatCurrency(0);
+
+  const pnlValue = document.querySelector("#dashboardPnl");
+  if (pnlValue) pnlValue.textContent = `${formatCurrency(0)} (0.00%)`;
+
+  const walletButton = document.querySelector("#walletBalance");
+  if (walletButton) walletButton.textContent = `▣ ${formatCurrency(balance)}`;
+
+  const fullNameValue = document.querySelector("#profileFullName");
+  if (fullNameValue) fullNameValue.innerHTML = user?.name ? escapeHtml(user.name) : "<em>Not set</em>";
+
+  const emailValue = document.querySelector("#profileEmail");
+  if (emailValue) emailValue.textContent = user?.email || "—";
+
+  const accountIdValue = document.querySelector("#profileAccountId");
+  if (accountIdValue) accountIdValue.textContent = uid;
+
+  const referralCodeValue = document.querySelector("#profileReferralCode");
+  if (referralCodeValue) referralCodeValue.textContent = uid;
+
+  const profileBalanceValue = document.querySelector("#profileBalance");
+  if (profileBalanceValue) profileBalanceValue.textContent = formatCurrency(balance);
+
+  const kyc = formatKycStatus(user?.kycStatus);
+  const kycStatusValue = document.querySelector("#profileKycStatus");
+  if (kycStatusValue) {
+    kycStatusValue.textContent = kyc.text;
+    kycStatusValue.className = kyc.className;
+  }
+  const kycBadgeValue = document.querySelector("#profileKycBadge");
+  if (kycBadgeValue) kycBadgeValue.textContent = kyc.text;
+
+  if (document.querySelector("#dashboard")?.classList.contains("is-active")) {
+    renderDashboardGreeting();
+  }
+  if (document.querySelector("#ticketBalanceValue")) renderTradeTicket();
+
+  loadInvitedFriends();
+  loadTransactionHistory();
+}
+
+async function loadInvitedFriends() {
+  const result = await authFetch("/api/referrals");
+  invitedFriends = (result?.invited || []).map((invited) => {
+    const name = invited.name || invited.email || "Client";
+    const verified = invited.kycStatus === "verified";
+    return {
+      name,
+      date: invited.createdAt
+        ? `Joined ${new Date(invited.createdAt).toLocaleDateString(undefined, { month: "short", day: "2-digit", year: "numeric" })}`
+        : "Joined",
+      status: verified ? "Verified" : invited.status === "active" ? "Active" : "Pending",
+      initial: name.charAt(0).toUpperCase() || "?",
+      positive: verified || invited.status === "active",
+    };
+  });
+  invitedFriendsPage = 1;
+  renderInvitedFriends();
+}
+
+async function loadTransactionHistory() {
+  const container = document.querySelector("#transactionHistoryList");
+  if (!container) return;
+
+  const result = await authFetch("/api/service-requests");
+  const transactions = (result?.serviceRequests || [])
+    .filter((item) => item.type === "deposit" || item.type === "withdrawal")
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  if (!transactions.length) {
+    container.innerHTML = '<div class="transaction-empty-state">No transactions yet.</div>';
+    return;
+  }
+
+  container.innerHTML = transactions
+    .map((item) => {
+      const isWithdrawal = item.type === "withdrawal";
+      const date = item.created_at ? new Date(item.created_at).toLocaleDateString() : "";
+      return `<div class="transaction-row${isWithdrawal ? " is-debit" : ""}"><span>${isWithdrawal ? "↑" : "↓"}</span><div><strong>${escapeHtml(item.type)}</strong><small>${escapeHtml(date)}</small></div><em>${isWithdrawal ? "-" : "+"}${formatCurrency(item.amount)}<small>${escapeHtml(item.status)}</small></em></div>`;
+    })
+    .join("");
+}
+
 function canEditManagedUsers() {
   return currentSession?.user?.role === "admin";
 }
@@ -32,6 +185,7 @@ function clearSession() {
 }
 
 function updateRoleAccess() {
+  renderAccountSummary();
   const allowed = canManageUsers();
   const editable = canEditManagedUsers();
   document.querySelectorAll('[data-section="users"]').forEach((item) => {
@@ -100,7 +254,9 @@ function moveSection(id) {
   if (id === "users" && !canManageUsers()) id = "dashboard";
   navItems.forEach((item) => item.classList.toggle("is-active", item.dataset.section === id));
   sections.forEach((section) => section.classList.toggle("is-active", section.id === id));
-  if (sectionTitle) {
+  if (id === "dashboard") {
+    renderDashboardGreeting();
+  } else if (sectionTitle) {
     sectionTitle.textContent = getNavLabel(navItems.find((item) => item.dataset.section === id)) || "Home";
   }
   if (id === "users" && canManageUsers()) {
@@ -353,7 +509,7 @@ function showHomeView() {
 
 function enterWorkspace(session = null) {
   if (session) saveSession(session);
-  else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital" } });
+  else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital", balance: 10000 } });
   homeView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
@@ -415,28 +571,19 @@ document.querySelector("#refreshDashboard").addEventListener("click", () => {
 
 document.querySelector("#copyReferralCode")?.addEventListener("click", async (event) => {
   const button = event.currentTarget;
+  const code = currentSession?.user?.referralCode || document.querySelector("#dashboardUid")?.textContent || "";
   try {
-    await navigator.clipboard.writeText("42686700");
+    await navigator.clipboard.writeText(code);
     button.textContent = "✓ Copied";
   } catch {
-    button.textContent = "42686700";
+    button.textContent = code;
   }
   setTimeout(() => {
     button.textContent = "▣ Copy";
   }, 1200);
 });
 
-const invitedFriends = [
-  { name: "harsha.trader@gmail.com", date: "Joined Jul 07, 2026", status: "Active", initial: "H", positive: true },
-  { name: "kkollu99@gmail.com", date: "Joined Sep 16, 2026", status: "Verified", initial: "K", positive: true },
-  { name: "sai.capital@gmail.com", date: "Invite sent", status: "Pending", initial: "S" },
-  { name: "arjun.metals@gmail.com", date: "Joined Sep 18, 2026", status: "Active", initial: "A", positive: true },
-  { name: "meera.trade@gmail.com", date: "Joined Sep 19, 2026", status: "Verified", initial: "M", positive: true },
-  { name: "vijayfx@gmail.com", date: "Invite sent", status: "Pending", initial: "V" },
-  { name: "neha.capital@gmail.com", date: "Joined Sep 20, 2026", status: "Active", initial: "N", positive: true },
-  { name: "rohit.gold@gmail.com", date: "Invite opened", status: "Pending", initial: "R" },
-  { name: "diya.market@gmail.com", date: "Joined Sep 20, 2026", status: "Verified", initial: "D", positive: true },
-];
+let invitedFriends = [];
 
 const invitedFriendsPageSize = 4;
 let invitedFriendsPage = 1;
@@ -1073,7 +1220,6 @@ const tradeTicketCopy = {
     lot: "1 Lots = 1 BTCUSD",
     fee: "0.064000",
     margin: "6.400000",
-    balance: "389201.37",
   },
   futures: {
     note: "Futures order · BTCUSD perpetual",
@@ -1081,7 +1227,6 @@ const tradeTicketCopy = {
     lot: "1 Lots = 1 BTCUSD Perp",
     fee: "0.128000",
     margin: "12.800000",
-    balance: "389201.37",
   },
 };
 
@@ -1096,7 +1241,7 @@ function renderTradeTicket() {
   document.querySelector("#ticketLotValue").textContent = `1 Lots = 1 ${symbol}${tradeTicketState.kind === "futures" ? " Perp" : ""}`;
   document.querySelector("#ticketFeeValue").textContent = ticket.fee;
   document.querySelector("#ticketMarginValue").textContent = ticket.margin;
-  document.querySelector("#ticketBalanceValue").textContent = ticket.balance;
+  document.querySelector("#ticketBalanceValue").textContent = Number(currentSession?.user?.balance || 0).toFixed(2);
   document.querySelector("#ticketModeTitle").textContent = isPending ? "Pending Orders" : "Market Price";
   document.querySelector("#pendingOrderFields").classList.toggle("is-hidden", !isPending);
   document.querySelector("#buyOrderButton").textContent = isPending ? "Place Buy" : "Buy";

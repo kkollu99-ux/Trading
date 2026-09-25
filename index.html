@@ -291,7 +291,7 @@
             </span>
           </label>
           <label>
-            Referral Code
+            Referral Code <span class="field-optional">(Optional)</span>
             <input name="referral" type="text" placeholder="ENTER REFERRAL CODE" />
           </label>
           <p id="registerError" class="form-error" aria-live="polite"></p>
@@ -328,7 +328,7 @@
         </div>
         <div class="topbar-actions client-actions">
           <input id="globalSearch" class="visually-hidden" type="search" aria-label="Search" />
-          <button class="wallet-button" type="button">▣ $389,201.37</button>
+          <button class="wallet-button" id="walletBalance" type="button">▣ $0.00</button>
           <button class="icon-button sun-button" type="button" aria-label="Light mode">☼</button>
           <button id="signOut" class="icon-button" type="button" aria-label="Sign out">⇱</button>
         </div>
@@ -355,24 +355,24 @@
           <div class="client-dashboard">
             <div class="client-greeting">
               <div>
-                <h2 id="sectionTitle">Good Evening, <strong>harilalharsha23</strong> 👋</h2>
-                <p>Wednesday, September 16</p>
-                <span class="uid-pill">UID <strong>42686700</strong></span>
+                <h2 id="sectionTitle">Good Evening, <strong>Guest</strong> 👋</h2>
+                <p id="dashboardDateLabel">Wednesday, September 16</p>
+                <span class="uid-pill">UID <strong id="dashboardUid">—</strong></span>
               </div>
-              <button class="client-avatar" type="button" aria-label="Client profile">H</button>
+              <button class="client-avatar" id="dashboardAvatar" type="button" aria-label="Client profile">G</button>
             </div>
 
             <article class="balance-panel">
               <span class="balance-label">▣ Account Balance</span>
-              <strong>$374,777.54</strong>
+              <strong id="dashboardBalance">$0.00</strong>
               <div class="profit-strip loss">
                 <span>↘ Today's P&amp;L</span>
-                <strong>$118293.54 (-31.56%)</strong>
+                <strong id="dashboardPnl">$0.00 (0.00%)</strong>
               </div>
               <div class="balance-grid">
-                <div><span>Total Equity</span><strong>$256,484.00</strong></div>
-                <div><span>Available Margin</span><strong class="positive">$256,484.00</strong></div>
-                <div><span>Margin Used</span><strong class="gold-text">$0.00</strong></div>
+                <div><span>Total Equity</span><strong id="dashboardEquity">$0.00</strong></div>
+                <div><span>Available Margin</span><strong id="dashboardAvailableMargin" class="positive">$0.00</strong></div>
+                <div><span>Margin Used</span><strong id="dashboardMarginUsed" class="gold-text">$0.00</strong></div>
               </div>
             </article>
 
@@ -793,14 +793,14 @@
               <article class="clone-card">
                 <h3>Profile Information</h3>
                 <div class="clone-list">
-                  <div class="clone-info-row"><span>♙</span><div><small>Full Name</small><strong><em>Not set</em></strong></div><button type="button">✎</button></div>
-                  <div class="clone-info-row"><span>✉</span><div><small>Email</small><strong>harilalharsha23@gmail.com</strong></div><button type="button">▣</button></div>
-                  <div class="clone-info-row"><span>#</span><div><small>Account ID</small><strong class="mono">42686700</strong></div><button type="button">▣</button></div>
-                  <div class="clone-info-row"><span>✓</span><div><small>KYC Status</small><strong class="positive">Verified ✓</strong></div></div>
+                  <div class="clone-info-row"><span>♙</span><div><small>Full Name</small><strong id="profileFullName"><em>Not set</em></strong></div><button type="button">✎</button></div>
+                  <div class="clone-info-row"><span>✉</span><div><small>Email</small><strong id="profileEmail">—</strong></div><button type="button">▣</button></div>
+                  <div class="clone-info-row"><span>#</span><div><small>Account ID</small><strong class="mono" id="profileAccountId">—</strong></div><button type="button">▣</button></div>
+                  <div class="clone-info-row"><span>✓</span><div><small>KYC Status</small><strong id="profileKycStatus">Pending</strong></div></div>
                 </div>
               </article>
               <article class="clone-card account-balance-row">
-                <div><small>Account Balance</small><strong>$389,201.37</strong></div>
+                <div><small>Account Balance</small><strong id="profileBalance">$0.00</strong></div>
                 <div class="wallet-actions">
                   <button class="deposit-btn" type="button" data-chat-topic="deposit">↓ Deposit</button>
                   <button class="withdraw-btn" type="button" data-chat-topic="withdrawal">↑ Withdraw</button>
@@ -808,12 +808,12 @@
               </article>
               <article class="clone-card">
                 <h3>⟳ Transaction History</h3>
-                <div class="transaction-row"><span>↓</span><div><strong>deposit</strong><small>7/7/2026</small></div><em>+$256,484.00<small>approved</small></em></div>
+                <div id="transactionHistoryList"><div class="transaction-empty-state">No transactions yet.</div></div>
               </article>
               <article class="clone-card">
                 <h3>♙ Invited Friends</h3>
                 <div class="referral-summary-row">
-                  <div><small>Your Referral Code</small><strong>42686700</strong></div>
+                  <div><small>Your Referral Code</small><strong id="profileReferralCode">—</strong></div>
                   <div><small>Total Invited</small><strong id="invitedFriendsTotal">0</strong></div>
                   <button id="copyReferralCode" type="button">▣ Copy</button>
                 </div>
@@ -828,7 +828,7 @@
                 <div class="clone-list service-list clone-service-list">
                   <button type="button" data-chat-topic="deposit"><span class="green">↓</span><div><strong>Deposit Funds</strong><small>Fund your trading account</small></div><i>›</i></button>
                   <button type="button" data-chat-topic="withdrawal"><span>↑</span><div><strong>Withdraw Funds</strong><small>Request a withdrawal</small></div><i>›</i></button>
-                  <button type="button" data-chat-topic="verification"><span class="green">◈</span><div><strong>Identity Verification (KYC) <b>Verified ✓</b></strong><small>Verification complete</small></div><i>›</i></button>
+                  <button type="button" data-chat-topic="verification"><span class="green">◈</span><div><strong>Identity Verification (KYC) <b id="profileKycBadge">Pending</b></strong><small>Verification complete</small></div><i>›</i></button>
                   <button type="button"><span class="purple">▥</span><div><strong>Add Bank Account</strong><small>Link a bank for withdrawals</small></div><i>›</i></button>
                 </div>
               </article>

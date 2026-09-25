@@ -780,6 +780,12 @@ select:focus {
   color: var(--blue);
 }
 
+.field-optional {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.85em;
+}
+
 .form-error {
   min-height: 1.25rem;
   margin: -0.35rem 0;
@@ -3651,6 +3657,22 @@ input[type="checkbox"] {
   font-style: normal;
   font-size: 0.76rem;
   font-weight: 1000;
+}
+
+.transaction-row.is-debit > span {
+  background: rgba(232, 61, 48, 0.14);
+  color: var(--red);
+}
+
+.transaction-row.is-debit em {
+  color: var(--red);
+}
+
+.transaction-empty-state {
+  padding: 1rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 .referral-summary-row {
