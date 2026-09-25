@@ -1093,6 +1093,7 @@ const liveCandleSymbols = new Set(["XAU/USD"]);
 
 const defaultTradeViewCount = 62;
 const minTradeViewCount = 12;
+const tradeChartMargins = { left: 12, top: 18, right: 64, bottom: 66 };
 
 const tradeChartState = {
   symbol: "XAUUSD",
@@ -1109,6 +1110,7 @@ const tradeChartState = {
   liveBid: null,
   liveAsk: null,
   slideAnim: null,
+  hover: null,
 };
 
 function resetTradeChartView() {
@@ -1186,9 +1188,10 @@ function setTradeText(selector, text) {
   if (element) element.textContent = text;
 }
 
-function syncTradeTerminal() {
+function syncTradeTerminal(ohlcCandle) {
   const latest = tradeChartState.candles.at(-1);
   if (!latest) return;
+  const ohlc = ohlcCandle || latest;
   const bid = tradeChartState.liveBid ?? latest.close - Math.max(latest.close * 0.00000016, 0.01);
   const ask = tradeChartState.liveAsk ?? latest.close + Math.max(latest.close * 0.00000016, 0.01);
   const move = latest.close - tradeChartState.price;
@@ -1198,10 +1201,13 @@ function syncTradeTerminal() {
   setTradeText("#tradeSymbolCategory", tradeChartState.category[0] + tradeChartState.category.slice(1).toLowerCase());
   setTradeText("#tradeSymbolPrice", formatTradeNumber(latest.close));
   setTradeText("#tradeSymbolChange", moveText);
-  setTradeText("#tradeOpenValue", formatTradeNumber(latest.open));
-  setTradeText("#tradeHighValue", formatTradeNumber(latest.high));
-  setTradeText("#tradeLowValue", formatTradeNumber(latest.low));
-  setTradeText("#tradeCloseValue", formatTradeNumber(latest.close));
+  // The O/H/L/C readout follows whatever candle is under the cursor (hover
+  // inspection); everything else (price, bid/ask, spread) always reflects the
+  // true live candle regardless of what's being hovered.
+  setTradeText("#tradeOpenValue", formatTradeNumber(ohlc.open));
+  setTradeText("#tradeHighValue", formatTradeNumber(ohlc.high));
+  setTradeText("#tradeLowValue", formatTradeNumber(ohlc.low));
+  setTradeText("#tradeCloseValue", formatTradeNumber(ohlc.close));
   setTradeText("#tradeBidValue", formatTradeNumber(bid));
   setTradeText("#tradeAskValue", formatTradeNumber(ask));
   setTradeText("#tradeSpreadValue", formatTradeNumber(ask - bid));
@@ -1243,7 +1249,7 @@ function renderTradeCandles() {
   tradeChartState.viewOffset = viewOffset;
   const viewEnd = total - viewOffset;
   const candles = tradeChartState.candles.slice(Math.max(0, viewEnd - viewCount), viewEnd);
-  const chart = { left: 12, top: 18, right: 64, bottom: 66 };
+  const chart = tradeChartMargins;
   const width = rect.width - chart.left - chart.right;
   const height = rect.height - chart.top - chart.bottom;
   const highs = candles.map((candle) => candle.high);
@@ -1327,11 +1333,65 @@ function renderTradeCandles() {
   ctx.stroke();
   ctx.setLineDash([]);
 
+  // Crosshair: hovering a candle shows its own OHLC in the readout above
+  // (instead of the live candle's) and draws a vertical line through it plus
+  // a horizontal line at the cursor's price, with small value tags on each
+  // axis — the "inspect a historical bar" behavior real terminal charts have.
+  let hoverCandle = null;
+  let hoverPriceLabel = null;
+  const hover = tradeChartState.hover;
+  if (hover && candles.length) {
+    const hoverIndex = Math.max(0, Math.min(candles.length - 1, hover.index));
+    hoverCandle = candles[hoverIndex];
+    const hoverX = chart.left + hoverIndex * candleStep + candleStep / 2;
+    const hoverY = Math.max(chart.top, Math.min(chart.top + height, hover.y));
+
+    ctx.setLineDash([2, 3]);
+    ctx.strokeStyle = "rgba(226, 232, 240, 0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(hoverX, chart.top);
+    ctx.lineTo(hoverX, rect.height - chart.bottom + 38);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(chart.left, hoverY);
+    ctx.lineTo(rect.width - chart.right + 8, hoverY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    hoverPriceLabel = { y: hoverY, text: formatTradeNumber(max - ((hoverY - chart.top) / height) * range) };
+
+    const timeLabel = formatChartTime(hoverCandle.time, tradeChartState.timeframe);
+    if (timeLabel) {
+      ctx.font = "11px sans-serif";
+      const timeLabelWidth = ctx.measureText(timeLabel).width + 10;
+      const timeLabelX = Math.min(Math.max(chart.left, hoverX - timeLabelWidth / 2), rect.width - chart.right - timeLabelWidth);
+      ctx.fillStyle = "#3a4152";
+      ctx.fillRect(timeLabelX, rect.height - chart.bottom + 40, timeLabelWidth, 18);
+      ctx.fillStyle = "#e6e9ef";
+      ctx.fillText(timeLabel, timeLabelX + 5, rect.height - chart.bottom + 49);
+    }
+  }
+
   ctx.restore();
+
+  // The hover price tag lives on the right axis, outside the clipped plot
+  // area drawn above, so it's drawn after restore() in unclipped coordinates
+  // (otherwise it'd fall past the clip boundary and never actually paint).
+  if (hoverPriceLabel) {
+    ctx.font = "11px sans-serif";
+    const labelWidth = ctx.measureText(hoverPriceLabel.text).width + 10;
+    ctx.fillStyle = "#3a4152";
+    ctx.fillRect(rect.width - chart.right + 8, hoverPriceLabel.y - 9, labelWidth, 18);
+    ctx.fillStyle = "#e6e9ef";
+    ctx.textBaseline = "middle";
+    ctx.fillText(hoverPriceLabel.text, rect.width - chart.right + 13, hoverPriceLabel.y);
+    ctx.textBaseline = "alphabetic";
+  }
 
   renderPriceScale([min, max]);
   renderTimeScale(candles);
-  syncTradeTerminal();
+  syncTradeTerminal(hoverCandle);
 
   if (tradeChartState.slideAnim) {
     const finished = performance.now() - tradeChartState.slideAnim.startTime >= tradeChartState.slideAnim.duration;
@@ -1388,6 +1448,7 @@ async function loadChartForCurrentSymbol() {
   tradeChartState.liveBid = null;
   tradeChartState.liveAsk = null;
   tradeChartState.slideAnim = null;
+  tradeChartState.hover = null;
   const isLive = liveCandleSymbols.has(tradeChartState.apiSymbol);
   if (!isLive) setStreamStatus(null);
   if (isLive) {
@@ -1620,6 +1681,27 @@ connectPriceStream();
   canvas.addEventListener("mousedown", (event) => beginDrag(event.clientX));
   window.addEventListener("mousemove", (event) => continueDrag(event.clientX));
   window.addEventListener("mouseup", endDrag);
+
+  // Crosshair hover: only while not actively dragging/panning, so the two
+  // don't fight over what the cursor means.
+  canvas.addEventListener("mousemove", (event) => {
+    if (drag) return;
+    const rect = canvas.getBoundingClientRect();
+    const viewCount = tradeChartState.viewCount || defaultTradeViewCount;
+    const width = rect.width - tradeChartMargins.left - tradeChartMargins.right;
+    const candleStep = width / viewCount;
+    if (!candleStep) return;
+    const relX = event.clientX - rect.left;
+    const relY = event.clientY - rect.top;
+    const index = Math.round((relX - tradeChartMargins.left - candleStep / 2) / candleStep);
+    tradeChartState.hover = { index, y: relY };
+    scheduleTradeRender();
+  });
+  canvas.addEventListener("mouseleave", () => {
+    if (!tradeChartState.hover) return;
+    tradeChartState.hover = null;
+    scheduleTradeRender();
+  });
 
   canvas.addEventListener(
     "touchstart",
