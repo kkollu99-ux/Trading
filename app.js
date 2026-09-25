@@ -12,6 +12,70 @@ function canManageUsers() {
   return ["admin", "team"].includes(currentSession?.user?.role);
 }
 
+function formatCurrency(value) {
+  return `$${Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good Morning";
+  if (hour < 18) return "Good Afternoon";
+  return "Good Evening";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+
+function currentDisplayName() {
+  const user = currentSession?.user;
+  return user?.name || user?.email?.split("@")[0] || "Guest";
+}
+
+function renderDashboardGreeting() {
+  if (!sectionTitle) return;
+  sectionTitle.innerHTML = `${getGreeting()}, <strong>${escapeHtml(currentDisplayName())}</strong> 👋`;
+}
+
+function renderAccountSummary() {
+  const user = currentSession?.user;
+  const balance = Number(user?.balance || 0);
+  const uid = user?.referralCode || user?.id || "—";
+  const name = currentDisplayName();
+
+  const dateLabel = document.querySelector("#dashboardDateLabel");
+  if (dateLabel) dateLabel.textContent = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+
+  const uidPill = document.querySelector("#dashboardUid");
+  if (uidPill) uidPill.textContent = uid;
+
+  const avatar = document.querySelector("#dashboardAvatar");
+  if (avatar) avatar.textContent = name.charAt(0).toUpperCase() || "?";
+
+  const balanceValue = document.querySelector("#dashboardBalance");
+  if (balanceValue) balanceValue.textContent = formatCurrency(balance);
+
+  const equityValue = document.querySelector("#dashboardEquity");
+  if (equityValue) equityValue.textContent = formatCurrency(balance);
+
+  const marginValue = document.querySelector("#dashboardAvailableMargin");
+  if (marginValue) marginValue.textContent = formatCurrency(balance);
+
+  const marginUsedValue = document.querySelector("#dashboardMarginUsed");
+  if (marginUsedValue) marginUsedValue.textContent = formatCurrency(0);
+
+  const pnlValue = document.querySelector("#dashboardPnl");
+  if (pnlValue) pnlValue.textContent = `${formatCurrency(0)} (0.00%)`;
+
+  const walletButton = document.querySelector("#walletBalance");
+  if (walletButton) walletButton.textContent = `▣ ${formatCurrency(balance)}`;
+
+  if (document.querySelector("#dashboard")?.classList.contains("is-active")) {
+    renderDashboardGreeting();
+  }
+  if (document.querySelector("#ticketBalanceValue")) renderTradeTicket();
+}
+
 function canEditManagedUsers() {
   return currentSession?.user?.role === "admin";
 }
@@ -32,6 +96,7 @@ function clearSession() {
 }
 
 function updateRoleAccess() {
+  renderAccountSummary();
   const allowed = canManageUsers();
   const editable = canEditManagedUsers();
   document.querySelectorAll('[data-section="users"]').forEach((item) => {
@@ -100,7 +165,9 @@ function moveSection(id) {
   if (id === "users" && !canManageUsers()) id = "dashboard";
   navItems.forEach((item) => item.classList.toggle("is-active", item.dataset.section === id));
   sections.forEach((section) => section.classList.toggle("is-active", section.id === id));
-  if (sectionTitle) {
+  if (id === "dashboard") {
+    renderDashboardGreeting();
+  } else if (sectionTitle) {
     sectionTitle.textContent = getNavLabel(navItems.find((item) => item.dataset.section === id)) || "Home";
   }
   if (id === "users" && canManageUsers()) {
@@ -353,7 +420,7 @@ function showHomeView() {
 
 function enterWorkspace(session = null) {
   if (session) saveSession(session);
-  else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital" } });
+  else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital", balance: 10000 } });
   homeView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
@@ -415,11 +482,12 @@ document.querySelector("#refreshDashboard").addEventListener("click", () => {
 
 document.querySelector("#copyReferralCode")?.addEventListener("click", async (event) => {
   const button = event.currentTarget;
+  const code = currentSession?.user?.referralCode || document.querySelector("#dashboardUid")?.textContent || "";
   try {
-    await navigator.clipboard.writeText("42686700");
+    await navigator.clipboard.writeText(code);
     button.textContent = "✓ Copied";
   } catch {
-    button.textContent = "42686700";
+    button.textContent = code;
   }
   setTimeout(() => {
     button.textContent = "▣ Copy";
@@ -1073,7 +1141,6 @@ const tradeTicketCopy = {
     lot: "1 Lots = 1 BTCUSD",
     fee: "0.064000",
     margin: "6.400000",
-    balance: "389201.37",
   },
   futures: {
     note: "Futures order · BTCUSD perpetual",
@@ -1081,7 +1148,6 @@ const tradeTicketCopy = {
     lot: "1 Lots = 1 BTCUSD Perp",
     fee: "0.128000",
     margin: "12.800000",
-    balance: "389201.37",
   },
 };
 
@@ -1096,7 +1162,7 @@ function renderTradeTicket() {
   document.querySelector("#ticketLotValue").textContent = `1 Lots = 1 ${symbol}${tradeTicketState.kind === "futures" ? " Perp" : ""}`;
   document.querySelector("#ticketFeeValue").textContent = ticket.fee;
   document.querySelector("#ticketMarginValue").textContent = ticket.margin;
-  document.querySelector("#ticketBalanceValue").textContent = ticket.balance;
+  document.querySelector("#ticketBalanceValue").textContent = Number(currentSession?.user?.balance || 0).toFixed(2);
   document.querySelector("#ticketModeTitle").textContent = isPending ? "Pending Orders" : "Market Price";
   document.querySelector("#pendingOrderFields").classList.toggle("is-hidden", !isPending);
   document.querySelector("#buyOrderButton").textContent = isPending ? "Place Buy" : "Buy";

@@ -328,7 +328,7 @@
         </div>
         <div class="topbar-actions client-actions">
           <input id="globalSearch" class="visually-hidden" type="search" aria-label="Search" />
-          <button class="wallet-button" type="button">▣ $389,201.37</button>
+          <button class="wallet-button" id="walletBalance" type="button">▣ $0.00</button>
           <button class="icon-button sun-button" type="button" aria-label="Light mode">☼</button>
           <button id="signOut" class="icon-button" type="button" aria-label="Sign out">⇱</button>
         </div>
@@ -355,24 +355,24 @@
           <div class="client-dashboard">
             <div class="client-greeting">
               <div>
-                <h2 id="sectionTitle">Good Evening, <strong>harilalharsha23</strong> 👋</h2>
-                <p>Wednesday, September 16</p>
-                <span class="uid-pill">UID <strong>42686700</strong></span>
+                <h2 id="sectionTitle">Good Evening, <strong>Guest</strong> 👋</h2>
+                <p id="dashboardDateLabel">Wednesday, September 16</p>
+                <span class="uid-pill">UID <strong id="dashboardUid">—</strong></span>
               </div>
-              <button class="client-avatar" type="button" aria-label="Client profile">H</button>
+              <button class="client-avatar" id="dashboardAvatar" type="button" aria-label="Client profile">G</button>
             </div>
 
             <article class="balance-panel">
               <span class="balance-label">▣ Account Balance</span>
-              <strong>$374,777.54</strong>
+              <strong id="dashboardBalance">$0.00</strong>
               <div class="profit-strip loss">
                 <span>↘ Today's P&amp;L</span>
-                <strong>$118293.54 (-31.56%)</strong>
+                <strong id="dashboardPnl">$0.00 (0.00%)</strong>
               </div>
               <div class="balance-grid">
-                <div><span>Total Equity</span><strong>$256,484.00</strong></div>
-                <div><span>Available Margin</span><strong class="positive">$256,484.00</strong></div>
-                <div><span>Margin Used</span><strong class="gold-text">$0.00</strong></div>
+                <div><span>Total Equity</span><strong id="dashboardEquity">$0.00</strong></div>
+                <div><span>Available Margin</span><strong id="dashboardAvailableMargin" class="positive">$0.00</strong></div>
+                <div><span>Margin Used</span><strong id="dashboardMarginUsed" class="gold-text">$0.00</strong></div>
               </div>
             </article>
 
