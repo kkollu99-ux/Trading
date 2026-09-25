@@ -1188,12 +1188,17 @@ function setTradeText(selector, text) {
   if (element) element.textContent = text;
 }
 
+function getLiveBidAsk(latest) {
+  const bid = tradeChartState.liveBid ?? latest.close - Math.max(latest.close * 0.00000016, 0.01);
+  const ask = tradeChartState.liveAsk ?? latest.close + Math.max(latest.close * 0.00000016, 0.01);
+  return { bid, ask };
+}
+
 function syncTradeTerminal(ohlcCandle) {
   const latest = tradeChartState.candles.at(-1);
   if (!latest) return;
   const ohlc = ohlcCandle || latest;
-  const bid = tradeChartState.liveBid ?? latest.close - Math.max(latest.close * 0.00000016, 0.01);
-  const ask = tradeChartState.liveAsk ?? latest.close + Math.max(latest.close * 0.00000016, 0.01);
+  const { bid, ask } = getLiveBidAsk(latest);
   const move = latest.close - tradeChartState.price;
   const moveText = `${move >= 0 ? "+" : ""}${formatTradeNumber(move)} (${tradeChartState.changePercent >= 0 ? "+" : ""}${tradeChartState.changePercent.toFixed(3)}%)`;
 
@@ -1212,6 +1217,8 @@ function syncTradeTerminal(ohlcCandle) {
   setTradeText("#tradeAskValue", formatTradeNumber(ask));
   setTradeText("#tradeSpreadValue", formatTradeNumber(ask - bid));
   setTradeText("#tradePriceMarker", formatTradeNumber(latest.close));
+  setTradeText("#tradeFloatBidValue", formatTradeNumber(bid));
+  setTradeText("#tradeFloatAskValue", formatTradeNumber(ask));
   setTradeText("#tradeTimeframeLabel", tradeChartState.timeframe);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", tradeChartState.changePercent >= 0);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", tradeChartState.changePercent < 0);
@@ -1325,6 +1332,18 @@ function renderTradeCandles() {
   const priceY = yFor(latest.close);
   const priceMarker = document.querySelector("#tradePriceMarker");
   if (priceMarker) priceMarker.style.top = `${Math.max(chart.top, Math.min(chart.top + height, priceY))}px`;
+
+  // Bid/ask float buttons stack just above/below the price marker. The real
+  // bid/ask spread is usually a fraction of a pixel at typical chart zoom
+  // (a few cents against a chart spanning hundreds of dollars), so anchoring
+  // them at their exact yFor(bid)/yFor(ask) position would draw them right
+  // on top of each other and the price marker — a small fixed offset instead
+  // keeps both readable, matching how MT4/cTrader-style tickets do it.
+  const sellFloat = document.querySelector("#tradeSellFloat");
+  const buyFloat = document.querySelector("#tradeBuyFloat");
+  if (sellFloat) sellFloat.style.top = `${Math.max(chart.top, Math.min(chart.top + height, priceY + 21))}px`;
+  if (buyFloat) buyFloat.style.top = `${Math.max(chart.top, Math.min(chart.top + height, priceY - 21))}px`;
+
   ctx.setLineDash([4, 4]);
   ctx.strokeStyle = "#ffb000";
   ctx.beginPath();
@@ -1499,6 +1518,16 @@ document.querySelector("#toggleWatchPanel")?.addEventListener("click", (event) =
 
 document.querySelector("#toggleOrderTicket")?.addEventListener("click", (event) => {
   toggleTradePanel("ticket", event.currentTarget, "›", "‹", "order ticket");
+});
+
+document.querySelectorAll("#tradeSellFloat, #tradeBuyFloat").forEach((button) => {
+  button.addEventListener("click", () => {
+    const terminal = document.querySelector(".trade-terminal");
+    if (terminal?.classList.contains("is-ticket-collapsed")) {
+      document.querySelector("#toggleOrderTicket")?.click();
+    }
+    document.querySelector(".order-ticket")?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  });
 });
 
 document.querySelectorAll(".timeframes button").forEach((button) => {
