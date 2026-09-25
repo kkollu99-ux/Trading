@@ -618,6 +618,74 @@ app.get("/api/markets/quotes", async (request, response) => {
   response.json({ provider: "mock", symbols, data });
 });
 
+// Historical OHLC candles for the chart. Twelve Data's time_series endpoint is
+// ~1 credit per call regardless of outputsize, so unlike /quote this is cheap enough
+// to fetch on demand (range switch) rather than needing a background poller — but it's
+// still scoped to quoteLiveSymbols (Gold only, for now) and short-cached so a user
+// rapidly clicking between ranges can't spam the upstream API.
+const candleRangeConfig = {
+  "1H": { interval: "1min", outputsize: 70 },
+  "1D": { interval: "15min", outputsize: 70 },
+  "1M": { interval: "1day", outputsize: 40 },
+  "1Y": { interval: "1week", outputsize: 60 },
+};
+const candleCacheTtlMs = Number(process.env.MARKET_DATA_CANDLE_CACHE_TTL_MS || 30000);
+const candleCache = new Map();
+
+app.get("/api/markets/candles", async (request, response) => {
+  const symbol = String(request.query.symbol || "").trim().toUpperCase();
+  const range = String(request.query.range || "1D").trim().toUpperCase();
+  const rangeSpec = candleRangeConfig[range];
+  if (!rangeSpec) return response.status(400).json({ error: "Invalid range. Use 1H, 1D, 1M, or 1Y." });
+  if (!quoteLiveSymbols.includes(symbol)) {
+    return response.status(400).json({ error: "Historical candles are only available for live-enabled symbols right now." });
+  }
+
+  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
+  const key = marketDataApiKey;
+  if (provider !== "twelvedata" || !key) {
+    return response.status(400).json({ error: "Market data provider not configured" });
+  }
+
+  const cacheKey = `${symbol}:${range}`;
+  const cached = candleCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < candleCacheTtlMs) {
+    return response.json({ symbol, range, candles: cached.candles });
+  }
+
+  try {
+    const url = new URL("https://api.twelvedata.com/time_series");
+    url.searchParams.set("symbol", symbol);
+    url.searchParams.set("interval", rangeSpec.interval);
+    url.searchParams.set("outputsize", String(rangeSpec.outputsize));
+    url.searchParams.set("apikey", key);
+    const upstream = await fetch(url);
+    const payload = await upstream.json();
+
+    if (payload?.status === "error" || !Array.isArray(payload?.values)) {
+      if (cached) return response.json({ symbol, range, candles: cached.candles, stale: true });
+      return response.status(502).json({ error: payload?.message || "Market data provider error" });
+    }
+
+    const candles = payload.values
+      .map((point) => ({
+        time: point.datetime,
+        open: Number(point.open),
+        high: Number(point.high),
+        low: Number(point.low),
+        close: Number(point.close),
+        volume: Number(point.volume || 0),
+      }))
+      .reverse();
+
+    candleCache.set(cacheKey, { candles, at: Date.now() });
+    return response.json({ symbol, range, candles });
+  } catch (error) {
+    if (cached) return response.json({ symbol, range, candles: cached.candles, stale: true });
+    return response.status(502).json({ error: error.message || "Market data provider error" });
+  }
+});
+
 app.post("/api/service-requests", requireAuth, attachUser, upload.single("attachment"), async (request, response) => {
   const { type, amount, note } = request.body;
   if (!["deposit", "withdrawal", "kyc"].includes(type)) return response.status(400).json({ error: "Invalid request type" });
