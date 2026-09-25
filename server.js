@@ -10,6 +10,7 @@ const express = require("express");
 const helmet = require("helmet");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const nodemailer = require("nodemailer");
 const { Pool } = require("pg");
 const { WebSocketServer, WebSocket } = require("ws");
 
@@ -435,11 +436,88 @@ app.get("/api/health", (_request, response) => {
   response.json({ ok: true, database: pool ? "postgres" : "memory" });
 });
 
+// Email OTP verification, gating registration. otpStore is in-memory and
+// intentionally not persisted — codes are short-lived (10 min) and losing a
+// pending one on a redeploy just means the user asks for a fresh one, same
+// as it expiring naturally.
+const otpStore = new Map(); // email -> { code, expiresAt, attempts, verified }
+const otpExpiryMs = 10 * 60 * 1000;
+const otpMaxAttempts = 5;
+
+const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+const mailTransport = smtpConfigured
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: Number(process.env.SMTP_PORT) === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    })
+  : null;
+
+// Without SMTP configured (e.g. local dev), the code is logged server-side and
+// handed back in the response instead of emailed, so the flow is still fully
+// testable end to end — the same graceful mock-mode fallback pattern used
+// elsewhere in this file (market data, live streaming) rather than a dead end.
+async function sendOtpEmail(email, code) {
+  if (!mailTransport) {
+    console.log(`[dev] OTP for ${email}: ${code}`);
+    return { devOtp: code };
+  }
+  await mailTransport.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: email,
+    subject: "Your FXCC Capitals verification code",
+    text: `Your verification code is ${code}. It expires in 10 minutes.`,
+    html: `<p>Your FXCC Capitals verification code is:</p><p style="font-size:24px;font-weight:700;letter-spacing:0.2em;">${code}</p><p>It expires in 10 minutes.</p>`,
+  });
+  return {};
+}
+
+app.post("/api/auth/send-otp", async (request, response) => {
+  const email = String(request.body.email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return response.status(400).json({ error: "Enter a valid email address" });
+  if (await findUserByEmail(email)) return response.status(409).json({ error: "Email already registered" });
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  otpStore.set(email, { code, expiresAt: Date.now() + otpExpiryMs, attempts: 0, verified: false });
+
+  try {
+    const extra = await sendOtpEmail(email, code);
+    response.json({ sent: true, ...extra });
+  } catch (error) {
+    otpStore.delete(email);
+    console.warn("Failed to send OTP email:", error.message);
+    response.status(502).json({ error: "Could not send verification email. Try again shortly." });
+  }
+});
+
+app.post("/api/auth/verify-otp", (request, response) => {
+  const email = String(request.body.email || "").trim().toLowerCase();
+  const code = String(request.body.otp || "").trim();
+  const entry = otpStore.get(email);
+  if (!entry) return response.status(400).json({ error: "Request a verification code first" });
+  if (Date.now() > entry.expiresAt) {
+    otpStore.delete(email);
+    return response.status(400).json({ error: "Code expired — request a new one" });
+  }
+  if (entry.attempts >= otpMaxAttempts) {
+    otpStore.delete(email);
+    return response.status(429).json({ error: "Too many attempts — request a new code" });
+  }
+  entry.attempts += 1;
+  if (code !== entry.code) return response.status(400).json({ error: "Incorrect code" });
+  entry.verified = true;
+  response.json({ verified: true });
+});
+
 app.post("/api/auth/register", async (request, response) => {
   const { email, password, name, referralCode } = request.body;
   if (!email || !password) return response.status(400).json({ error: "Email and password are required" });
   if (await findUserByEmail(email)) return response.status(409).json({ error: "Email already registered" });
+  const otpEntry = otpStore.get(String(email).trim().toLowerCase());
+  if (!otpEntry?.verified) return response.status(400).json({ error: "Please verify your email before registering" });
   const user = await createUser({ email, password, name: name || email.split("@")[0], referredBy: referralCode || null });
+  otpStore.delete(String(email).trim().toLowerCase());
   response.status(201).json({ token: signToken(user), user: publicUser(user) });
 });
 
