@@ -780,6 +780,12 @@ select:focus {
   color: var(--blue);
 }
 
+.field-optional {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.85em;
+}
+
 .form-error {
   min-height: 1.25rem;
   margin: -0.35rem 0;
