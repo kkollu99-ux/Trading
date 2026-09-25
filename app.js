@@ -1106,6 +1106,8 @@ const tradeChartState = {
   isLiveChart: false,
   viewCount: defaultTradeViewCount,
   viewOffset: 0,
+  liveBid: null,
+  liveAsk: null,
 };
 
 function resetTradeChartView() {
@@ -1186,8 +1188,8 @@ function setTradeText(selector, text) {
 function syncTradeTerminal() {
   const latest = tradeChartState.candles.at(-1);
   if (!latest) return;
-  const bid = latest.close - Math.max(latest.close * 0.00000016, 0.01);
-  const ask = latest.close + Math.max(latest.close * 0.00000016, 0.01);
+  const bid = tradeChartState.liveBid ?? latest.close - Math.max(latest.close * 0.00000016, 0.01);
+  const ask = tradeChartState.liveAsk ?? latest.close + Math.max(latest.close * 0.00000016, 0.01);
   const move = latest.close - tradeChartState.price;
   const moveText = `${move >= 0 ? "+" : ""}${formatTradeNumber(move)} (${tradeChartState.changePercent >= 0 ? "+" : ""}${tradeChartState.changePercent.toFixed(3)}%)`;
 
@@ -1332,8 +1334,29 @@ async function loadRealCandles(symbol, range) {
   }
 }
 
+function setStreamStatus(state) {
+  const dot = document.querySelector("#tradeStreamStatus");
+  if (!dot) return;
+  dot.classList.remove("is-live", "is-polling", "is-offline");
+  if (state === "live") {
+    dot.classList.add("is-live");
+    dot.title = "Live price stream connected";
+  } else if (state === "polling") {
+    dot.classList.add("is-polling");
+    dot.title = "Polling for price updates";
+  } else if (state === "offline") {
+    dot.classList.add("is-offline");
+    dot.title = "Live feed disconnected";
+  } else {
+    dot.title = "Connecting…";
+  }
+}
+
 async function loadChartForCurrentSymbol() {
+  tradeChartState.liveBid = null;
+  tradeChartState.liveAsk = null;
   const isLive = liveCandleSymbols.has(tradeChartState.apiSymbol);
+  if (!isLive) setStreamStatus(null);
   if (isLive) {
     const loadingToken = candleRequestToken;
     const ok = await loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe);
@@ -1412,6 +1435,113 @@ function panTradeChart(candleDelta) {
   tradeChartState.viewOffset = Math.max(0, Math.min(maxOffset, (tradeChartState.viewOffset || 0) + candleDelta));
   renderTradeCandles();
 }
+
+let tradeRenderQueued = false;
+function scheduleTradeRender() {
+  if (tradeRenderQueued) return;
+  tradeRenderQueued = true;
+  requestAnimationFrame(() => {
+    tradeRenderQueued = false;
+    renderTradeCandles();
+  });
+}
+
+function bucketStartMs(timeMs, timeframe) {
+  const stepMs = (timeframeMinutes[timeframe] || 60) * 60000;
+  return Math.floor(timeMs / stepMs) * stepMs;
+}
+
+// Ticks arrive from the server over /ws (either true Twelve Data stream pushes or
+// its safe-interval fallback poll — applyLiveTick doesn't care which). Each tick
+// either mutates the still-forming candle or, once its timestamp crosses into the
+// next timeframe bucket, opens a new one — mirroring how the real exchange candle
+// would form instead of waiting for the next full REST refresh.
+function applyLiveTick(tick) {
+  if (!tick.symbol || tick.symbol !== tradeChartState.apiSymbol) return;
+  if (!tradeChartState.isLiveChart || !tradeChartState.candles.length) return;
+  if (!document.querySelector("#trade")?.classList.contains("is-active")) return;
+
+  const price = Number(tick.price);
+  if (!Number.isFinite(price)) return;
+
+  setStreamStatus(tick.source === "stream" ? "live" : "polling");
+  if (typeof tick.bid === "number") tradeChartState.liveBid = tick.bid;
+  if (typeof tick.ask === "number") tradeChartState.liveAsk = tick.ask;
+
+  const candles = tradeChartState.candles;
+  const last = candles.at(-1);
+  const tickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
+  const bucketMs = bucketStartMs(tickMs, tradeChartState.timeframe);
+  const lastBucketMs = bucketStartMs(new Date(last.time).getTime(), tradeChartState.timeframe);
+  // viewOffset === 0 means the view is already pinned to the newest candle — keep
+  // it pinned so the chart keeps scrolling forward as new candles land. A user who
+  // has panned back into history (viewOffset > 0) keeps their place instead.
+  const isFollowingLive = (tradeChartState.viewOffset || 0) === 0;
+
+  if (bucketMs > lastBucketMs) {
+    candles.push({
+      time: new Date(bucketMs).toISOString(),
+      open: last.close,
+      high: Math.max(last.close, price),
+      low: Math.min(last.close, price),
+      close: price,
+      volume: 0,
+    });
+    const maxCandles = 600;
+    if (candles.length > maxCandles) candles.splice(0, candles.length - maxCandles);
+    if (isFollowingLive) tradeChartState.viewOffset = 0;
+  } else {
+    last.close = price;
+    last.high = Math.max(last.high, price);
+    last.low = Math.min(last.low, price);
+  }
+
+  scheduleTradeRender();
+}
+
+let priceStreamSocket = null;
+let priceStreamReconnectMs = 2000;
+const priceStreamMaxReconnectMs = 20000;
+
+function connectPriceStream() {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  try {
+    priceStreamSocket = new WebSocket(`${protocol}//${location.host}/ws`);
+  } catch {
+    scheduleStreamReconnect();
+    return;
+  }
+
+  priceStreamSocket.addEventListener("open", () => {
+    priceStreamReconnectMs = 2000;
+  });
+
+  priceStreamSocket.addEventListener("message", (event) => {
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (payload.type === "price-tick") applyLiveTick(payload);
+  });
+
+  priceStreamSocket.addEventListener("close", () => {
+    if (tradeChartState.isLiveChart) setStreamStatus("offline");
+    scheduleStreamReconnect();
+  });
+
+  priceStreamSocket.addEventListener("error", () => {
+    priceStreamSocket?.close();
+  });
+}
+
+function scheduleStreamReconnect() {
+  window.setTimeout(connectPriceStream, priceStreamReconnectMs);
+  priceStreamReconnectMs = Math.min(priceStreamMaxReconnectMs, priceStreamReconnectMs * 1.6);
+}
+
+connectPriceStream();
 
 (function setupTradeChartInteractions() {
   const canvas = document.querySelector("#tradeCandleCanvas");
@@ -1560,15 +1690,24 @@ async function tickLiveCandle() {
   last.close = price;
   last.high = Math.max(last.high, price);
   last.low = Math.min(last.low, price);
+  setStreamStatus("polling");
   renderTradeCandles();
 }
 
 let liveCandleRefreshTick = 0;
 
+function isPriceStreamOpen() {
+  return Boolean(priceStreamSocket && priceStreamSocket.readyState === WebSocket.OPEN);
+}
+
 function tickTradeCandles() {
   if (!tradeChartState.candles.length) return;
   if (tradeChartState.isLiveChart) {
-    tickLiveCandle();
+    // When our own /ws connection is up, the server pushes price ticks (real
+    // stream or its own safe-interval fallback poll) straight to applyLiveTick,
+    // so this REST-based tick would just be a redundant, credit-spending
+    // duplicate. Only fall back to it if that channel is actually down.
+    if (!isPriceStreamOpen()) tickLiveCandle();
     liveCandleRefreshTick += 1;
     if (liveCandleRefreshTick % 40 === 0 && document.querySelector("#trade")?.classList.contains("is-active")) {
       loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe).then((ok) => {

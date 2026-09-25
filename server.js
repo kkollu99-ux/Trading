@@ -11,7 +11,7 @@ const helmet = require("helmet");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const { Pool } = require("pg");
-const { WebSocketServer } = require("ws");
+const { WebSocketServer, WebSocket } = require("ws");
 
 const app = express();
 const server = http.createServer(app);
@@ -584,6 +584,139 @@ async function pollQuotesOnce() {
   }
 }
 
+// Live symbols (Gold, for now) need much snappier updates than the 60s rotation
+// above can give a single symbol its fair share of credits for. Twelve Data's push
+// WebSocket (below) is the real fix — ticks arrive as they happen with no REST
+// credit cost at all — but while that connection is down/unavailable we still want
+// something better than a 60s-stale price, so this dedicated poller refreshes just
+// the live symbols on its own short interval. It's sized to stay under the ~8
+// credit/minute cap even if it's the only thing spending credits: interval_ms =
+// (symbolCount / 7) * 60000, i.e. at most ~7 credits/minute, leaving headroom for
+// on-demand candle fetches.
+const quoteLivePollIntervalMs = Math.max(
+  5000,
+  Number(process.env.MARKET_DATA_LIVE_POLL_INTERVAL_MS) || Math.ceil((Math.max(1, quoteLiveSymbols.length) / 7) * 60000),
+);
+let twelveDataStreamConnected = false;
+
+async function pollLiveQuotesOnce() {
+  if (twelveDataStreamConnected) return; // WS stream already delivering live ticks for free
+  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
+  const key = marketDataApiKey;
+  if (provider !== "twelvedata" || !key || !quoteLiveSymbols.length) return;
+
+  try {
+    const url = new URL("https://api.twelvedata.com/quote");
+    url.searchParams.set("symbol", quoteLiveSymbols.join(","));
+    url.searchParams.set("timezone", "UTC");
+    url.searchParams.set("apikey", key);
+    const upstream = await fetch(url);
+    const data = await upstream.json();
+    if (data?.status === "error") {
+      console.warn("Live quote poll error:", data.message);
+      return;
+    }
+    const quotesBySymbol = quoteLiveSymbols.length === 1 ? { [quoteLiveSymbols[0]]: data } : data;
+    for (const symbol of quoteLiveSymbols) {
+      const quote = quotesBySymbol[symbol];
+      if (!quote) continue;
+      quoteStore.set(symbol, { data: quote, at: Date.now() });
+      const price = Number(quote.close ?? quote.price);
+      if (Number.isFinite(price)) {
+        broadcast({ type: "price-tick", symbol, price, source: "poll", timestamp: new Date().toISOString() });
+      }
+    }
+  } catch (error) {
+    console.warn("Live quote poll failed:", error.message);
+  }
+}
+
+// True push-based streaming: Twelve Data's WebSocket relays ticks the instant they
+// happen, at no REST credit cost, so this is the preferred path whenever the plan
+// supports it. It's proxied here (rather than opened directly from the browser) so
+// the API key never reaches the client, and ticks are fanned out to every connected
+// browser over the app's own /ws channel via broadcast().
+let twelveDataStreamReconnectMs = 2000;
+const twelveDataStreamMaxReconnectMs = 30000;
+let twelveDataStreamReconnectScheduled = false;
+
+function connectTwelveDataStream() {
+  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
+  const key = marketDataApiKey;
+  if (provider !== "twelvedata" || !key || !quoteLiveSymbols.length) return;
+
+  let socket;
+  try {
+    socket = new WebSocket(`wss://ws.twelvedata.com/v1/quotes/price?apikey=${key}`);
+  } catch (error) {
+    console.warn("Twelve Data stream connect failed:", error.message);
+    scheduleStreamReconnect();
+    return;
+  }
+
+  let heartbeat;
+
+  socket.on("open", () => {
+    twelveDataStreamConnected = true;
+    twelveDataStreamReconnectMs = 2000;
+    console.log("Twelve Data live price stream connected for", quoteLiveSymbols.join(", "));
+    socket.send(JSON.stringify({ action: "subscribe", params: { symbols: quoteLiveSymbols.join(",") } }));
+    heartbeat = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ action: "heartbeat" }));
+    }, 10000);
+  });
+
+  socket.on("message", (raw) => {
+    let payload;
+    try {
+      payload = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+    if (payload?.event !== "price" || !payload.symbol) return;
+    const symbol = String(payload.symbol).toUpperCase();
+    if (!quoteLiveSymbols.includes(symbol)) return;
+    const price = Number(payload.price);
+    if (!Number.isFinite(price)) return;
+
+    const existing = quoteStore.get(symbol);
+    quoteStore.set(symbol, {
+      data: { ...(existing?.data || {}), symbol, close: price, price, timestamp: payload.timestamp },
+      at: Date.now(),
+    });
+    broadcast({
+      type: "price-tick",
+      symbol,
+      price,
+      bid: Number.isFinite(Number(payload.bid)) ? Number(payload.bid) : undefined,
+      ask: Number.isFinite(Number(payload.ask)) ? Number(payload.ask) : undefined,
+      source: "stream",
+      timestamp: payload.timestamp ? new Date(payload.timestamp * 1000).toISOString() : new Date().toISOString(),
+    });
+  });
+
+  socket.on("close", () => {
+    twelveDataStreamConnected = false;
+    if (heartbeat) clearInterval(heartbeat);
+    scheduleStreamReconnect();
+  });
+
+  socket.on("error", (error) => {
+    console.warn("Twelve Data stream error:", error.message);
+    twelveDataStreamConnected = false;
+  });
+}
+
+function scheduleStreamReconnect() {
+  if (twelveDataStreamReconnectScheduled) return;
+  twelveDataStreamReconnectScheduled = true;
+  setTimeout(() => {
+    twelveDataStreamReconnectScheduled = false;
+    connectTwelveDataStream();
+  }, twelveDataStreamReconnectMs);
+  twelveDataStreamReconnectMs = Math.min(twelveDataStreamMaxReconnectMs, twelveDataStreamReconnectMs * 2);
+}
+
 app.get("/api/markets/quotes", async (request, response) => {
   const requestedSymbols = String(request.query.symbols || "")
     .split(",")
@@ -743,6 +876,9 @@ seedDefaults()
     });
     pollQuotesOnce();
     setInterval(pollQuotesOnce, quotePollIntervalMs);
+    connectTwelveDataStream();
+    pollLiveQuotesOnce();
+    setInterval(pollLiveQuotesOnce, quoteLivePollIntervalMs);
   })
   .catch((error) => {
     console.error("Failed to start FXCC platform", error);

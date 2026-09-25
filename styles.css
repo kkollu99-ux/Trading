@@ -1948,6 +1948,29 @@ select:focus {
   color: var(--text);
 }
 
+.stream-status {
+  width: 0.55rem !important;
+  height: 0.55rem;
+  padding: 0 !important;
+  border-radius: 50%;
+  background: var(--trade-muted) !important;
+  transition: background-color 0.25s ease;
+}
+
+.stream-status.is-live {
+  background: #25b15f !important;
+  box-shadow: 0 0 0.4rem rgba(37, 177, 95, 0.7);
+}
+
+.stream-status.is-polling {
+  background: #ffb000 !important;
+  box-shadow: 0 0 0.4rem rgba(255, 176, 0, 0.55);
+}
+
+.stream-status.is-offline {
+  background: #e83d30 !important;
+}
+
 .trade-stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) 1.2fr;
