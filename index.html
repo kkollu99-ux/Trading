@@ -426,7 +426,7 @@
           <div class="markets-page">
             <header class="markets-header">
               <h2>Markets</h2>
-              <span>42 instruments</span>
+              <span id="marketsInstrumentCount">Loading…</span>
             </header>
 
             <div class="market-search">
@@ -443,72 +443,34 @@
             </div>
 
             <section class="instrument-group" data-market-group="forex">
-              <h3>◎ Forex <span>28</span><small>Featured</small></h3>
+              <h3>◎ Forex <span id="marketsForexCount">0</span><small>Featured</small></h3>
               <div class="instrument-table">
                 <div class="instrument-head"><span>Symbol</span><span>Price&nbsp;&nbsp;24h</span></div>
-                <div class="instrument-row" data-category="forex" data-symbol="AUDJPY Australian Dollar Japanese Yen"><div><strong>AUDJPY</strong><small>Australian Dollar / Japanese Yen</small></div><em>3112118245.18433 <b class="up">↗ +3195193170.21%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="AUDCAD Australian Dollar Canadian Dollar"><div><strong>AUDCAD</strong><small>Australian Dollar / Canadian Dollar</small></div><em>97035.98986 <b class="up">↗ +1092736.34%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="EURJPY Euro Japanese Yen"><div><strong>EURJPY</strong><small>Euro / Japanese Yen</small></div><em>250.09375 <b class="up">↗ +46.42%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="AUDNZD Australian Dollar New Zealand Dollar"><div><strong>AUDNZD</strong><small>Australian Dollar / New Zealand Dollar</small></div><em>1.29792 <b class="up">↗ +19.62%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="AUDCHF Australian Dollar Swiss Franc"><div><strong>AUDCHF</strong><small>Australian Dollar / Swiss Franc</small></div><em>0.47053 <b class="down">↘ -19.01%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="USDJPY US Dollar Japanese Yen"><div><strong>USDJPY</strong><small>US Dollar / Japanese Yen</small></div><em>183.09697 <b class="up">↗ +10.43%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="GBPUSD British Pound US Dollar"><div><strong>GBPUSD</strong><small>British Pound / US Dollar</small></div><em>1.40468 <b class="up">↗ +10.43%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="AUDUSD Australian Dollar US Dollar"><div><strong>AUDUSD</strong><small>Australian Dollar / US Dollar</small></div><em>0.70288 <b class="up">↗ +8.22%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="GBPJPY British Pound Japanese Yen"><div><strong>GBPJPY</strong><small>British Pound / Japanese Yen</small></div><em>196.84855 <b class="down">↘ -1.63%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="EURAUD Euro Australian Dollar"><div><strong>EURAUD</strong><small>Euro / Australian Dollar</small></div><em>1.67294 <b class="up">↗ +0.54%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="EURUSD Euro US Dollar"><div><strong>EURUSD</strong><small>Euro / US Dollar</small></div><em>1.09021 <b class="up">↗ +0.53%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="CADJPY Canadian Dollar Japanese Yen"><div><strong>CADJPY</strong><small>Canadian Dollar / Japanese Yen</small></div><em>110.06375 <b class="up">↗ +0.33%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="EURCAD Euro Canadian Dollar"><div><strong>EURCAD</strong><small>Euro / Canadian Dollar</small></div><em>1.48160 <b class="up">↗ +0.24%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="GBPAUD British Pound Australian Dollar"><div><strong>GBPAUD</strong><small>British Pound / Australian Dollar</small></div><em>1.94600 <b class="up">↗ +0.10%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="CHFJPY Swiss Franc Japanese Yen"><div><strong>CHFJPY</strong><small>Swiss Franc / Japanese Yen</small></div><em>167.97048 <b class="up">↗ +0.10%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="EURCHF Euro Swiss Franc"><div><strong>EURCHF</strong><small>Euro / Swiss Franc</small></div><em>0.96762 <b class="up">↗ +0.06%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="GBPCAD British Pound Canadian Dollar"><div><strong>GBPCAD</strong><small>British Pound / Canadian Dollar</small></div><em>1.72807 <b class="up">↗ +0.06%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="NZDUSD New Zealand Dollar US Dollar"><div><strong>NZDUSD</strong><small>New Zealand Dollar / US Dollar</small></div><em>0.59836 <b class="up">↗ +0.06%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="NZDCHF New Zealand Dollar Swiss Franc"><div><strong>NZDCHF</strong><small>New Zealand Dollar / Swiss Franc</small></div><em>0.53475 <b class="down">↘ -0.05%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="GBPNZD British Pound New Zealand Dollar"><div><strong>GBPNZD</strong><small>British Pound / New Zealand Dollar</small></div><em>2.10903 <b class="down">↘ -0.05%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="USDCHF US Dollar Swiss Franc"><div><strong>USDCHF</strong><small>US Dollar / Swiss Franc</small></div><em>0.89836 <b class="up">↗ +0.04%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="USDCAD US Dollar Canadian Dollar"><div><strong>USDCAD</strong><small>US Dollar / Canadian Dollar</small></div><em>1.36452 <b class="up">↗ +0.04%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="EURGBP Euro British Pound"><div><strong>EURGBP</strong><small>Euro / British Pound</small></div><em>0.85229 <b class="up">↗ +0.03%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="NZDJPY New Zealand Dollar Japanese Yen"><div><strong>NZDJPY</strong><small>New Zealand Dollar / Japanese Yen</small></div><em>89.77863 <b class="down">↘ -0.02%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="GBPCHF British Pound Swiss Franc"><div><strong>GBPCHF</strong><small>British Pound / Swiss Franc</small></div><em>1.13014 <b class="up">↗ +0.01%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="CADCHF Canadian Dollar Swiss Franc"><div><strong>CADCHF</strong><small>Canadian Dollar / Swiss Franc</small></div><em>0.65406 <b class="up">↗ +0.01%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="EURNZD Euro New Zealand Dollar"><div><strong>EURNZD</strong><small>Euro / New Zealand Dollar</small></div><em>1.80514 <b class="up">↗ +0.01%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="forex" data-symbol="EURNZD Euro New Zealand Dollar"><div><strong>EURNZD</strong><small>Euro / New Zealand Dollar</small></div><em>1.80496 <b class="down">↘ -0.00%</b></em><button type="button">Trade</button></div>
+                <div id="marketsForexRows"></div>
               </div>
             </section>
 
             <section class="instrument-group" data-market-group="crypto">
-              <h3>₿ Crypto <span>5</span></h3>
+              <h3>₿ Crypto <span id="marketsCryptoCount">0</span></h3>
               <div class="instrument-table compact">
                 <div class="instrument-head"><span>Symbol</span><span>Price&nbsp;&nbsp;24h</span></div>
-                <div class="instrument-row" data-category="crypto" data-symbol="BTCUSD Bitcoin US Dollar"><div><strong>BTCUSD</strong><small>Bitcoin / US Dollar</small></div><em>63971.14 <b class="down">↘ -15.56%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="crypto" data-symbol="XRPUSD XRP US Dollar"><div><strong>XRPUSD</strong><small>XRP / US Dollar</small></div><em>1.27 <b class="down">↘ -0.10%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="crypto" data-symbol="ETHUSD Ethereum US Dollar"><div><strong>ETHUSD</strong><small>Ethereum / US Dollar</small></div><em>3418.64 <b class="up">↗ +0.08%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="crypto" data-symbol="SOLUSDC Solana USD Coin"><div><strong>SOLUSDC</strong><small>Solana / USD Coin</small></div><em>97.17 <b class="down">↘ -0.05%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="crypto" data-symbol="BNBUSD BNB US Dollar"><div><strong>BNBUSD</strong><small>BNB / US Dollar</small></div><em>713.04 <b class="down">↘ -0.04%</b></em><button type="button">Trade</button></div>
+                <div id="marketsCryptoRows"></div>
               </div>
             </section>
 
             <section class="instrument-group" data-market-group="stocks">
-              <h3>▥ Stocks <span>4</span></h3>
+              <h3>▥ Stocks <span id="marketsStocksCount">0</span></h3>
               <div class="instrument-table compact">
                 <div class="instrument-head"><span>Symbol</span><span>Price&nbsp;&nbsp;24h</span></div>
-                <div class="instrument-row" data-category="stocks" data-symbol="AAPL Apple Inc"><div><strong>AAPL</strong><small>Apple Inc.</small></div><em>332.80 <b class="down">↘ -0.10%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="stocks" data-symbol="TSLA Tesla Inc"><div><strong>TSLA</strong><small>Tesla Inc.</small></div><em>359.20 <b class="up">↗ +0.05%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="stocks" data-symbol="GOOGL Alphabet Inc"><div><strong>GOOGL</strong><small>Alphabet Inc.</small></div><em>349.52 <b class="up">↗ +0.02%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="stocks" data-symbol="MSFT Microsoft Corporation"><div><strong>MSFT</strong><small>Microsoft Corporation</small></div><em>511.70 <b class="up">↗ +0.01%</b></em><button type="button">Trade</button></div>
+                <div id="marketsStocksRows"></div>
               </div>
             </section>
 
             <section class="instrument-group" data-market-group="commodities">
-              <h3>◈ Commodities <span>5</span></h3>
+              <h3>◈ Commodities <span id="marketsCommoditiesCount">0</span></h3>
               <div class="instrument-table compact">
                 <div class="instrument-head"><span>Symbol</span><span>Price&nbsp;&nbsp;24h</span></div>
-                <div class="instrument-row" data-category="commodities" data-symbol="USOIL Crude Oil WTI"><div><strong>USOIL</strong><small>Crude Oil WTI</small></div><em>17553755537.02 <b class="up">↗ +22447257619.98%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="commodities" data-symbol="XAUUSD Gold US Dollar"><div><strong>XAUUSD</strong><small>Gold / US Dollar</small></div><em>4539.88 <b class="up">↗ +4.36%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="commodities" data-symbol="NATGAS Natural Gas"><div><strong>NATGAS</strong><small>Natural Gas</small></div><em>2.35 <b class="up">↗ +0.10%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="commodities" data-symbol="UKOIL Crude Oil Brent"><div><strong>UKOIL</strong><small>Crude Oil Brent</small></div><em>82.33 <b class="down">↘ -0.09%</b></em><button type="button">Trade</button></div>
-                <div class="instrument-row" data-category="commodities" data-symbol="XAGUSD Silver US Dollar"><div><strong>XAGUSD</strong><small>Silver / US Dollar</small></div><em>30.47 <b class="down">↘ -0.09%</b></em><button type="button">Trade</button></div>
+                <div id="marketsCommoditiesRows"></div>
               </div>
             </section>
           </div>
