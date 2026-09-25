@@ -1638,6 +1638,7 @@ select:focus {
 }
 
 .trade-terminal {
+  position: relative;
   display: grid;
   grid-template-columns: 16rem minmax(0, 1fr) 20rem;
   height: calc(100vh - 3rem);
@@ -1651,6 +1652,86 @@ select:focus {
   min-width: 0;
   border-right: 1px solid var(--trade-border);
   background: var(--trade-panel);
+}
+
+@media (min-width: 1051px) {
+  .trade-terminal {
+    transition: grid-template-columns 0.28s ease;
+  }
+
+  .watch-panel,
+  .order-ticket {
+    transition: opacity 0.2s ease, border-color 0.28s ease;
+  }
+
+  .trade-terminal.is-watch-collapsed {
+    grid-template-columns: 0rem minmax(0, 1fr) 20rem;
+  }
+
+  .trade-terminal.is-watch-collapsed .watch-panel {
+    opacity: 0;
+    pointer-events: none;
+    border-right-color: transparent;
+  }
+
+  .trade-terminal.is-ticket-collapsed {
+    grid-template-columns: 16rem minmax(0, 1fr) 0rem;
+  }
+
+  .trade-terminal.is-ticket-collapsed .order-ticket {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .trade-terminal.is-watch-collapsed.is-ticket-collapsed {
+    grid-template-columns: 0rem minmax(0, 1fr) 0rem;
+  }
+
+  .panel-toggle {
+    position: absolute;
+    top: 50%;
+    z-index: 5;
+    transform: translateY(-50%);
+    width: 1.3rem;
+    height: 2.75rem;
+    border: 1px solid var(--trade-border);
+    border-radius: 0.4rem;
+    background: var(--trade-panel-soft);
+    color: var(--trade-muted);
+    font-size: 0.9rem;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: left 0.28s ease, right 0.28s ease, background 0.15s ease, color 0.15s ease;
+  }
+
+  .panel-toggle:hover {
+    color: var(--text);
+    background: var(--trade-panel);
+  }
+
+  .panel-toggle-left {
+    left: calc(16rem - 0.65rem);
+  }
+
+  .trade-terminal.is-watch-collapsed .panel-toggle-left {
+    left: -0.15rem;
+  }
+
+  .panel-toggle-right {
+    right: calc(20rem - 0.65rem);
+  }
+
+  .trade-terminal.is-ticket-collapsed .panel-toggle-right {
+    right: -0.15rem;
+  }
+}
+
+@media (max-width: 1050px) {
+  .panel-toggle {
+    display: none;
+  }
 }
 
 .watch-panel {
