@@ -451,6 +451,11 @@ const mailTransport = smtpConfigured
       port: Number(process.env.SMTP_PORT || 587),
       secure: Number(process.env.SMTP_PORT) === 465,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      // Some hosts (Railway included) only have IPv4 egress, but SMTP hosts
+      // like Gmail's resolve an IPv6 address first - without forcing IPv4
+      // here the connection attempt fails with ENETUNREACH before it ever
+      // gets to the TLS/auth handshake.
+      family: 4,
     })
   : null;
 
