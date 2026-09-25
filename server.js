@@ -458,17 +458,74 @@ const mailTransport = smtpConfigured
 // handed back in the response instead of emailed, so the flow is still fully
 // testable end to end — the same graceful mock-mode fallback pattern used
 // elsewhere in this file (market data, live streaming) rather than a dead end.
+// Table-based layout with everything inlined - email clients (Outlook and
+// Gmail's own clipping/sanitizing especially) don't reliably support
+// external/embedded <style> blocks, flexbox, grid, or CSS variables, so this
+// deliberately doesn't reuse the app's own stylesheet or brand-mark markup.
+function otpEmailTemplate(code) {
+  const subject = "Your FXCC Capitals verification code";
+  const text = `Your FXCC Capitals verification code is ${code}. It expires in 10 minutes. If you didn't request this, you can safely ignore this email.`;
+  const html = `<!doctype html>
+<html>
+  <body style="margin:0; padding:0; background:#05080f; font-family:Arial, Helvetica, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#05080f; padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px; width:100%; background:#0c1424; border:1px solid #1c2434; border-radius:12px; overflow:hidden;">
+            <tr>
+              <td style="padding:28px 32px 0;">
+                <span style="display:inline-block; font-size:20px; font-weight:900; letter-spacing:0.06em; color:#ffb000;">FXCC</span>
+                <div style="font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:#7b879d; margin-top:2px;">A Broker On Your Side</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:28px 32px 8px; color:#e4e9f1; font-size:16px; font-weight:700;">
+                Verify your email address
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 24px; color:#a7b0c0; font-size:14px; line-height:1.6;">
+                Enter this code to finish creating your FXCC Capitals account. It expires in 10 minutes.
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:0 32px 28px;">
+                <div style="display:inline-block; background:#131722; border:1px solid #ffb000; border-radius:8px; padding:16px 28px; font-size:32px; font-weight:900; letter-spacing:0.35em; color:#ffb000;">
+                  ${code}
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 28px; color:#7b879d; font-size:12px; line-height:1.6; border-top:1px solid #1c2434; padding-top:20px;">
+                If you didn't request this code, you can safely ignore this email — no account will be created without it.
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 32px; background:#080c14; color:#4b5568; font-size:11px; text-align:center;">
+                © ${new Date().getFullYear()} FXCC Capitals. This is an automated message — please don't reply.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+  return { subject, text, html };
+}
+
 async function sendOtpEmail(email, code) {
   if (!mailTransport) {
     console.log(`[dev] OTP for ${email}: ${code}`);
     return { devOtp: code };
   }
+  const { subject, text, html } = otpEmailTemplate(code);
   await mailTransport.sendMail({
     from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to: email,
-    subject: "Your FXCC Capitals verification code",
-    text: `Your verification code is ${code}. It expires in 10 minutes.`,
-    html: `<p>Your FXCC Capitals verification code is:</p><p style="font-size:24px;font-weight:700;letter-spacing:0.2em;">${code}</p><p>It expires in 10 minutes.</p>`,
+    subject,
+    text,
+    html,
   });
   return {};
 }
