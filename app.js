@@ -8,6 +8,24 @@ const sections = [...document.querySelectorAll(".view-section")];
 const apiBase = "";
 let currentSession = null;
 
+// Icon-only sidebar toggle: a single button hides the nav-item text labels
+// and narrows the sidebar column, independent of the responsive breakpoints
+// that already auto-collapse it on tablet widths. Persisted so it survives
+// a refresh.
+function applySidebarCollapsed(collapsed) {
+  document.querySelector(".app-body")?.classList.toggle("is-sidebar-collapsed", collapsed);
+  document.querySelector(".sidebar")?.classList.toggle("is-collapsed", collapsed);
+  document.querySelector("#sidebarCollapseToggle")?.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+}
+
+document.querySelector("#sidebarCollapseToggle")?.addEventListener("click", () => {
+  const collapsed = !document.querySelector(".sidebar")?.classList.contains("is-collapsed");
+  applySidebarCollapsed(collapsed);
+  localStorage.setItem("fxccSidebarCollapsed", String(collapsed));
+});
+
+applySidebarCollapsed(localStorage.getItem("fxccSidebarCollapsed") === "true");
+
 function canManageUsers() {
   return ["admin", "team"].includes(currentSession?.user?.role);
 }
@@ -2101,6 +2119,59 @@ document.querySelector("#toggleWatchPanel")?.addEventListener("click", (event) =
 document.querySelector("#toggleOrderTicket")?.addEventListener("click", (event) => {
   toggleTradePanel("ticket", event.currentTarget, "›", "‹", "order ticket");
 });
+
+// Lets a trader drag either trade-terminal panel's inner edge to resize it
+// (in addition to the existing collapse buttons, which just show/hide it
+// entirely) - width is remembered across visits via localStorage.
+function initPanelResizer(handleSelector, { varName, side, min, max, storageKey }) {
+  const handle = document.querySelector(handleSelector);
+  const terminal = document.querySelector(".trade-terminal");
+  if (!handle || !terminal) return;
+
+  const stored = Number(localStorage.getItem(storageKey));
+  if (Number.isFinite(stored) && stored >= min && stored <= max) {
+    terminal.style.setProperty(varName, `${stored}px`);
+  }
+
+  let dragging = false;
+  let rafToken = null;
+
+  handle.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    handle.classList.add("is-active");
+    terminal.classList.add("is-resizing-panel");
+    handle.setPointerCapture(event.pointerId);
+  });
+
+  handle.addEventListener("pointermove", (event) => {
+    if (!dragging || rafToken) return;
+    rafToken = requestAnimationFrame(() => {
+      rafToken = null;
+      const rect = terminal.getBoundingClientRect();
+      const raw = side === "right" ? rect.right - event.clientX : event.clientX - rect.left;
+      const width = Math.min(max, Math.max(min, raw));
+      terminal.style.setProperty(varName, `${width}px`);
+      renderTradeCandles();
+    });
+  });
+
+  const stopDragging = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove("is-active");
+    terminal.classList.remove("is-resizing-panel");
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    const widthPx = parseFloat(terminal.style.getPropertyValue(varName));
+    if (Number.isFinite(widthPx)) localStorage.setItem(storageKey, widthPx);
+    window.setTimeout(renderTradeCandles, 300);
+  };
+
+  handle.addEventListener("pointerup", stopDragging);
+  handle.addEventListener("pointercancel", stopDragging);
+}
+
+initPanelResizer("#watchResizeHandle", { varName: "--watch-width", side: "left", min: 200, max: 420, storageKey: "fxccWatchPanelWidth" });
+initPanelResizer("#ticketResizeHandle", { varName: "--ticket-width", side: "right", min: 260, max: 460, storageKey: "fxccTicketPanelWidth" });
 
 document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button) => {
   button.addEventListener("click", () => {

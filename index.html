@@ -344,6 +344,9 @@
 
       <div class="app-body">
         <aside class="sidebar">
+          <button id="sidebarCollapseToggle" class="sidebar-collapse-toggle" type="button" aria-label="Collapse sidebar">
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
           <nav class="nav-stack" aria-label="Primary navigation">
             <button class="nav-item is-active" data-section="dashboard" data-label="Home"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="m3 10.5 9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg></span><span class="nav-label">Home</span></button>
             <button class="nav-item" data-section="markets" data-label="Quotes"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M5 20V10"/><path d="M12 20V4"/><path d="M19 20v-7"/></svg></span><span class="nav-label">Quotes</span></button>
@@ -489,6 +492,8 @@
           <div class="trade-terminal">
             <button id="toggleWatchPanel" class="panel-toggle panel-toggle-left" type="button" aria-label="Hide market watch">‹</button>
             <button id="toggleOrderTicket" class="panel-toggle panel-toggle-right" type="button" aria-label="Hide order ticket">›</button>
+            <div id="watchResizeHandle" class="panel-resize-handle panel-resize-handle-left" role="separator" aria-orientation="vertical" aria-label="Resize market watch panel"></div>
+            <div id="ticketResizeHandle" class="panel-resize-handle panel-resize-handle-right" role="separator" aria-orientation="vertical" aria-label="Resize order ticket panel"></div>
             <aside class="watch-panel">
               <h2>Market Watch</h2>
               <div class="watch-search">
