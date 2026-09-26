@@ -444,6 +444,16 @@ const otpStore = new Map(); // email -> { code, expiresAt, attempts, verified }
 const otpExpiryMs = 10 * 60 * 1000;
 const otpMaxAttempts = 5;
 
+// Railway (and most PaaS free/hobby tiers) block outbound SMTP entirely to
+// prevent spam abuse - see https://docs.railway.com/networking/outbound-networking.
+// Their own recommendation, Resend's HTTPS API, isn't subject to that block
+// since it's just a regular HTTPS request, so it's tried first; SMTP (e.g. for
+// a Pro-plan host, or local dev against a real mail server) is a fallback for
+// anyone who's set it up instead, and logging the code server-side is the
+// last resort so the flow is still fully testable with neither configured.
+const resendApiKey = process.env.RESEND_API_KEY || "";
+const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || "";
+
 const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 const mailTransport = smtpConfigured
   ? nodemailer.createTransport({
@@ -459,10 +469,18 @@ const mailTransport = smtpConfigured
     })
   : null;
 
-// Without SMTP configured (e.g. local dev), the code is logged server-side and
-// handed back in the response instead of emailed, so the flow is still fully
-// testable end to end — the same graceful mock-mode fallback pattern used
-// elsewhere in this file (market data, live streaming) rather than a dead end.
+async function sendEmailViaResend({ to, subject, text, html }) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ from: emailFrom, to: [to], subject, text, html }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.message || `Resend API error (${response.status})`);
+}
 // Table-based layout with everything inlined - email clients (Outlook and
 // Gmail's own clipping/sanitizing especially) don't reliably support
 // external/embedded <style> blocks, flexbox, grid, or CSS variables, so this
@@ -520,19 +538,17 @@ function otpEmailTemplate(code) {
 }
 
 async function sendOtpEmail(email, code) {
-  if (!mailTransport) {
-    console.log(`[dev] OTP for ${email}: ${code}`);
-    return { devOtp: code };
-  }
   const { subject, text, html } = otpEmailTemplate(code);
-  await mailTransport.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to: email,
-    subject,
-    text,
-    html,
-  });
-  return {};
+  if (resendApiKey) {
+    await sendEmailViaResend({ to: email, subject, text, html });
+    return {};
+  }
+  if (mailTransport) {
+    await mailTransport.sendMail({ from: emailFrom, to: email, subject, text, html });
+    return {};
+  }
+  console.log(`[dev] OTP for ${email}: ${code}`);
+  return { devOtp: code };
 }
 
 app.post("/api/auth/send-otp", async (request, response) => {
