@@ -2797,10 +2797,11 @@ function hydrateSession() {
   }
   try {
     currentSession = { token, user: JSON.parse(userJson) };
+    enterWorkspace();
   } catch {
     clearSession();
+    updateRoleAccess();
   }
-  updateRoleAccess();
 }
 
 seedMetalData();
