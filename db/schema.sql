@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS orders (
   margin_held NUMERIC(14, 2) NOT NULL,
   fee NUMERIC(14, 2) NOT NULL,
   realized_pnl NUMERIC(14, 2),
+  -- Auto-close thresholds, in floating P&L dollars (not a price level): the
+  -- position is closed the moment floating P&L reaches -stop_loss_amount or
+  -- +take_profit_amount. NULL means that side is not armed.
+  stop_loss_amount NUMERIC(14, 2),
+  take_profit_amount NUMERIC(14, 2),
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('pending', 'open', 'closed')),
   opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   closed_at TIMESTAMPTZ

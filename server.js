@@ -524,13 +524,13 @@ async function listChatMessages(requestId) {
   return memory.chatMessages.filter((message) => message.request_id === requestId);
 }
 
-async function createOrder({ userId, symbol, direction, lots, multiplier, entryPrice, marginHeld, fee }, client = null) {
+async function createOrder({ userId, symbol, direction, lots, multiplier, entryPrice, marginHeld, fee, stopLoss = null, takeProfit = null }, client = null) {
   if (pool) {
     const rows = await query(
-      `INSERT INTO orders (user_id, symbol, direction, lots, multiplier, entry_price, margin_held, fee)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO orders (user_id, symbol, direction, lots, multiplier, entry_price, margin_held, fee, stop_loss_amount, take_profit_amount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [userId, symbol, direction, lots, multiplier, entryPrice, marginHeld, fee],
+      [userId, symbol, direction, lots, multiplier, entryPrice, marginHeld, fee, stopLoss, takeProfit],
       client,
     );
     return rows[0];
@@ -546,6 +546,8 @@ async function createOrder({ userId, symbol, direction, lots, multiplier, entryP
     exit_price: null,
     margin_held: marginHeld,
     fee,
+    stop_loss_amount: stopLoss,
+    take_profit_amount: takeProfit,
     realized_pnl: null,
     status: "open",
     opened_at: new Date().toISOString(),
@@ -575,16 +577,26 @@ async function findOrderById(id) {
   return memory.orders.find((order) => order.id === id) || null;
 }
 
+async function listOpenOrdersWithThresholds() {
+  if (pool) {
+    return query("SELECT * FROM orders WHERE status = 'open' AND (stop_loss_amount IS NOT NULL OR take_profit_amount IS NOT NULL)");
+  }
+  return memory.orders.filter((order) => order.status === "open" && (order.stop_loss_amount != null || order.take_profit_amount != null));
+}
+
+// Conditioned on status = 'open' so two concurrent closers (a manual close
+// racing the SL/TP monitor, say) can't both succeed - the loser's UPDATE
+// matches zero rows and gets null back instead of double-crediting the wallet.
 async function closeOrderRecord(id, { exitPrice, realizedPnl }, client = null) {
   if (pool) {
     const rows = await query(
-      `UPDATE orders SET status = 'closed', exit_price = $2, realized_pnl = $3, closed_at = NOW() WHERE id = $1 RETURNING *`,
+      `UPDATE orders SET status = 'closed', exit_price = $2, realized_pnl = $3, closed_at = NOW() WHERE id = $1 AND status = 'open' RETURNING *`,
       [id, exitPrice, realizedPnl],
       client,
     );
     return rows[0] || null;
   }
-  const order = memory.orders.find((item) => item.id === id);
+  const order = memory.orders.find((item) => item.id === id && item.status === "open");
   if (!order) return null;
   order.status = "closed";
   order.exit_price = exitPrice;
@@ -625,6 +637,8 @@ async function seedDefaults() {
     await query(fs.readFileSync(schemaPath, "utf8"));
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_loss_amount NUMERIC(14, 2)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS take_profit_amount NUMERIC(14, 2)`);
     for (const instrument of defaultInstruments) await seedInstrument(instrument);
   }
 
@@ -1188,6 +1202,13 @@ app.post("/api/orders", requireAuth, attachUser, async (request, response) => {
   const direction = String(request.body.side || request.body.direction || "").toLowerCase();
   const lots = Number(request.body.lots);
   const multiplier = Number(request.body.multiplier) || 100;
+  // Auto-close thresholds are a floating-P&L dollar amount, not a price level
+  // (e.g. stopLoss: 5 closes the position the instant it's down $5) - 0/unset
+  // means that side isn't armed, since a $0 stop-loss would fire immediately.
+  const stopLossRaw = Number(request.body.stopLoss);
+  const takeProfitRaw = Number(request.body.takeProfit);
+  const stopLoss = Number.isFinite(stopLossRaw) && stopLossRaw > 0 ? Math.round(stopLossRaw * 100) / 100 : null;
+  const takeProfit = Number.isFinite(takeProfitRaw) && takeProfitRaw > 0 ? Math.round(takeProfitRaw * 100) / 100 : null;
 
   if (!["buy", "sell"].includes(direction)) return response.status(400).json({ error: "Invalid direction" });
   if (!Number.isFinite(lots) || lots < 0.01 || lots > 100) return response.status(400).json({ error: "Invalid lot size" });
@@ -1214,7 +1235,7 @@ app.post("/api/orders", requireAuth, attachUser, async (request, response) => {
     const marginUsedAfter = Math.round((user.marginUsed + margin) * 100) / 100;
 
     await setUserWallet(user.id, { balance: afterFee, marginUsed: marginUsedAfter }, client);
-    const order = await createOrder({ userId: user.id, symbol, direction, lots, multiplier, entryPrice: price, marginHeld: margin, fee }, client);
+    const order = await createOrder({ userId: user.id, symbol, direction, lots, multiplier, entryPrice: price, marginHeld: margin, fee, stopLoss, takeProfit }, client);
     await insertLedgerEntry({ userId: user.id, type: "margin_hold", amount: -margin, balanceBefore: balanceBeforeMargin, balanceAfter: afterMargin, referenceId: order.id, createdBy: user.id }, client);
     if (fee > 0) {
       await insertLedgerEntry({ userId: user.id, type: "fee", amount: -fee, balanceBefore: afterMargin, balanceAfter: afterFee, referenceId: order.id, createdBy: user.id }, client);
@@ -1239,6 +1260,39 @@ app.get("/api/orders", requireAuth, attachUser, async (request, response) => {
   response.json({ orders: enriched });
 });
 
+// Shared by the manual close endpoint and the SL/TP monitor below, so both
+// paths get the same locked-transaction/ledger guarantees. closedBy is the
+// acting user's id, or null for a system-triggered (SL/TP) close.
+async function closeOrder(order, { closedBy, reason = null }) {
+  const exitPrice = getCurrentPrice(order.symbol);
+  const realizedPnl = floatingPnl(order, exitPrice);
+  const marginHeld = Number(order.margin_held);
+
+  const result = await withUserLock(order.user_id, async (user, client) => {
+    // Closing the order row first (conditioned on status='open') means a
+    // second closer for the same order - a manual close racing this exact
+    // SL/TP sweep - finds it already closed and bails before touching the
+    // wallet, instead of double-crediting margin/P&L.
+    const closedOrder = await closeOrderRecord(order.id, { exitPrice, realizedPnl }, client);
+    if (!closedOrder) return { error: "Order already closed", status: 409 };
+
+    const balanceBeforeRelease = user.balance;
+    const afterRelease = Math.round((balanceBeforeRelease + marginHeld) * 100) / 100;
+    const afterPnl = Math.round((afterRelease + realizedPnl) * 100) / 100;
+    const marginUsedAfter = Math.max(0, Math.round((user.marginUsed - marginHeld) * 100) / 100);
+
+    await setUserWallet(user.id, { balance: afterPnl, marginUsed: marginUsedAfter }, client);
+    await insertLedgerEntry({ userId: user.id, type: "margin_release", amount: marginHeld, balanceBefore: balanceBeforeRelease, balanceAfter: afterRelease, referenceId: order.id, createdBy: closedBy }, client);
+    await insertLedgerEntry({ userId: user.id, type: "trade_pnl", amount: realizedPnl, balanceBefore: afterRelease, balanceAfter: afterPnl, referenceId: order.id, createdBy: closedBy }, client);
+    return { order: closedOrder, balance: afterPnl };
+  });
+
+  if (!result.error) {
+    broadcast({ type: "order.update", order: result.order, userId: order.user_id, balance: result.balance, closedBy, reason });
+  }
+  return { ...result, pnl: result.error ? null : realizedPnl };
+}
+
 app.post("/api/orders/:id/close", requireAuth, attachUser, async (request, response) => {
   const order = await findOrderById(request.params.id);
   if (!order) return response.status(404).json({ error: "Order not found" });
@@ -1247,27 +1301,39 @@ app.post("/api/orders/:id/close", requireAuth, attachUser, async (request, respo
   }
   if (order.status !== "open") return response.status(400).json({ error: "Order already closed" });
 
-  const exitPrice = getCurrentPrice(order.symbol);
-  const realizedPnl = floatingPnl(order, exitPrice);
-  const marginHeld = Number(order.margin_held);
-
-  const result = await withUserLock(order.user_id, async (user, client) => {
-    const balanceBeforeRelease = user.balance;
-    const afterRelease = Math.round((balanceBeforeRelease + marginHeld) * 100) / 100;
-    const afterPnl = Math.round((afterRelease + realizedPnl) * 100) / 100;
-    const marginUsedAfter = Math.max(0, Math.round((user.marginUsed - marginHeld) * 100) / 100);
-
-    await setUserWallet(user.id, { balance: afterPnl, marginUsed: marginUsedAfter }, client);
-    const closedOrder = await closeOrderRecord(order.id, { exitPrice, realizedPnl }, client);
-    await insertLedgerEntry({ userId: user.id, type: "margin_release", amount: marginHeld, balanceBefore: balanceBeforeRelease, balanceAfter: afterRelease, referenceId: order.id, createdBy: request.user.id }, client);
-    await insertLedgerEntry({ userId: user.id, type: "trade_pnl", amount: realizedPnl, balanceBefore: afterRelease, balanceAfter: afterPnl, referenceId: order.id, createdBy: request.user.id }, client);
-    return { order: closedOrder, balance: afterPnl };
-  });
-
+  const result = await closeOrder(order, { closedBy: request.user.id });
   if (result.error) return response.status(result.status || 400).json({ error: result.error });
-  broadcast({ type: "order.update", order: result.order, userId: order.user_id, balance: result.balance });
-  response.json({ order: result.order, balance: result.balance, pnl: realizedPnl });
+  response.json({ order: result.order, balance: result.balance, pnl: result.pnl });
 });
+
+// Sweeps every open order that has a stop-loss or take-profit armed and
+// closes anything whose floating P&L has crossed its threshold. Runs on a
+// plain timer against getCurrentPrice() (cheap in-memory reads off the
+// existing quote store/poller), independent of any single user's requests -
+// so a threshold fires even if that user's browser is closed.
+const stopLossTakeProfitIntervalMs = Number(process.env.SL_TP_CHECK_INTERVAL_MS || 3000);
+
+async function checkStopLossTakeProfit() {
+  const candidates = await listOpenOrdersWithThresholds();
+  for (const order of candidates) {
+    const currentPrice = getCurrentPrice(order.symbol);
+    const pnl = floatingPnl(order, currentPrice);
+    const stopLoss = order.stop_loss_amount != null ? Number(order.stop_loss_amount) : null;
+    const takeProfit = order.take_profit_amount != null ? Number(order.take_profit_amount) : null;
+    const hitStopLoss = stopLoss != null && pnl <= -stopLoss;
+    const hitTakeProfit = takeProfit != null && pnl >= takeProfit;
+    if (!hitStopLoss && !hitTakeProfit) continue;
+    try {
+      await closeOrder(order, { closedBy: null, reason: hitStopLoss ? "stop_loss" : "take_profit" });
+    } catch (error) {
+      console.warn(`SL/TP auto-close failed for order ${order.id}:`, error.message);
+    }
+  }
+}
+
+setInterval(() => {
+  checkStopLossTakeProfit().catch((error) => console.warn("SL/TP sweep failed:", error.message));
+}, stopLossTakeProfitIntervalMs);
 
 app.get("/api/markets/quotes", async (request, response) => {
   const requestedSymbols = String(request.query.symbols || "")
