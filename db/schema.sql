@@ -81,7 +81,35 @@ CREATE TABLE IF NOT EXISTS ledger (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- One row per KYC submission attempt (a user can resubmit after a rejection),
+-- so admin review always sees exactly what the user actually typed/uploaded -
+-- users.kyc_status stays the current summary flag, kept in sync on review.
+CREATE TABLE IF NOT EXISTS kyc_submissions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id),
+  document_type TEXT NOT NULL CHECK (document_type IN ('passport', 'id_card', 'drivers_license')),
+  full_name TEXT NOT NULL,
+  document_number TEXT NOT NULL,
+  address TEXT NOT NULL,
+  document_image_url TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'verified', 'rejected')),
+  reviewed_by UUID REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- One bank account on file per user (upsert-on-submit, not a history log).
+CREATE TABLE IF NOT EXISTS bank_accounts (
+  user_id UUID PRIMARY KEY REFERENCES users(id),
+  bank_name TEXT NOT NULL,
+  account_holder TEXT NOT NULL,
+  account_number TEXT NOT NULL,
+  ifsc_swift TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_service_requests_user_id ON service_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_request_id ON chat_messages(request_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_user_id ON ledger(user_id);
+CREATE INDEX IF NOT EXISTS idx_kyc_submissions_user_id ON kyc_submissions(user_id);
