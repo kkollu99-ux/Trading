@@ -923,6 +923,7 @@ select:focus {
   grid-template-columns: 14rem minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+  transition: grid-template-columns 0.2s ease;
 }
 
 .sidebar {
@@ -932,6 +933,53 @@ select:focus {
   padding: 1rem 0.5rem;
   border-right: 1px solid var(--line);
   background: var(--panel);
+}
+
+.sidebar-collapse-toggle {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  margin: 0 0 0.75rem auto;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--muted);
+  place-items: center;
+  cursor: pointer;
+  transition: transform 0.2s ease, color 0.15s ease;
+}
+
+.sidebar-collapse-toggle:hover {
+  color: var(--blue);
+}
+
+.sidebar-collapse-toggle svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
+}
+
+.sidebar.is-collapsed .sidebar-collapse-toggle {
+  margin: 0 auto 0.75rem;
+  transform: rotate(180deg);
+}
+
+.app-body.is-sidebar-collapsed {
+  grid-template-columns: 4.6rem minmax(0, 1fr);
+}
+
+.sidebar.is-collapsed .nav-label {
+  display: none;
+}
+
+.sidebar.is-collapsed .nav-item {
+  justify-content: center;
+  gap: 0;
+  padding: 0.45rem;
 }
 
 .dashboard-logo {
@@ -1688,13 +1736,26 @@ select:focus {
 }
 
 .trade-terminal {
+  --watch-width: 16rem;
+  --ticket-width: 20rem;
   position: relative;
   display: grid;
-  grid-template-columns: 16rem minmax(0, 1fr) 20rem;
+  grid-template-columns: var(--watch-width) minmax(0, 1fr) var(--ticket-width);
   height: calc(100vh - 3rem);
   min-height: 40rem;
   overflow: hidden;
   background: var(--trade-bg);
+}
+
+.trade-terminal.is-resizing-panel {
+  cursor: col-resize;
+  user-select: none;
+  transition: none;
+}
+
+.trade-terminal.is-resizing-panel .watch-panel,
+.trade-terminal.is-resizing-panel .order-ticket {
+  transition: none;
 }
 
 .watch-panel,
@@ -1762,7 +1823,7 @@ select:focus {
   }
 
   .panel-toggle-left {
-    left: calc(16rem - 1.3rem);
+    left: calc(var(--watch-width) - 1.3rem);
   }
 
   .trade-terminal.is-watch-collapsed .panel-toggle-left {
@@ -1770,11 +1831,52 @@ select:focus {
   }
 
   .panel-toggle-right {
-    right: calc(20rem - 1.3rem);
+    right: calc(var(--ticket-width) - 1.3rem);
   }
 
   .trade-terminal.is-ticket-collapsed .panel-toggle-right {
     right: 0rem;
+  }
+
+  .panel-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 6;
+    width: 0.5rem;
+    cursor: col-resize;
+    background: transparent;
+    touch-action: none;
+  }
+
+  .panel-resize-handle::after {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    background: transparent;
+    content: "";
+    transition: background 0.15s ease;
+  }
+
+  .panel-resize-handle:hover::after,
+  .panel-resize-handle.is-active::after {
+    background: var(--blue);
+  }
+
+  .panel-resize-handle-left {
+    left: calc(var(--watch-width) - 0.25rem);
+  }
+
+  .panel-resize-handle-right {
+    right: calc(var(--ticket-width) - 0.25rem);
+  }
+
+  .trade-terminal.is-watch-collapsed .panel-resize-handle-left,
+  .trade-terminal.is-ticket-collapsed .panel-resize-handle-right {
+    display: none;
   }
 }
 
