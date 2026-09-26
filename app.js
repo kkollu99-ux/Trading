@@ -986,7 +986,11 @@ function orderRowHtml(order, { closable }) {
   const sideClass = order.direction === "buy" ? "buy" : "sell";
   const arrow = order.direction === "buy" ? "↗" : "↘";
   const opened = new Date(order.opened_at).toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-  const info = `<div><strong>${escapeHtml(compactSymbol(order.symbol))}</strong><small><b>${order.direction.toUpperCase()}</b> market · ${Number(order.lots).toFixed(2)} lots</small><small>@ ${Number(order.entry_price).toFixed(4)} · ${escapeHtml(opened)}</small></div>`;
+  const riskParts = [];
+  if (order.stop_loss_amount != null) riskParts.push(`SL -${formatCurrency(order.stop_loss_amount)}`);
+  if (order.take_profit_amount != null) riskParts.push(`TP +${formatCurrency(order.take_profit_amount)}`);
+  const riskLine = riskParts.length ? `<small>${riskParts.join(" · ")}</small>` : "";
+  const info = `<div><strong>${escapeHtml(compactSymbol(order.symbol))}</strong><small><b>${order.direction.toUpperCase()}</b> market · ${Number(order.lots).toFixed(2)} lots</small><small>@ ${Number(order.entry_price).toFixed(4)} · ${escapeHtml(opened)}</small>${riskLine}</div>`;
   if (closable) {
     const pnl = Number(order.floating_pnl || 0);
     const pnlClass = pnl >= 0 ? "" : "muted-result";
@@ -1170,6 +1174,17 @@ function applyIncomingBalanceUpdate(payload) {
 function applyIncomingOrderUpdate(payload) {
   if (!payload || payload.userId !== currentSession?.user?.id) return;
   applyLiveBalance(payload.balance);
+  // reason is only set for a system-triggered SL/TP close (never a manual
+  // one), so this is exactly the case the acting user didn't just cause
+  // themselves and needs telling about.
+  if (payload.reason && payload.order?.status === "closed") {
+    const label = payload.reason === "stop_loss" ? "Stop Loss" : "Take Profit";
+    const pnl = Number(payload.order.realized_pnl || 0);
+    const pnlText = `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}`;
+    const message = `${label} triggered on ${compactSymbol(payload.order.symbol)}. P&L: ${pnlText}.`;
+    setOrdersMessage(message, pnl >= 0 ? "success" : "error");
+    setTicketOrderMessage(message, pnl >= 0 ? "success" : "error");
+  }
   if (document.querySelector("#orders")?.classList.contains("is-active")) loadOrders();
 }
 
@@ -2400,6 +2415,25 @@ function setTicketOrderMessage(message, type = "") {
   element.classList.toggle("is-error", type === "error");
 }
 
+// Reads a risk field (Set Loss/Take Profit) only if its toggle is on - an
+// armed threshold of 0 would fire the instant the position opens, so "off"
+// and "0" both mean "not set" to the backend either way.
+function readRiskThreshold(key) {
+  const toggle = document.querySelector(`[data-risk-toggle="${key}"]`);
+  if (!toggle?.classList.contains("is-on")) return null;
+  const value = Number(document.querySelector(`[data-risk-value="${key}"]`)?.textContent);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function resetRiskControls() {
+  document.querySelectorAll("[data-risk-toggle]").forEach((toggle) => {
+    toggle.classList.remove("is-on");
+    toggle.setAttribute("aria-pressed", "false");
+  });
+  document.querySelectorAll("[data-risk-stepper]").forEach((stepper) => stepper.classList.remove("is-enabled"));
+  document.querySelectorAll("[data-risk-value]").forEach((value) => (value.textContent = "0"));
+}
+
 async function placeOrder(direction) {
   if (!currentSession?.token) {
     setTicketOrderMessage("Sign in to place a real order.", "error");
@@ -2408,19 +2442,22 @@ async function placeOrder(direction) {
   const symbol = tradeChartState.apiSymbol;
   const lots = Number(document.querySelector("#ticketLotsValue")?.textContent) || 0;
   const multiplier = Number(tradeTicketCopy.multiplier) || 100;
+  const stopLoss = readRiskThreshold("loss");
+  const takeProfit = readRiskThreshold("profit");
   const button = document.querySelector(direction === "buy" ? "#buyOrderButton" : "#sellOrderButton");
   if (button) button.disabled = true;
   try {
     const result = await authRequest("/api/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol, side: direction, lots, multiplier }),
+      body: JSON.stringify({ symbol, side: direction, lots, multiplier, stopLoss, takeProfit }),
     });
     applyLiveBalance(result.balance);
     setTicketOrderMessage(
       `${direction === "buy" ? "Bought" : "Sold"} ${lots.toFixed(2)} lots of ${compactSymbol(symbol)} @ ${Number(result.order.entry_price).toFixed(4)}.`,
       "success",
     );
+    resetRiskControls();
     if (document.querySelector("#orders")?.classList.contains("is-active")) loadOrders();
   } catch (error) {
     setTicketOrderMessage(error.message, "error");
