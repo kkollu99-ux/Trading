@@ -630,7 +630,7 @@
                   <button type="button" data-risk-step="profit" data-risk-dir="-1">−</button><strong data-risk-value="profit">0</strong><button type="button" data-risk-step="profit" data-risk-dir="1">+</button>
                 </div>
               </div>
-              <label>Lots (Step: 0.01) <div class="lots-control"><button id="lotsDecrease" type="button">−</button><strong id="ticketLotsValue">0.01</strong><button id="lotsIncrease" type="button">+</button></div></label>
+              <label>Lots (Step: 0.01) <div class="lots-control"><button id="lotsDecrease" type="button">−</button><input id="ticketLotsValue" type="number" inputmode="decimal" min="0.01" step="0.01" value="0.01" /><button id="lotsIncrease" type="button">+</button></div></label>
               <div class="ticket-summary">
                 <span>Each Lots <strong id="ticketLotValue">1 Lots = 1 BTCUSD</strong></span>
                 <span>Estimated Handling Fee <strong id="ticketFeeValue">0.064000</strong></span>
@@ -1046,6 +1046,29 @@
               <p id="userDetailWalletMessage" class="managed-user-message" role="status"></p>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div id="orderConfirmModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-label="Confirm order">
+        <div class="order-confirm-modal">
+          <button id="closeOrderConfirmModal" class="profile-modal-x" type="button" aria-label="Cancel">×</button>
+          <h3 id="orderConfirmTitle">Confirm Buy</h3>
+          <div class="order-confirm-price-row">
+            <span id="orderConfirmSymbol">BTCUSD</span>
+            <strong id="orderConfirmPrice">0.00</strong>
+          </div>
+          <div class="ticket-summary order-confirm-summary">
+            <span>Lots<strong id="orderConfirmLots">0.01</strong></span>
+            <span>Multiplier<strong id="orderConfirmMultiplier">100</strong></span>
+            <span>Estimated Margin<strong id="orderConfirmMargin">0.00</strong></span>
+            <span>Estimated Fee<strong id="orderConfirmFee">0.00</strong></span>
+            <span id="orderConfirmRiskRow" hidden>Risk<strong id="orderConfirmRisk"></strong></span>
+          </div>
+          <div class="trade-actions">
+            <button id="orderConfirmCancel" type="button" class="secondary-action">Cancel</button>
+            <button id="orderConfirmSubmit" type="button" class="buy-button">Confirm Buy</button>
+          </div>
+          <p id="orderConfirmMessage" class="managed-user-message" role="status"></p>
         </div>
       </div>
     </main>

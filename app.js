@@ -197,6 +197,7 @@ function clearSession() {
   localStorage.removeItem("fxccAuthToken");
   localStorage.removeItem("fxccUser");
   localStorage.removeItem("fxccAdminToken");
+  localStorage.removeItem("fxccActiveSection");
   updateRoleAccess();
 }
 
@@ -291,6 +292,7 @@ function moveSection(id) {
   }
   drawCharts();
   renderTradeCandles();
+  localStorage.setItem("fxccActiveSection", id);
 }
 
 function formatPrice(metal) {
@@ -1174,7 +1176,7 @@ function orderRowHtml(order, { closable }) {
   const info = `<div><strong>${escapeHtml(compactSymbol(order.symbol))}</strong><small><b>${order.direction.toUpperCase()}</b> market · ${Number(order.lots).toFixed(2)} lots</small><small>@ ${Number(order.entry_price).toFixed(4)} · ${escapeHtml(opened)}</small>${riskLine}</div>`;
   if (closable) {
     const pnl = Number(order.floating_pnl || 0);
-    const pnlClass = pnl >= 0 ? "" : "muted-result";
+    const pnlClass = pnl >= 0 ? "positive" : "danger-text";
     return `<div class="history-row ${sideClass}" data-open-order="${escapeHtml(order.id)}">
       <span>${arrow}</span>${info}
       <em><strong class="${pnlClass}">${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}</strong><small>margin ${formatCurrency(order.margin_held)}</small></em>
@@ -1182,7 +1184,7 @@ function orderRowHtml(order, { closable }) {
     </div>`;
   }
   const pnl = Number(order.realized_pnl || 0);
-  const pnlClass = pnl >= 0 ? "" : "muted-result";
+  const pnlClass = pnl >= 0 ? "positive" : "danger-text";
   return `<div class="history-row ${sideClass}">
     <span>${arrow}</span>${info}
     <em><strong class="${pnlClass}">${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}</strong><i>closed</i></em>
@@ -2212,6 +2214,8 @@ function applyLiveTick(tick) {
   const price = Number(tick.price);
   if (!Number.isFinite(price)) return;
 
+  updateOrderConfirmLivePrice(tick.symbol, price);
+
   // A stray tick around the open/close boundary shouldn't flip the dot back
   // to live/polling if the market's already known closed for this symbol.
   const isMarketClosed = marketOpenBySymbol.get(tick.symbol) === false;
@@ -2543,7 +2547,7 @@ const orderFeeRate = 0.001;
 function renderTradeTicket() {
   const symbol = tradeChartState.symbol;
   const multiplier = Number(tradeTicketCopy.multiplier) || 100;
-  const lots = Number(document.querySelector("#ticketLotsValue")?.textContent) || 0;
+  const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
   const price = tradeChartState.candles.at(-1)?.close || 0;
   const notional = lots * orderUnitsPerLot * price;
   const margin = multiplier > 0 ? notional / multiplier : 0;
@@ -2578,14 +2582,29 @@ document.querySelectorAll("[data-risk-step]").forEach((button) => {
 
 document.querySelector("#lotsIncrease")?.addEventListener("click", () => {
   const valueEl = document.querySelector("#ticketLotsValue");
-  valueEl.textContent = (Number(valueEl.textContent) + 0.01).toFixed(2);
+  valueEl.value = ((Number(valueEl.value) || 0) + 0.01).toFixed(2);
   renderTradeTicket();
 });
 
 document.querySelector("#lotsDecrease")?.addEventListener("click", () => {
   const valueEl = document.querySelector("#ticketLotsValue");
-  valueEl.textContent = Math.max(0.01, Number(valueEl.textContent) - 0.01).toFixed(2);
+  valueEl.value = Math.max(0.01, (Number(valueEl.value) || 0) - 0.01).toFixed(2);
   renderTradeTicket();
+});
+
+// Typing a value updates the preview live; blur/enter snaps it to a valid,
+// cleanly formatted lot size (matching what the +/- buttons already produce)
+// so a stray "0", empty field, or trailing decimal never reaches placeOrder.
+document.querySelector("#ticketLotsValue")?.addEventListener("input", renderTradeTicket);
+
+document.querySelector("#ticketLotsValue")?.addEventListener("blur", (event) => {
+  const normalized = Math.max(0.01, Number(event.target.value) || 0.01);
+  event.target.value = normalized.toFixed(2);
+  renderTradeTicket();
+});
+
+document.querySelector("#ticketLotsValue")?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") event.target.blur();
 });
 
 function setTicketOrderMessage(message, type = "") {
@@ -2621,12 +2640,14 @@ async function placeOrder(direction) {
     return;
   }
   const symbol = tradeChartState.apiSymbol;
-  const lots = Number(document.querySelector("#ticketLotsValue")?.textContent) || 0;
+  const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
   const multiplier = Number(tradeTicketCopy.multiplier) || 100;
   const stopLoss = readRiskThreshold("loss");
   const takeProfit = readRiskThreshold("profit");
   const button = document.querySelector(direction === "buy" ? "#buyOrderButton" : "#sellOrderButton");
+  const confirmButton = document.querySelector("#orderConfirmSubmit");
   if (button) button.disabled = true;
+  if (confirmButton) confirmButton.disabled = true;
   try {
     const result = await authRequest("/api/orders", {
       method: "POST",
@@ -2640,15 +2661,101 @@ async function placeOrder(direction) {
     );
     resetRiskControls();
     if (document.querySelector("#orders")?.classList.contains("is-active")) loadOrders();
+    closeOrderConfirmModal();
   } catch (error) {
     setTicketOrderMessage(error.message, "error");
+    setOrderConfirmMessage(error.message, "error");
   } finally {
     if (button) button.disabled = false;
+    if (confirmButton) confirmButton.disabled = false;
   }
 }
 
-document.querySelector("#buyOrderButton")?.addEventListener("click", () => placeOrder("buy"));
-document.querySelector("#sellOrderButton")?.addEventListener("click", () => placeOrder("sell"));
+// ---------- Buy/Sell confirmation modal ----------
+// Clicking Buy/Sell no longer submits immediately - it opens this modal with
+// a live-updating price (green on an uptick, red on a downtick, mirroring a
+// candle's gain/loss) plus the same margin/fee preview, and only the modal's
+// own Confirm button actually calls placeOrder.
+let pendingOrderDirection = null;
+
+function setOrderConfirmMessage(message, type = "") {
+  const element = document.querySelector("#orderConfirmMessage");
+  if (!element) return;
+  element.textContent = message;
+  element.classList.toggle("is-success", type === "success");
+  element.classList.toggle("is-error", type === "error");
+}
+
+function openOrderConfirmModal(direction) {
+  const modal = document.querySelector("#orderConfirmModal");
+  if (!modal) return;
+  pendingOrderDirection = direction;
+  const symbol = tradeChartState.symbol;
+  const multiplier = Number(tradeTicketCopy.multiplier) || 100;
+  const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
+  const price = tradeChartState.candles.at(-1)?.close || 0;
+  const notional = lots * orderUnitsPerLot * price;
+  const margin = multiplier > 0 ? notional / multiplier : 0;
+  const fee = margin * orderFeeRate;
+  const stopLoss = readRiskThreshold("loss");
+  const takeProfit = readRiskThreshold("profit");
+
+  document.querySelector("#orderConfirmTitle").textContent = `Confirm ${direction === "buy" ? "Buy" : "Sell"}`;
+  document.querySelector("#orderConfirmSymbol").textContent = compactSymbol(symbol);
+  const priceEl = document.querySelector("#orderConfirmPrice");
+  priceEl.textContent = price.toFixed(4);
+  priceEl.dataset.rawPrice = String(price);
+  priceEl.classList.remove("tick-up", "tick-down");
+  document.querySelector("#orderConfirmLots").textContent = lots.toFixed(2);
+  document.querySelector("#orderConfirmMultiplier").textContent = String(multiplier);
+  document.querySelector("#orderConfirmMargin").textContent = margin.toFixed(6);
+  document.querySelector("#orderConfirmFee").textContent = fee.toFixed(6);
+  const riskRow = document.querySelector("#orderConfirmRiskRow");
+  const riskParts = [];
+  if (stopLoss) riskParts.push(`SL -${formatCurrency(stopLoss)}`);
+  if (takeProfit) riskParts.push(`TP +${formatCurrency(takeProfit)}`);
+  riskRow.hidden = !riskParts.length;
+  if (riskParts.length) document.querySelector("#orderConfirmRisk").textContent = riskParts.join(" · ");
+
+  const submitButton = document.querySelector("#orderConfirmSubmit");
+  submitButton.textContent = `Confirm ${direction === "buy" ? "Buy" : "Sell"}`;
+  submitButton.classList.toggle("buy-button", direction === "buy");
+  submitButton.classList.toggle("sell-button", direction === "sell");
+  setOrderConfirmMessage("");
+  modal.classList.remove("is-hidden");
+}
+
+function closeOrderConfirmModal() {
+  pendingOrderDirection = null;
+  document.querySelector("#orderConfirmModal")?.classList.add("is-hidden");
+}
+
+// Called from applyLiveTick for every price update while this modal is open,
+// so the trader sees the same up-tick/down-tick they'd see on the chart
+// candle before committing to the trade.
+function updateOrderConfirmLivePrice(symbol, price) {
+  const modal = document.querySelector("#orderConfirmModal");
+  if (!modal || modal.classList.contains("is-hidden")) return;
+  if (symbol !== tradeChartState.apiSymbol) return;
+  const priceEl = document.querySelector("#orderConfirmPrice");
+  if (!priceEl) return;
+  const previous = Number(priceEl.dataset.rawPrice) || price;
+  priceEl.textContent = Number(price).toFixed(4);
+  priceEl.dataset.rawPrice = String(price);
+  priceEl.classList.toggle("tick-up", price > previous);
+  priceEl.classList.toggle("tick-down", price < previous);
+}
+
+document.querySelector("#buyOrderButton")?.addEventListener("click", () => openOrderConfirmModal("buy"));
+document.querySelector("#sellOrderButton")?.addEventListener("click", () => openOrderConfirmModal("sell"));
+document.querySelector("#orderConfirmSubmit")?.addEventListener("click", () => {
+  if (pendingOrderDirection) placeOrder(pendingOrderDirection);
+});
+document.querySelector("#orderConfirmCancel")?.addEventListener("click", closeOrderConfirmModal);
+document.querySelector("#closeOrderConfirmModal")?.addEventListener("click", closeOrderConfirmModal);
+document.querySelector("#orderConfirmModal")?.addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) closeOrderConfirmModal();
+});
 
 async function tickLiveCandle() {
   if (!document.querySelector("#trade")?.classList.contains("is-active")) return;
@@ -2662,6 +2769,7 @@ async function tickLiveCandle() {
   last.high = Math.max(last.high, price);
   last.low = Math.min(last.low, price);
   setStreamStatus("polling");
+  updateOrderConfirmLivePrice(tradeChartState.apiSymbol, price);
   renderTradeCandles();
 }
 
@@ -2695,6 +2803,7 @@ function tickTradeCandles() {
   last.low = Math.min(last.low, last.close - Math.abs(delta) * 0.8);
   last.volume = Math.min(180, last.volume + Math.abs(delta / scale) * 9);
   tradeChartState.tick += 1;
+  updateOrderConfirmLivePrice(tradeChartState.apiSymbol, last.close);
 
   if (tradeChartState.tick % 8 === 0) {
     const open = last.close;
@@ -3457,6 +3566,14 @@ function hydrateSession() {
   try {
     currentSession = { token, user: JSON.parse(userJson) };
     enterWorkspace();
+    // A refresh re-parses this static HTML, where #dashboard is marked
+    // is-active by default, so without this every refresh would silently
+    // bounce the user back to the dashboard regardless of what page they
+    // were actually on.
+    const lastSection = localStorage.getItem("fxccActiveSection");
+    if (lastSection && sections.some((section) => section.id === lastSection)) {
+      moveSection(lastSection);
+    }
   } catch {
     clearSession();
     updateRoleAccess();

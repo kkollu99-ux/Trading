@@ -2445,12 +2445,12 @@ select:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: 2.55rem;
+  min-height: 2.1rem;
   border: 0;
   border-radius: 0.5rem;
   background: var(--trade-panel-soft);
   color: var(--text);
-  padding: 0.7rem 0.9rem;
+  padding: 0.45rem 0.75rem;
   text-align: left;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
@@ -2529,6 +2529,28 @@ select:focus {
   color: var(--trade-muted);
   font-size: 1.3rem;
   font-weight: 900;
+}
+
+.lots-control input {
+  width: 4.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.lots-control input::-webkit-outer-spin-button,
+.lots-control input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.lots-control input[type="number"] {
+  -moz-appearance: textfield;
 }
 
 .lots-control {
@@ -3822,12 +3844,15 @@ input[type="checkbox"] {
 }
 
 .history-row em strong {
-  color: #34d399;
   font-size: 0.86rem;
 }
 
-.history-row em .muted-result {
-  color: var(--muted);
+.history-row em strong.positive {
+  color: var(--green);
+}
+
+.history-row em strong.danger-text {
+  color: var(--red);
 }
 
 .history-row em i {
@@ -4579,6 +4604,81 @@ input[type="checkbox"] {
   margin: 0;
   color: var(--text);
   font-weight: 700;
+}
+
+/* ---------- Order confirm modal ---------- */
+
+.order-confirm-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  width: min(24rem, 100%);
+  border: 1px solid var(--trade-border);
+  border-radius: 0.75rem;
+  background: var(--trade-panel);
+  padding: 1.5rem 1.25rem 1.25rem;
+  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.45);
+}
+
+.order-confirm-modal h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.order-confirm-price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-radius: 0.5rem;
+  background: var(--trade-panel-soft);
+  padding: 0.75rem 0.9rem;
+}
+
+.order-confirm-price-row span {
+  color: var(--trade-muted);
+  font-weight: 800;
+}
+
+.order-confirm-price-row strong {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  font-weight: 900;
+  transition: color 0.15s ease;
+}
+
+.order-confirm-price-row strong.tick-up {
+  color: var(--green);
+}
+
+.order-confirm-price-row strong.tick-down {
+  color: var(--red);
+}
+
+.order-confirm-summary {
+  margin-top: 0;
+}
+
+.order-confirm-summary span[hidden] {
+  display: none;
+}
+
+.order-confirm-modal .trade-actions {
+  position: static;
+  border-top: 0;
+  background: transparent;
+  padding-top: 0;
+}
+
+#orderConfirmCancel {
+  min-height: 2.9rem;
+  border: 1px solid var(--trade-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 900;
 }
 
 /* ---------- Admin user-detail modal ---------- */
