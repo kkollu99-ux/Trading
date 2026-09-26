@@ -352,6 +352,7 @@
             <button class="nav-item" data-section="news" data-label="News"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h14a2 2 0 0 1 2 2v12H6a2 2 0 0 1-2-2z"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></span><span class="nav-label">News</span></button>
             <button class="nav-item" data-section="copy" data-label="Copy"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-label">Copy</span></button>
             <button class="nav-item role-restricted-nav" data-section="users" data-label="Users" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6"/><path d="M19 8v6"/></svg></span><span class="nav-label">Users</span></button>
+            <button class="nav-item role-restricted-nav" data-section="products" data-label="Products" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M21 8v8a2 2 0 0 1-1 1.73l-6 3.46a2 2 0 0 1-2 0l-6-3.46A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.73l6-3.46a2 2 0 0 1 2 0l6 3.46A2 2 0 0 1 21 8Z"/><path d="M3.27 6.96 12 12l8.73-5.04"/><path d="M12 22.08V12"/></svg></span><span class="nav-label">Products</span></button>
             <button class="nav-item role-restricted-nav" data-section="requests" data-label="Requests" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><span class="nav-label">Requests</span></button>
             <button class="nav-item" data-section="profile" data-label="Profile"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 10h16"/><path d="M8 15h4"/></svg></span><span class="nav-label">Profile</span></button>
             <button class="nav-item" data-section="service" data-label="Online Service"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M5 13h3v6H5z"/><path d="M16 13h3v6h-3z"/><path d="M19 19a4 4 0 0 1-4 3h-3"/></svg></span><span class="nav-label">Online Service</span></button>
@@ -732,7 +733,7 @@
               <article><span>Verified KYC</span><strong id="managedVerifiedUsers">0</strong></article>
               <article><span>Pending Review</span><strong id="managedPendingUsers">0</strong></article>
             </div>
-            <div class="management-grid clone-management-grid">
+            <div class="management-grid users-management-grid">
               <article class="clone-card managed-form-card">
                 <h3>Create User</h3>
                 <form id="managedUserForm" class="compact-form">
@@ -748,18 +749,6 @@
                   <p id="managedUserMessage" class="managed-user-message" role="status"></p>
                 </form>
               </article>
-              <article class="clone-card managed-instrument-card">
-                <div class="managed-table-head">
-                  <div>
-                    <h3>Trade Controls</h3>
-                    <p>Select which markets users can see and trade in the Trade dashboard.</p>
-                  </div>
-                  <button id="refreshManagedInstruments" class="secondary-action compact-action" type="button">⟳ Sync</button>
-                </div>
-                <div id="managedInstrumentList" class="managed-instrument-list">
-                  <div class="instrument-control-row"><span>Loading instruments...</span></div>
-                </div>
-              </article>
               <article class="clone-card managed-table-card">
                 <div class="managed-table-head">
                   <div>
@@ -773,6 +762,26 @@
                     <thead><tr><th>User</th><th>Role</th><th>Status</th><th>KYC</th><th>Balance</th><th></th></tr></thead>
                     <tbody id="managedUserTable"><tr><td colspan="6">Loading users...</td></tr></tbody>
                   </table>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="products" class="view-section">
+          <div class="user-management-page">
+            <header class="user-management-head">
+              <div>
+                <span>Product Management</span>
+                <h2>Trade Controls</h2>
+                <p>Select which markets users can see and trade in the Trade dashboard.</p>
+              </div>
+              <button id="refreshManagedInstruments" class="secondary-action compact-action" type="button">⟳ Sync</button>
+            </header>
+            <div class="management-grid products-grid">
+              <article class="clone-card managed-instrument-card">
+                <div id="managedInstrumentList" class="managed-instrument-list">
+                  <div class="instrument-control-row"><span>Loading instruments...</span></div>
                 </div>
               </article>
             </div>

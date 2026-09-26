@@ -2806,8 +2806,9 @@ canvas {
   color: var(--blue);
 }
 
-.clone-management-grid {
-  grid-template-columns: minmax(18rem, 0.54fr) minmax(0, 1.46fr);
+.users-management-grid,
+.products-grid {
+  grid-template-columns: 1fr;
 }
 
 .request-detail-card {
@@ -4797,7 +4798,6 @@ input[type="checkbox"] {
     bottom: 5.75rem;
   }
 
-  .clone-management-grid,
   .managed-table-head,
   .managed-instrument-list {
     grid-template-columns: 1fr;
