@@ -638,6 +638,7 @@
                 <span>Estimated Margin <strong id="ticketMarginValue">6.400000</strong></span>
               </div>
               <div class="trade-actions"><button id="buyOrderButton" class="buy-button" type="button">Buy</button><button id="sellOrderButton" class="sell-button" type="button">Sell</button></div>
+              <p id="ticketOrderMessage" class="managed-user-message" role="status"></p>
             </aside>
           </div>
         </section>
@@ -653,9 +654,10 @@
               </div>
             </div>
             <div class="orders-subbar">
-              <p id="ordersTabSummary"><strong>20</strong> orders — tap any row to expand</p>
-              <button class="secondary-action compact-action" type="button">⟳ Refresh</button>
+              <p id="ordersTabSummary"><strong>0</strong> orders</p>
+              <button id="refreshOrders" class="secondary-action compact-action" type="button">⟳ Refresh</button>
             </div>
+            <p id="ordersMessage" class="managed-user-message" role="status"></p>
             <div class="orders-tab-panel clone-history-list" data-orders-panel="positions">
               <div class="orders-empty-state"><span>↔</span><strong>No Open Positions</strong><small>Your active trades will appear here.</small></div>
             </div>
@@ -663,16 +665,7 @@
               <div class="orders-empty-state"><span>⏱</span><strong>No Pending Orders</strong><small>Your limit and stop orders will appear here.</small></div>
             </div>
             <div class="orders-tab-panel clone-history-list is-active" data-orders-panel="history">
-              <div class="history-row sell"><span>↘</span><div><strong>XAUUSD</strong><small><b>SELL</b> market · 20 lots</small><small>@ 4538.97 · Sep 18, 09:02 PM</small></div><em><strong>+$14649.66</strong><small>(+16.14%)</small><i>executed</i></em><button type="button">⋮</button></div>
-              <div class="history-row sell"><span>↘</span><div><strong>XAUUSD</strong><small><b>SELL</b> market · 20 lots</small><small>@ 4538.97 · Sep 18, 09:00 PM</small></div><em><strong class="muted-result">—</strong><i>executed</i></em><button type="button">⋮</button></div>
-              <div class="history-row sell"><span>↘</span><div><strong>XAUUSD</strong><small><b>SELL</b> market · 20 lots</small><small>@ 4540.62 · Sep 18, 08:57 PM</small></div><em><strong>+$13420.18</strong><small>(+14.78%)</small><i>executed</i></em><button type="button">⋮</button></div>
-              <div class="history-row buy"><span>↗</span><div><strong>XAUUSD</strong><small><b>BUY</b> market · 19 lots</small><small>@ 4471.01 · Sep 09, 12:17 PM</small></div><em><strong>+$11951.86</strong><small>(+14.07%)</small><i>executed</i></em><button type="button">⋮</button></div>
-              <div class="history-row buy"><span>↗</span><div><strong>XAUUSD</strong><small><b>BUY</b> market · 19 lots</small><small>@ 4471.01 · Sep 09, 12:13 PM</small></div><em><strong class="muted-result">—</strong><i>executed</i></em><button type="button">⋮</button></div>
-              <div class="history-row buy"><span>↗</span><div><strong>XAUUSD</strong><small><b>BUY</b> market · 20 lots</small><small>@ 4437.25 · Sep 07, 03:00 PM</small></div><em><strong>+$8900.40</strong><small>(+10.03%)</small><i>executed</i></em><button type="button">⋮</button></div>
-              <div class="history-row buy"><span>↗</span><div><strong>XAUUSD</strong><small><b>BUY</b> market · 20 lots</small><small>@ 4437.25 · Sep 07, 02:57 PM</small></div><em><strong class="muted-result">—</strong><i>executed</i></em><button type="button">⋮</button></div>
-              <div class="history-row buy"><span>↗</span><div><strong>XAUUSD</strong><small><b>BUY</b> market · 20 lots</small><small>@ 4133.46 · Aug 06, 07:17 PM</small></div><em><strong>+$14473.46</strong><small>(+17.51%)</small><i>executed</i></em><button type="button">⋮</button></div>
-              <div class="history-row buy"><span>↗</span><div><strong>XAUUSD</strong><small><b>BUY</b> market · 20 lots</small><small>@ 4133.46 · Aug 06, 07:13 PM</small></div><em><strong class="muted-result">—</strong><i>executed</i></em><button type="button">⋮</button></div>
-              <button class="load-more" type="button">Load More</button>
+              <div class="orders-empty-state"><span>🕘</span><strong>No Closed Orders</strong><small>Your closed trades will appear here.</small></div>
             </div>
           </div>
         </section>
@@ -748,7 +741,7 @@
                     <label>Role<select name="role"><option value="user">User</option><option value="team">Team</option><option value="admin">Admin</option></select></label>
                     <label>KYC<select name="kycStatus"><option value="pending">Pending</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select></label>
                   </div>
-                  <label>Balance<input name="balance" type="number" min="0" step="0.01" value="0" /></label>
+                  <p class="managed-user-hint">New accounts start at $0 — use Deposit in the Users table after KYC is verified to fund them.</p>
                   <button class="primary-action" type="submit">Create Account</button>
                   <p id="managedUserMessage" class="managed-user-message" role="status"></p>
                 </form>
