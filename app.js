@@ -188,11 +188,12 @@ function updateRoleAccess() {
   renderAccountSummary();
   const allowed = canManageUsers();
   const editable = canEditManagedUsers();
-  document.querySelectorAll('[data-section="users"], [data-section="requests"]').forEach((item) => {
+  document.querySelectorAll('[data-section="users"], [data-section="products"], [data-section="requests"]').forEach((item) => {
     item.hidden = !allowed;
     item.classList.toggle("is-hidden", !allowed);
   });
   document.querySelector("#users")?.classList.toggle("is-role-hidden", !allowed);
+  document.querySelector("#products")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector(".managed-form-card")?.classList.toggle("is-hidden", allowed && !editable);
   document.querySelector(".managed-instrument-card")?.classList.toggle("is-hidden", !allowed);
 
@@ -202,6 +203,7 @@ function updateRoleAccess() {
     renderManagedUsers();
     renderManagedInstruments();
     if (document.querySelector("#users")?.classList.contains("is-active")) moveSection("dashboard");
+    if (document.querySelector("#products")?.classList.contains("is-active")) moveSection("dashboard");
     if (document.querySelector("#requests")?.classList.contains("is-active")) moveSection("dashboard");
   }
 }
@@ -252,7 +254,7 @@ function getNavLabel(item) {
 }
 
 function moveSection(id) {
-  if ((id === "users" || id === "requests") && !canManageUsers()) id = "dashboard";
+  if ((id === "users" || id === "products" || id === "requests") && !canManageUsers()) id = "dashboard";
   navItems.forEach((item) => item.classList.toggle("is-active", item.dataset.section === id));
   sections.forEach((section) => section.classList.toggle("is-active", section.id === id));
   if (id === "dashboard") {
@@ -262,6 +264,8 @@ function moveSection(id) {
   }
   if (id === "users" && canManageUsers()) {
     loadManagedUsers();
+  }
+  if (id === "products" && canManageUsers()) {
     loadManagedInstruments();
   }
   if (id === "requests" && canManageUsers()) {
