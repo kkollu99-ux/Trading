@@ -113,13 +113,15 @@ function renderAccountSummary() {
   if (profileBalanceValue) profileBalanceValue.textContent = formatCurrency(balance);
 
   const kyc = formatKycStatus(user?.kycStatus);
-  const kycStatusValue = document.querySelector("#profileKycStatus");
-  if (kycStatusValue) {
-    kycStatusValue.textContent = kyc.text;
-    kycStatusValue.className = kyc.className;
-  }
   const kycBadgeValue = document.querySelector("#profileKycBadge");
-  if (kycBadgeValue) kycBadgeValue.textContent = kyc.text;
+  if (kycBadgeValue) {
+    kycBadgeValue.textContent = kyc.text;
+    kycBadgeValue.classList.toggle("is-pending", user?.kycStatus !== "verified" && user?.kycStatus !== "rejected");
+    kycBadgeValue.classList.toggle("is-rejected", user?.kycStatus === "rejected");
+  }
+
+  const avatarInitial = document.querySelector("#profileModalAvatar");
+  if (avatarInitial) avatarInitial.textContent = name.charAt(0).toUpperCase() || "?";
 
   if (document.querySelector("#dashboard")?.classList.contains("is-active")) {
     renderDashboardGreeting();
@@ -284,9 +286,6 @@ function moveSection(id) {
   }
   if (id === "requests" && canManageUsers()) {
     loadServiceRequestsInbox();
-  }
-  if (id === "profile") {
-    loadTransactionHistory();
   }
   if (id === "markets") {
     refreshMarketsQuotes();
@@ -666,6 +665,186 @@ document.querySelector("#nextInvitedFriendsPage")?.addEventListener("click", () 
 });
 renderInvitedFriends();
 
+// ---------- Profile modal ("My Account") ----------
+
+function setPaneMessage(id, message, type = "") {
+  const element = document.querySelector(id);
+  if (!element) return;
+  element.textContent = message;
+  element.classList.toggle("is-success", type === "success");
+  element.classList.toggle("is-error", type === "error");
+}
+
+function switchProfilePane(pane) {
+  document.querySelectorAll("[data-profile-pane]").forEach((button) => button.classList.toggle("is-active", button.dataset.profilePane === pane));
+  document.querySelectorAll("[data-profile-pane-content]").forEach((panel) => panel.classList.toggle("is-active", panel.dataset.profilePaneContent === pane));
+}
+
+function renderKycSubmissionSummary(submission) {
+  const container = document.querySelector("#kycSubmissionSummary");
+  const form = document.querySelector("#kycForm");
+  if (!container) return;
+  if (!submission) {
+    container.innerHTML = "";
+    return;
+  }
+  const kyc = formatKycStatus(submission.status);
+  container.innerHTML = `
+    <div class="kyc-submission-card">
+      <dl>
+        <dt>Status</dt><dd class="${kyc.className}">${kyc.text}</dd>
+        <dt>Document Type</dt><dd>${escapeHtml(submission.document_type.replace("_", " "))}</dd>
+        <dt>Full Name</dt><dd>${escapeHtml(submission.full_name)}</dd>
+        <dt>Document Number</dt><dd>${escapeHtml(submission.document_number)}</dd>
+        <dt>Address</dt><dd>${escapeHtml(submission.address)}</dd>
+        <dt>Submitted</dt><dd>${new Date(submission.submitted_at).toLocaleString()}</dd>
+      </dl>
+      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document" />
+    </div>`;
+  // A verified submission has nothing left to resubmit; pending/rejected can
+  // still resubmit (e.g. to fix a rejected document), so keep the form visible.
+  if (form) form.classList.toggle("is-hidden", submission.status === "verified");
+}
+
+async function loadKycStatus() {
+  const result = await authFetch("/api/kyc/me");
+  renderKycSubmissionSummary(result?.submission || null);
+}
+
+function renderBankAccountSummary(account) {
+  const container = document.querySelector("#bankAccountSummary");
+  const form = document.querySelector("#bankForm");
+  if (!container) return;
+  if (!account) {
+    container.innerHTML = "";
+    return;
+  }
+  const masked = String(account.account_number).replace(/.(?=.{4})/g, "•");
+  container.innerHTML = `
+    <div class="kyc-submission-card">
+      <dl>
+        <dt>Bank</dt><dd>${escapeHtml(account.bank_name)}</dd>
+        <dt>Account Holder</dt><dd>${escapeHtml(account.account_holder)}</dd>
+        <dt>Account Number</dt><dd>${escapeHtml(masked)}</dd>
+        ${account.ifsc_swift ? `<dt>IFSC/SWIFT</dt><dd>${escapeHtml(account.ifsc_swift)}</dd>` : ""}
+      </dl>
+    </div>`;
+  if (form) form.querySelector("button[type=submit]").textContent = "Update Bank Account";
+}
+
+async function loadBankDetails() {
+  const result = await authFetch("/api/bank-details/me");
+  renderBankAccountSummary(result?.account || null);
+}
+
+function openProfileModal() {
+  renderAccountSummary();
+  loadInvitedFriends();
+  loadKycStatus();
+  loadBankDetails();
+  switchProfilePane("kyc");
+  document.querySelector("#profileModal")?.classList.remove("is-hidden");
+}
+
+function closeProfileModal() {
+  document.querySelector("#profileModal")?.classList.add("is-hidden");
+}
+
+document.querySelector("#closeProfileModal")?.addEventListener("click", closeProfileModal);
+document.querySelector("#profileModal")?.addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) closeProfileModal();
+});
+
+document.querySelector("#profileModalMenu")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-profile-pane]");
+  if (button) switchProfilePane(button.dataset.profilePane);
+});
+
+document.querySelector(".profile-modal-content")?.addEventListener("click", (event) => {
+  const gotoButton = event.target.closest("[data-profile-goto]");
+  if (gotoButton) {
+    closeProfileModal();
+    moveSection(gotoButton.dataset.profileGoto);
+    return;
+  }
+  // Deposit/Withdraw buttons already have a generic [data-chat-topic] handler
+  // (bound at page load) that opens the chat - this just also closes the modal.
+  if (event.target.closest("[data-chat-topic]")) closeProfileModal();
+});
+
+document.querySelector("#profileModalSignOut")?.addEventListener("click", () => {
+  closeProfileModal();
+  clearSession();
+  showHomeView();
+});
+
+document.querySelector("#kycForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!currentSession?.token) return;
+  const form = event.target;
+  const formData = new FormData(form);
+  try {
+    const response = await fetch(`${apiBase}/api/kyc/submit`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${currentSession.token}` },
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Submission failed");
+    currentSession.user.kycStatus = data.user.kycStatus;
+    localStorage.setItem("fxccUser", JSON.stringify(currentSession.user));
+    renderAccountSummary();
+    renderKycSubmissionSummary(data.submission);
+    setPaneMessage("#kycFormMessage", "KYC submitted for review.", "success");
+  } catch (error) {
+    setPaneMessage("#kycFormMessage", error.message, "error");
+  }
+});
+
+document.querySelectorAll(".document-option").forEach((option) => {
+  option.addEventListener("click", () => {
+    document.querySelectorAll(".document-option").forEach((item) => item.classList.remove("selected"));
+    option.classList.add("selected");
+  });
+});
+
+document.querySelector("#bankForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  try {
+    const result = await authRequest("/api/bank-details", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    renderBankAccountSummary(result.account);
+    setPaneMessage("#bankFormMessage", "Bank account saved.", "success");
+  } catch (error) {
+    setPaneMessage("#bankFormMessage", error.message, "error");
+  }
+});
+
+document.querySelector("#passwordForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target;
+  const data = Object.fromEntries(new FormData(form).entries());
+  if (data.newPassword !== data.confirmPassword) {
+    setPaneMessage("#passwordFormMessage", "New passwords do not match.", "error");
+    return;
+  }
+  try {
+    await authRequest("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword: data.currentPassword, newPassword: data.newPassword }),
+    });
+    form.reset();
+    setPaneMessage("#passwordFormMessage", "Password updated.", "success");
+  } catch (error) {
+    setPaneMessage("#passwordFormMessage", error.message, "error");
+  }
+});
+
 document.querySelectorAll("#homeLogin, #heroPlatform, #ctaSignin").forEach((button) => {
   button.addEventListener("click", () => showAuthView(loginView));
 });
@@ -841,7 +1020,13 @@ document.querySelector("#registerForm").addEventListener("submit", async (event)
   }
 });
 
-navItems.forEach((item) => item.addEventListener("click", () => moveSection(item.dataset.section)));
+navItems.forEach((item) => item.addEventListener("click", () => {
+  if (item.dataset.section === "profile") {
+    openProfileModal();
+    return;
+  }
+  moveSection(item.dataset.section);
+}));
 
 let marketsInstruments = [];
 
@@ -1156,7 +1341,7 @@ function applyIncomingChatMessage(message) {
 
 function applyIncomingRequestStatus(serviceRequest) {
   if (!serviceRequest || serviceRequest.user_id !== currentSession?.user?.id) return;
-  if (document.querySelector("#profile")?.classList.contains("is-active")) loadTransactionHistory();
+  if (!document.querySelector("#profileModal")?.classList.contains("is-hidden")) loadTransactionHistory();
 }
 
 function applyLiveBalance(balance) {
@@ -2952,6 +3137,201 @@ document.querySelector("#managedUserTable")?.addEventListener("click", async (ev
     setManagedMessage(`${action === "deposit" ? "Deposited" : "Withdrew"} ${formatCurrency(amount)} for ${result.user.email}. New balance: ${formatCurrency(result.user.balance)}.`, "success");
   } catch (error) {
     setManagedMessage(error.message, "error");
+  }
+});
+
+// ---------- Admin user-detail modal ----------
+
+let activeUserDetailId = null;
+
+function renderUserDetailHeader(user) {
+  const avatar = document.querySelector("#userDetailAvatar");
+  if (avatar) avatar.textContent = (user.name || user.email || "?").charAt(0).toUpperCase();
+  setTradeText("#userDetailName", user.name || user.email);
+  setTradeText("#userDetailEmail", user.email);
+  const roleBadge = document.querySelector("#userDetailRoleBadge");
+  if (roleBadge) roleBadge.textContent = user.role;
+  const kyc = formatKycStatus(user.kycStatus);
+  const kycBadge = document.querySelector("#userDetailKycBadge");
+  if (kycBadge) {
+    kycBadge.textContent = kyc.text;
+    kycBadge.classList.toggle("is-pending", user.kycStatus !== "verified" && user.kycStatus !== "rejected");
+    kycBadge.classList.toggle("is-rejected", user.kycStatus === "rejected");
+  }
+}
+
+function renderUserDetailKyc(submission) {
+  const container = document.querySelector("#userDetailKycContent");
+  if (!container) return;
+  if (!submission) {
+    container.innerHTML = `<div class="profile-empty-state"><span>🪪</span><strong>No submission yet</strong><small>This user hasn't submitted KYC documents.</small></div>`;
+    return;
+  }
+  const kyc = formatKycStatus(submission.status);
+  const actions = submission.status === "pending"
+    ? `<div class="request-detail-actions">
+        <button type="button" class="approve-btn" data-kyc-review="verified">Approve</button>
+        <button type="button" class="reject-btn" data-kyc-review="rejected">Reject</button>
+      </div>`
+    : "";
+  container.innerHTML = `
+    <div class="kyc-submission-card">
+      <dl>
+        <dt>Status</dt><dd class="${kyc.className}">${kyc.text}</dd>
+        <dt>Document Type</dt><dd>${escapeHtml(submission.document_type.replace("_", " "))}</dd>
+        <dt>Full Name</dt><dd>${escapeHtml(submission.full_name)}</dd>
+        <dt>Document Number</dt><dd>${escapeHtml(submission.document_number)}</dd>
+        <dt>Address</dt><dd>${escapeHtml(submission.address)}</dd>
+        <dt>Submitted</dt><dd>${new Date(submission.submitted_at).toLocaleString()}</dd>
+      </dl>
+      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document" />
+    </div>
+    ${actions}`;
+}
+
+function renderUserDetailBank(account) {
+  const container = document.querySelector("#userDetailBankContent");
+  if (!container) return;
+  if (!account) {
+    container.innerHTML = `<div class="profile-empty-state"><span>🏦</span><strong>No bank account on file</strong><small>This user hasn't added bank details.</small></div>`;
+    return;
+  }
+  container.innerHTML = `<div class="kyc-submission-card"><dl>
+    <dt>Bank</dt><dd>${escapeHtml(account.bank_name)}</dd>
+    <dt>Account Holder</dt><dd>${escapeHtml(account.account_holder)}</dd>
+    <dt>Account Number</dt><dd>${escapeHtml(account.account_number)}</dd>
+    ${account.ifsc_swift ? `<dt>IFSC/SWIFT</dt><dd>${escapeHtml(account.ifsc_swift)}</dd>` : ""}
+  </dl></div>`;
+}
+
+function renderUserDetailOrders(orders) {
+  const container = document.querySelector("#userDetailOrdersContent");
+  if (!container) return;
+  if (!orders.length) {
+    container.innerHTML = `<div class="profile-empty-state"><span>☰</span><strong>No orders</strong><small>This user hasn't placed any trades.</small></div>`;
+    return;
+  }
+  container.innerHTML = orders.map((order) => orderRowHtml(order, { closable: order.status === "open" })).join("");
+}
+
+function renderUserDetailLedger(entries) {
+  const container = document.querySelector("#userDetailLedgerContent");
+  if (!container) return;
+  if (!entries.length) {
+    container.innerHTML = `<div class="profile-empty-state"><span>▤</span><strong>No ledger entries</strong><small>No balance-changing events yet.</small></div>`;
+    return;
+  }
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Type</th><th>Amount</th><th>Balance After</th><th>Date</th></tr></thead><tbody>${entries
+    .map(
+      (entry) => `
+    <tr>
+      <td>${escapeHtml(entry.type.replaceAll("_", " "))}</td>
+      <td class="${Number(entry.amount) >= 0 ? "positive" : "danger-text"}">${Number(entry.amount) >= 0 ? "+" : ""}${formatCurrency(entry.amount)}</td>
+      <td>${formatCurrency(entry.balance_after)}</td>
+      <td>${new Date(entry.created_at).toLocaleString()}</td>
+    </tr>`,
+    )
+    .join("")}</tbody></table></div>`;
+}
+
+async function openUserDetailModal(userId) {
+  const user = findManagedUserById(userId);
+  if (!user) return;
+  activeUserDetailId = userId;
+  renderUserDetailHeader(user);
+  document.querySelectorAll("[data-user-detail-tab]").forEach((btn) => btn.classList.toggle("is-active", btn.dataset.userDetailTab === "kyc"));
+  document.querySelectorAll("[data-user-detail-pane]").forEach((pane) => pane.classList.toggle("is-active", pane.dataset.userDetailPane === "kyc"));
+  document.querySelector("#userDetailModal")?.classList.remove("is-hidden");
+
+  try {
+    const [kycResult, bankResult, ordersResult, ledgerResult] = await Promise.all([
+      adminFetch(`/api/admin/users/${userId}/kyc`),
+      adminFetch(`/api/admin/users/${userId}/bank-details`),
+      adminFetch(`/api/admin/users/${userId}/orders`),
+      adminFetch(`/api/admin/users/${userId}/ledger`),
+    ]);
+    renderUserDetailKyc(kycResult.submission);
+    renderUserDetailBank(bankResult.account);
+    renderUserDetailOrders(ordersResult.orders || []);
+    renderUserDetailLedger(ledgerResult.entries || []);
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+}
+
+function closeUserDetailModal() {
+  activeUserDetailId = null;
+  document.querySelector("#userDetailModal")?.classList.add("is-hidden");
+}
+
+document.querySelector("#closeUserDetailModal")?.addEventListener("click", closeUserDetailModal);
+document.querySelector("#userDetailModal")?.addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) closeUserDetailModal();
+});
+
+document.querySelectorAll("[data-user-detail-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-user-detail-tab]").forEach((btn) => btn.classList.toggle("is-active", btn === button));
+    document.querySelectorAll("[data-user-detail-pane]").forEach((pane) => pane.classList.toggle("is-active", pane.dataset.userDetailPane === button.dataset.userDetailTab));
+  });
+});
+
+document.querySelector("#managedUserTable")?.addEventListener("click", (event) => {
+  if (event.target.closest("select, input, button")) return;
+  const row = event.target.closest("[data-managed-user-row]");
+  if (!row) return;
+  openUserDetailModal(row.dataset.managedUserRow);
+});
+
+document.querySelector("#userDetailKycContent")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-kyc-review]");
+  if (!button || !activeUserDetailId) return;
+  const kycStatus = button.dataset.kycReview;
+  try {
+    const result = await adminFetch(`/api/admin/users/${activeUserDetailId}`, { method: "PATCH", body: JSON.stringify({ kycStatus }) });
+    managedUsers = managedUsers.map((user) => (user.id === activeUserDetailId ? result.user : user));
+    renderManagedUsers();
+    renderUserDetailHeader(result.user);
+    const kycResult = await adminFetch(`/api/admin/users/${activeUserDetailId}/kyc`);
+    renderUserDetailKyc(kycResult.submission);
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+});
+
+document.querySelector("#userDetailOrdersContent")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-close-order]");
+  if (!button || !activeUserDetailId) return;
+  button.disabled = true;
+  button.textContent = "Closing…";
+  try {
+    await adminFetch(`/api/orders/${button.dataset.closeOrder}/close`, { method: "POST" });
+    const ordersResult = await adminFetch(`/api/admin/users/${activeUserDetailId}/orders`);
+    renderUserDetailOrders(ordersResult.orders || []);
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+});
+
+document.querySelector("#userDetailWalletRow")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-user-detail-wallet-action]");
+  if (!button || !activeUserDetailId) return;
+  const amount = Number(document.querySelector("#userDetailWalletAmount")?.value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    setPaneMessage("#userDetailWalletMessage", "Enter a valid amount.", "error");
+    return;
+  }
+  const action = button.dataset.userDetailWalletAction;
+  try {
+    const result = await adminFetch(`/api/admin/users/${activeUserDetailId}/${action}`, { method: "POST", body: JSON.stringify({ amount }) });
+    managedUsers = managedUsers.map((user) => (user.id === activeUserDetailId ? result.user : user));
+    renderManagedUsers();
+    renderUserDetailHeader(result.user);
+    const ledgerResult = await adminFetch(`/api/admin/users/${activeUserDetailId}/ledger`);
+    renderUserDetailLedger(ledgerResult.entries || []);
+    setPaneMessage("#userDetailWalletMessage", `${action === "deposit" ? "Deposited" : "Withdrew"} ${formatCurrency(amount)}. New balance: ${formatCurrency(result.user.balance)}.`, "success");
+  } catch (error) {
+    setPaneMessage("#userDetailWalletMessage", error.message, "error");
   }
 });
 

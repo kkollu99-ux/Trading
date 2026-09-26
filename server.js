@@ -115,6 +115,8 @@ const memory = {
   chatMessages: [],
   orders: [],
   ledger: [],
+  kycSubmissions: [],
+  bankAccounts: [],
 };
 
 let pool = null;
@@ -383,6 +385,99 @@ async function recordWithdrawal({ userId, amount, createdBy }) {
     const ledgerEntry = await insertLedgerEntry({ userId, type: "withdrawal", amount: -amount, balanceBefore, balanceAfter, createdBy }, client);
     return { user: { ...user, balance: balanceAfter }, ledgerEntry };
   });
+}
+
+async function createKycSubmission({ userId, documentType, fullName, documentNumber, address, documentImageUrl }) {
+  if (pool) {
+    const rows = await query(
+      `INSERT INTO kyc_submissions (user_id, document_type, full_name, document_number, address, document_image_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [userId, documentType, fullName, documentNumber, address, documentImageUrl],
+    );
+    return rows[0];
+  }
+  const submission = {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    document_type: documentType,
+    full_name: fullName,
+    document_number: documentNumber,
+    address,
+    document_image_url: documentImageUrl,
+    status: "pending",
+    reviewed_by: null,
+    reviewed_at: null,
+    submitted_at: new Date().toISOString(),
+  };
+  memory.kycSubmissions.push(submission);
+  return submission;
+}
+
+async function findLatestKycSubmission(userId) {
+  if (pool) {
+    const rows = await query("SELECT * FROM kyc_submissions WHERE user_id = $1 ORDER BY submitted_at DESC LIMIT 1", [userId]);
+    return rows[0] || null;
+  }
+  return (
+    memory.kycSubmissions
+      .filter((item) => item.user_id === userId)
+      .sort((a, b) => String(b.submitted_at).localeCompare(String(a.submitted_at)))[0] || null
+  );
+}
+
+// Keeps the latest submission's own status in sync whenever admin sets
+// users.kyc_status via the review action, so the submission record (what the
+// admin actually looked at) always matches the outcome.
+async function syncLatestKycSubmissionStatus(userId, status, reviewedBy) {
+  const latest = await findLatestKycSubmission(userId);
+  if (!latest) return null;
+  if (pool) {
+    const rows = await query(
+      "UPDATE kyc_submissions SET status = $2, reviewed_by = $3, reviewed_at = NOW() WHERE id = $1 RETURNING *",
+      [latest.id, status, reviewedBy],
+    );
+    return rows[0] || null;
+  }
+  latest.status = status;
+  latest.reviewed_by = reviewedBy;
+  latest.reviewed_at = new Date().toISOString();
+  return latest;
+}
+
+async function upsertBankAccount({ userId, bankName, accountHolder, accountNumber, ifscSwift }) {
+  if (pool) {
+    const rows = await query(
+      `INSERT INTO bank_accounts (user_id, bank_name, account_holder, account_number, ifsc_swift, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (user_id) DO UPDATE
+       SET bank_name = EXCLUDED.bank_name, account_holder = EXCLUDED.account_holder,
+           account_number = EXCLUDED.account_number, ifsc_swift = EXCLUDED.ifsc_swift, updated_at = NOW()
+       RETURNING *`,
+      [userId, bankName, accountHolder, accountNumber, ifscSwift || null],
+    );
+    return rows[0];
+  }
+  const existing = memory.bankAccounts.find((item) => item.user_id === userId);
+  const record = {
+    user_id: userId,
+    bank_name: bankName,
+    account_holder: accountHolder,
+    account_number: accountNumber,
+    ifsc_swift: ifscSwift || null,
+    updated_at: new Date().toISOString(),
+  };
+  if (existing) Object.assign(existing, record);
+  else memory.bankAccounts.push(record);
+  return record;
+}
+
+async function findBankAccount(userId) {
+  if (pool) {
+    const rows = await query("SELECT * FROM bank_accounts WHERE user_id = $1", [userId]);
+    return rows[0] || null;
+  }
+  return memory.bankAccounts.find((item) => item.user_id === userId) || null;
 }
 
 async function listInstruments({ tradeOnly = false, includeDisabled = false } = {}) {
@@ -872,6 +967,7 @@ app.patch("/api/admin/users/:id", requireAuth, attachUser, requireRole("admin", 
 
   const user = await updateUser(request.params.id, patch);
   if (!user) return response.status(404).json({ error: "User not found" });
+  if (patch.kycStatus !== undefined) await syncLatestKycSubmissionStatus(user.id, patch.kycStatus, request.user.id);
   response.json({ user: publicUser(user) });
 });
 
@@ -904,6 +1000,84 @@ app.post("/api/admin/users/:id/withdraw", requireAuth, attachUser, requireRole("
 app.get("/api/admin/users/:id/ledger", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
   const entries = await listLedgerEntries(request.params.id);
   response.json({ entries });
+});
+
+const kycDocumentTypes = ["passport", "id_card", "drivers_license"];
+
+app.post("/api/kyc/submit", requireAuth, attachUser, upload.single("document"), async (request, response) => {
+  const documentType = String(request.body.documentType || "").toLowerCase();
+  const fullName = String(request.body.fullName || "").trim();
+  const documentNumber = String(request.body.documentNumber || "").trim();
+  const address = String(request.body.address || "").trim();
+
+  if (!kycDocumentTypes.includes(documentType)) return response.status(400).json({ error: "Invalid document type" });
+  if (!fullName || !documentNumber || !address) return response.status(400).json({ error: "Full name, document number, and address are required" });
+  if (!request.file) return response.status(400).json({ error: "A document image is required" });
+
+  const documentImageUrl = `/uploads/${request.file.filename}`;
+  const submission = await createKycSubmission({ userId: request.user.id, documentType, fullName, documentNumber, address, documentImageUrl });
+  // Any new submission needs fresh review, even if a prior one was rejected.
+  const user = await updateUser(request.user.id, { kycStatus: "pending" });
+  response.status(201).json({ submission, user: publicUser(user) });
+});
+
+app.get("/api/kyc/me", requireAuth, attachUser, async (request, response) => {
+  const submission = await findLatestKycSubmission(request.user.id);
+  response.json({ submission });
+});
+
+app.get("/api/admin/users/:id/kyc", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+  const submission = await findLatestKycSubmission(request.params.id);
+  response.json({ submission });
+});
+
+app.post("/api/bank-details", requireAuth, attachUser, async (request, response) => {
+  const bankName = String(request.body.bankName || "").trim();
+  const accountHolder = String(request.body.accountHolder || "").trim();
+  const accountNumber = String(request.body.accountNumber || "").trim();
+  const ifscSwift = String(request.body.ifscSwift || "").trim();
+  if (!bankName || !accountHolder || !accountNumber) {
+    return response.status(400).json({ error: "Bank name, account holder, and account number are required" });
+  }
+  const account = await upsertBankAccount({ userId: request.user.id, bankName, accountHolder, accountNumber, ifscSwift });
+  response.json({ account });
+});
+
+app.get("/api/bank-details/me", requireAuth, attachUser, async (request, response) => {
+  const account = await findBankAccount(request.user.id);
+  response.json({ account });
+});
+
+app.get("/api/admin/users/:id/bank-details", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+  const account = await findBankAccount(request.params.id);
+  response.json({ account });
+});
+
+app.get("/api/admin/users/:id/orders", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+  const orders = await listOrders(request.params.id);
+  const enriched = orders.map((order) => {
+    if (order.status !== "open") return order;
+    const currentPrice = getCurrentPrice(order.symbol);
+    return { ...order, current_price: currentPrice, floating_pnl: floatingPnl(order, currentPrice) };
+  });
+  response.json({ orders: enriched });
+});
+
+app.post("/api/auth/change-password", requireAuth, attachUser, async (request, response) => {
+  const currentPassword = String(request.body.currentPassword || "");
+  const newPassword = String(request.body.newPassword || "");
+  if (newPassword.length < 6) return response.status(400).json({ error: "New password must be at least 6 characters" });
+  if (!(await bcrypt.compare(currentPassword, request.user.passwordHash))) {
+    return response.status(401).json({ error: "Current password is incorrect" });
+  }
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  if (pool) {
+    await query("UPDATE users SET password_hash = $2 WHERE id = $1", [request.user.id, passwordHash]);
+  } else {
+    const user = memory.users.find((item) => item.id === request.user.id);
+    if (user) user.passwordHash = passwordHash;
+  }
+  response.json({ ok: true });
 });
 
 app.get("/api/referrals", requireAuth, attachUser, async (request, response) => {

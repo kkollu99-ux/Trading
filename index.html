@@ -828,57 +828,6 @@
           </div>
         </section>
 
-        <section id="profile" class="view-section">
-          <div class="account-clone-page">
-            <div class="account-titlebar">♙ <span>My Account</span></div>
-            <div class="account-stack">
-              <article class="clone-card">
-                <h3>Profile Information</h3>
-                <div class="clone-list">
-                  <div class="clone-info-row"><span>♙</span><div><small>Full Name</small><strong id="profileFullName"><em>Not set</em></strong></div><button type="button">✎</button></div>
-                  <div class="clone-info-row"><span>✉</span><div><small>Email</small><strong id="profileEmail">—</strong></div><button type="button">▣</button></div>
-                  <div class="clone-info-row"><span>#</span><div><small>Account ID</small><strong class="mono" id="profileAccountId">—</strong></div><button type="button">▣</button></div>
-                  <div class="clone-info-row"><span>✓</span><div><small>KYC Status</small><strong id="profileKycStatus">Pending</strong></div></div>
-                </div>
-              </article>
-              <article class="clone-card account-balance-row">
-                <div><small>Account Balance</small><strong id="profileBalance">$0.00</strong></div>
-                <div class="wallet-actions">
-                  <button class="deposit-btn" type="button" data-chat-topic="deposit">↓ Deposit</button>
-                  <button class="withdraw-btn" type="button" data-chat-topic="withdrawal">↑ Withdraw</button>
-                </div>
-              </article>
-              <article class="clone-card">
-                <h3>⟳ Transaction History</h3>
-                <div id="transactionHistoryList"><div class="transaction-empty-state">No transactions yet.</div></div>
-              </article>
-              <article class="clone-card">
-                <h3>♙ Invited Friends</h3>
-                <div class="referral-summary-row">
-                  <div><small>Your Referral Code</small><strong id="profileReferralCode">—</strong></div>
-                  <div><small>Total Invited</small><strong id="invitedFriendsTotal">0</strong></div>
-                  <button id="copyReferralCode" type="button">▣ Copy</button>
-                </div>
-                <button id="openInvitedFriendsModal" class="invited-modal-trigger" type="button">
-                  <span>♙</span>
-                  <div><strong>View Invited Friends</strong><small>Open full referral list</small></div>
-                  <i>›</i>
-                </button>
-              </article>
-              <article class="clone-card">
-                <h3>Services</h3>
-                <div class="clone-list service-list clone-service-list">
-                  <button type="button" data-chat-topic="deposit"><span class="green">↓</span><div><strong>Deposit Funds</strong><small>Fund your trading account</small></div><i>›</i></button>
-                  <button type="button" data-chat-topic="withdrawal"><span>↑</span><div><strong>Withdraw Funds</strong><small>Request a withdrawal</small></div><i>›</i></button>
-                  <button type="button" data-chat-topic="verification"><span class="green">◈</span><div><strong>Identity Verification (KYC) <b id="profileKycBadge">Pending</b></strong><small>Verification complete</small></div><i>›</i></button>
-                  <button type="button"><span class="purple">▥</span><div><strong>Add Bank Account</strong><small>Link a bank for withdrawals</small></div><i>›</i></button>
-                </div>
-              </article>
-              <button class="signout-clone-button" type="button">⇱ Sign Out</button>
-            </div>
-          </div>
-        </section>
-
         <section id="service" class="view-section">
           <div class="account-clone-page service-clone-page">
             <div class="account-titlebar">♙ <span>My Account</span></div>
@@ -943,6 +892,186 @@
             <span id="invitedFriendsPageNumber">Page 1 / 1</span>
             <button id="nextInvitedFriendsPage" type="button">Next ›</button>
           </footer>
+        </div>
+      </div>
+
+      <div id="profileModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-label="My Account">
+        <div class="profile-modal">
+          <button id="closeProfileModal" class="profile-modal-x" type="button" aria-label="Close profile">×</button>
+          <aside class="profile-modal-side">
+            <div class="profile-modal-user">
+              <div class="profile-modal-avatar" id="profileModalAvatar">?</div>
+              <strong class="profile-modal-name" id="profileFullName"><em>Not set</em></strong>
+              <div class="profile-modal-email" id="profileEmail">—</div>
+              <div class="profile-modal-uid">UID: <span id="profileAccountId">—</span></div>
+              <div class="profile-modal-kyc-badge status-pill" id="profileKycBadge">Pending</div>
+            </div>
+            <nav class="profile-modal-menu" id="profileModalMenu" aria-label="Account menu">
+              <button class="is-active" type="button" data-profile-pane="kyc"><span>🪪</span> <span>KYC Verification</span></button>
+              <button type="button" data-profile-pane="bank"><span>🏦</span> <span>Bind Account</span></button>
+              <button type="button" data-profile-pane="orders"><span>☰</span> <span>Orders</span></button>
+              <button type="button" data-profile-pane="deposit"><span>↓</span> <span>Deposit</span></button>
+              <button type="button" data-profile-pane="withdraw"><span>↑</span> <span>Withdraw</span></button>
+              <button type="button" data-profile-pane="password"><span>🛡</span> <span>Password</span></button>
+              <button type="button" data-profile-pane="history"><span>▤</span> <span>History</span></button>
+              <button type="button" data-profile-pane="referrals"><span>♙</span> <span>Referrals</span></button>
+              <button type="button" data-profile-pane="notifications"><span>🔔</span> <span>Notifications</span></button>
+              <button type="button" data-profile-pane="service"><span>☏</span> <span>Online Service</span></button>
+              <button type="button" data-profile-pane="about"><span>🏢</span> <span>About Us</span></button>
+              <button type="button" data-profile-pane="help"><span>❓</span> <span>Help</span></button>
+              <button id="profileModalSignOut" class="profile-modal-logout" type="button"><span>⇱</span> <span>Logout</span></button>
+            </nav>
+          </aside>
+          <section class="profile-modal-content">
+
+            <div class="profile-pane is-active" data-profile-pane-content="kyc">
+              <h3>Identity Verification</h3>
+              <p class="profile-pane-hint">Verify your identity to unlock deposits and withdrawals.</p>
+              <div id="kycSubmissionSummary"></div>
+              <form id="kycForm" class="compact-form profile-form">
+                <div class="document-type-options">
+                  <label class="document-option selected"><input type="radio" name="documentType" value="passport" checked /><span>🛂</span><span>Passport</span></label>
+                  <label class="document-option"><input type="radio" name="documentType" value="id_card" /><span>🪪</span><span>ID Card</span></label>
+                  <label class="document-option"><input type="radio" name="documentType" value="drivers_license" /><span>🚗</span><span>Driver's License</span></label>
+                </div>
+                <label>Full Name<input name="fullName" type="text" placeholder="Enter your full name" required /></label>
+                <label>Document Number<input name="documentNumber" type="text" placeholder="Enter your document number" required /></label>
+                <label>Address<input name="address" type="text" placeholder="Enter your complete address" required /></label>
+                <label>Document Image<input id="kycDocumentInput" name="document" type="file" accept="image/*" required /></label>
+                <button class="primary-action" type="submit">Submit for Review</button>
+                <p id="kycFormMessage" class="managed-user-message" role="status"></p>
+              </form>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="bank">
+              <h3>Bind Bank Account</h3>
+              <p class="profile-pane-hint">Link a bank account to use for withdrawals.</p>
+              <div id="bankAccountSummary"></div>
+              <form id="bankForm" class="compact-form profile-form">
+                <label>Bank Name<input name="bankName" type="text" placeholder="e.g. Chase Bank" required /></label>
+                <label>Account Holder<input name="accountHolder" type="text" placeholder="Full name on account" required /></label>
+                <label>Account Number<input name="accountNumber" type="text" placeholder="Account number" required /></label>
+                <label>IFSC / SWIFT Code<input name="ifscSwift" type="text" placeholder="Optional" /></label>
+                <button class="primary-action" type="submit">Save Bank Account</button>
+                <p id="bankFormMessage" class="managed-user-message" role="status"></p>
+              </form>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="orders">
+              <h3>Orders</h3>
+              <p class="profile-pane-hint">View your open positions and trade history.</p>
+              <button class="primary-action" type="button" data-profile-goto="orders">Go to Orders</button>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="deposit">
+              <h3>Deposit</h3>
+              <p class="profile-pane-hint">Current balance: <strong id="profileBalance">$0.00</strong></p>
+              <p class="profile-pane-hint">Deposits are added by our support team once your funds are verified. Start a chat to arrange your deposit.</p>
+              <button class="primary-action deposit-btn" type="button" data-chat-topic="deposit">↓ Start Deposit Chat</button>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="withdraw">
+              <h3>Withdraw</h3>
+              <p class="profile-pane-hint">Withdrawals are processed by our support team after identity verification. Start a chat to request a withdrawal.</p>
+              <button class="primary-action withdraw-btn" type="button" data-chat-topic="withdrawal">↑ Start Withdrawal Chat</button>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="password">
+              <h3>Change Password</h3>
+              <form id="passwordForm" class="compact-form profile-form">
+                <label>Current Password<input name="currentPassword" type="password" autocomplete="current-password" required /></label>
+                <label>New Password<input name="newPassword" type="password" minlength="6" autocomplete="new-password" required /></label>
+                <label>Confirm New Password<input name="confirmPassword" type="password" minlength="6" autocomplete="new-password" required /></label>
+                <button class="primary-action" type="submit">Update Password</button>
+                <p id="passwordFormMessage" class="managed-user-message" role="status"></p>
+              </form>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="history">
+              <h3>⟳ Transaction History</h3>
+              <div id="transactionHistoryList"><div class="transaction-empty-state">No transactions yet.</div></div>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="referrals">
+              <h3>♙ Invited Friends</h3>
+              <div class="referral-summary-row">
+                <div><small>Your Referral Code</small><strong id="profileReferralCode">—</strong></div>
+                <div><small>Total Invited</small><strong id="invitedFriendsTotal">0</strong></div>
+                <button id="copyReferralCode" type="button">▣ Copy</button>
+              </div>
+              <button id="openInvitedFriendsModal" class="invited-modal-trigger" type="button">
+                <span>♙</span>
+                <div><strong>View Invited Friends</strong><small>Open full referral list</small></div>
+                <i>›</i>
+              </button>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="notifications">
+              <h3>Notifications</h3>
+              <div class="profile-empty-state"><span>🔕</span><strong>No notifications yet</strong><small>You don't have any notifications yet.</small></div>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="service">
+              <h3>Online Service</h3>
+              <p class="profile-pane-hint">Chat with our support team for any questions.</p>
+              <button class="primary-action" type="button" data-profile-goto="service">Open Online Service</button>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="about">
+              <h3>About Us</h3>
+              <p class="profile-pane-hint">FXCC Capitals is a broker on your side, offering trading across forex, crypto, metals, commodities, and stocks with transparent pricing and dedicated client support.</p>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="help">
+              <h3>Help Center</h3>
+              <div class="clone-list faq-list">
+                <div class="faq-item"><strong>What is KYC verification?</strong><small>KYC confirms your identity using a government document so we can enable deposits and withdrawals on your account.</small></div>
+                <div class="faq-item"><strong>How do deposits and withdrawals work?</strong><small>Start a chat from the Deposit or Withdraw tab. Our support team verifies your request and credits or debits your account balance.</small></div>
+                <div class="faq-item"><strong>What are Stop Loss and Take Profit?</strong><small>They automatically close an open position once your floating profit or loss reaches the dollar amount you set.</small></div>
+                <div class="faq-item"><strong>How is margin calculated?</strong><small>Margin = (lots × 100 units × price) ÷ multiplier. It's held from your balance while a position is open and released when you close it.</small></div>
+                <div class="faq-item"><strong>How do I contact support?</strong><small>Use the Online Service tab to open a live chat with our team at any time.</small></div>
+              </div>
+            </div>
+
+          </section>
+        </div>
+      </div>
+
+      <div id="userDetailModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-label="User details">
+        <div class="user-detail-modal">
+          <button id="closeUserDetailModal" class="profile-modal-x" type="button" aria-label="Close user details">×</button>
+          <header class="user-detail-head">
+            <div class="user-detail-avatar" id="userDetailAvatar">?</div>
+            <div class="user-detail-head-info">
+              <strong id="userDetailName">—</strong>
+              <small id="userDetailEmail">—</small>
+            </div>
+            <div class="user-detail-badges">
+              <span class="status-pill" id="userDetailRoleBadge">user</span>
+              <span class="status-pill" id="userDetailKycBadge">pending</span>
+            </div>
+          </header>
+          <nav class="user-detail-tabs">
+            <button class="is-active" type="button" data-user-detail-tab="kyc">KYC</button>
+            <button type="button" data-user-detail-tab="bank">Bank</button>
+            <button type="button" data-user-detail-tab="orders">Orders</button>
+            <button type="button" data-user-detail-tab="ledger">Ledger</button>
+            <button type="button" data-user-detail-tab="wallet">Wallet</button>
+          </nav>
+          <div class="user-detail-body">
+            <div class="user-detail-pane is-active" data-user-detail-pane="kyc"><div id="userDetailKycContent"></div></div>
+            <div class="user-detail-pane" data-user-detail-pane="bank"><div id="userDetailBankContent"></div></div>
+            <div class="user-detail-pane" data-user-detail-pane="orders"><div id="userDetailOrdersContent"></div></div>
+            <div class="user-detail-pane" data-user-detail-pane="ledger"><div id="userDetailLedgerContent"></div></div>
+            <div class="user-detail-pane" data-user-detail-pane="wallet">
+              <div class="wallet-action-row" id="userDetailWalletRow">
+                <input type="number" min="0.01" step="0.01" placeholder="Amount" class="wallet-amount-input" id="userDetailWalletAmount" />
+                <button type="button" class="wallet-deposit-btn" data-user-detail-wallet-action="deposit">+ Deposit</button>
+                <button type="button" class="wallet-withdraw-btn" data-user-detail-wallet-action="withdraw">− Withdraw</button>
+              </div>
+              <p id="userDetailWalletMessage" class="managed-user-message" role="status"></p>
+            </div>
+          </div>
         </div>
       </div>
     </main>
