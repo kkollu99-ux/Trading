@@ -352,6 +352,7 @@
             <button class="nav-item" data-section="news" data-label="News"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h14a2 2 0 0 1 2 2v12H6a2 2 0 0 1-2-2z"/><path d="M8 9h8"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></span><span class="nav-label">News</span></button>
             <button class="nav-item" data-section="copy" data-label="Copy"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-label">Copy</span></button>
             <button class="nav-item role-restricted-nav" data-section="users" data-label="Users" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6"/><path d="M19 8v6"/></svg></span><span class="nav-label">Users</span></button>
+            <button class="nav-item role-restricted-nav" data-section="requests" data-label="Requests" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><span class="nav-label">Requests</span></button>
             <button class="nav-item" data-section="profile" data-label="Profile"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 10h16"/><path d="M8 15h4"/></svg></span><span class="nav-label">Profile</span></button>
             <button class="nav-item" data-section="service" data-label="Online Service"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M5 13h3v6H5z"/><path d="M16 13h3v6h-3z"/><path d="M19 19a4 4 0 0 1-4 3h-3"/></svg></span><span class="nav-label">Online Service</span></button>
           </nav>
@@ -773,6 +774,49 @@
                     <tbody id="managedUserTable"><tr><td colspan="6">Loading users...</td></tr></tbody>
                   </table>
                 </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="requests" class="view-section">
+          <div class="user-management-page">
+            <header class="user-management-head">
+              <div>
+                <span>Support Inbox</span>
+                <h2>Service Requests</h2>
+                <p>Deposit, withdrawal, and identity verification requests from clients, with a live chat thread per request.</p>
+              </div>
+              <button id="refreshServiceRequests" class="secondary-action compact-action" type="button">⟳ Refresh</button>
+            </header>
+            <div class="management-grid">
+              <article class="clone-card managed-table-card requests-table-card">
+                <div class="managed-table-head">
+                  <div>
+                    <h3>All Requests</h3>
+                    <p>Click a request to open its thread.</p>
+                  </div>
+                </div>
+                <div class="table-wrap managed-user-table-wrap">
+                  <table class="managed-user-table">
+                    <thead><tr><th>Date</th><th>Client</th><th>Type</th><th>Status</th><th></th></tr></thead>
+                    <tbody id="requestsTable"><tr><td colspan="5">Loading requests...</td></tr></tbody>
+                  </table>
+                </div>
+              </article>
+              <article class="clone-card request-detail-card" id="requestDetailCard" hidden>
+                <div class="service-history-head">
+                  <div>
+                    <h3 id="requestDetailTitle">Request</h3>
+                    <p id="requestDetailSubtitle"></p>
+                  </div>
+                  <div id="requestDetailActions" class="request-detail-actions"></div>
+                </div>
+                <div id="requestDetailMessages" class="support-body process-chat-body request-detail-messages"></div>
+                <form id="requestDetailForm" class="process-chat-form">
+                  <input id="requestDetailInput" type="text" placeholder="Reply to client…" autocomplete="off" />
+                  <button type="submit">➤</button>
+                </form>
               </article>
             </div>
           </div>
