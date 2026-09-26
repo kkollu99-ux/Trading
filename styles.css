@@ -5000,6 +5000,11 @@ input[type="checkbox"] {
   font-weight: 900;
 }
 
+#serviceInboxList {
+  display: grid;
+  gap: 0.6rem;
+}
+
 .chat-history-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

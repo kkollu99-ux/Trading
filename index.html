@@ -792,7 +792,7 @@
         <section id="service" class="view-section">
           <div class="account-clone-page service-clone-page">
             <div class="account-titlebar">♙ <span>My Account</span></div>
-            <article class="clone-card service-history-card">
+            <article class="clone-card service-history-card" id="clientServiceCard">
               <div class="service-history-head">
                 <div>
                   <h3>Online Service</h3>
@@ -808,6 +808,16 @@
                 </div>
                 <i>›</i>
               </button>
+            </article>
+            <article class="clone-card service-history-card is-hidden" id="adminServiceInboxCard">
+              <div class="service-history-head">
+                <div>
+                  <h3>Online Service</h3>
+                  <p>Client conversations</p>
+                </div>
+                <button id="refreshServiceInbox" class="secondary-action compact-action" type="button">⟳ Refresh</button>
+              </div>
+              <div id="serviceInboxList"></div>
             </article>
           </div>
         </section>
@@ -877,7 +887,6 @@
               <button type="button" data-profile-pane="history"><span>▤</span> <span>History</span></button>
               <button type="button" data-profile-pane="referrals"><span>♙</span> <span>Referrals</span></button>
               <button type="button" data-profile-pane="notifications"><span>🔔</span> <span>Notifications</span></button>
-              <button type="button" data-profile-pane="service"><span>☏</span> <span>Online Service</span></button>
               <button type="button" data-profile-pane="about"><span>🏢</span> <span>About Us</span></button>
               <button type="button" data-profile-pane="help"><span>❓</span> <span>Help</span></button>
               <button id="profileModalSignOut" class="profile-modal-logout" type="button"><span>⇱</span> <span>Logout</span></button>
@@ -970,12 +979,6 @@
             <div class="profile-pane" data-profile-pane-content="notifications">
               <h3>Notifications</h3>
               <div class="profile-empty-state"><span>🔕</span><strong>No notifications yet</strong><small>You don't have any notifications yet.</small></div>
-            </div>
-
-            <div class="profile-pane" data-profile-pane-content="service">
-              <h3>Online Service</h3>
-              <p class="profile-pane-hint">Chat with our support team for any questions.</p>
-              <button class="primary-action" type="button" data-profile-goto="service">Open Online Service</button>
             </div>
 
             <div class="profile-pane" data-profile-pane-content="about">
