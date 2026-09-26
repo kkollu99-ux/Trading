@@ -602,36 +602,40 @@
             </section>
 
             <aside class="order-ticket">
-              <div class="ticket-tabs ticket-kind-tabs" aria-label="Trade product type">
-                <button class="is-active" type="button" data-ticket-kind="spot">Spot</button>
-                <button type="button" data-ticket-kind="futures">Futures</button>
-              </div>
               <div id="ticketKindNote" class="ticket-context">Spot order · BTCUSD settlement</div>
-              <div class="ticket-tabs order-mode" aria-label="Order type">
-                <button class="is-active" type="button" data-order-mode="market">Market Price</button>
-                <button type="button" data-order-mode="pending">Pending Orders</button>
+              <div class="ticket-funds-banner">
+                <span>Available funds</span>
+                <strong>$<span id="ticketBalanceValue">389201.37</span></strong>
               </div>
-              <h2 id="ticketModeTitle">Market Price</h2>
+              <div class="ticket-symbol-row">
+                <strong id="ticketSymbolName">BTCUSD</strong>
+                <span id="ticketSymbolPrice">63971.14</span>
+              </div>
+              <label>Order Type <button type="button"><span id="ticketModeTitle">Market Price</span><span>›</span></button></label>
               <label>Multiplier <button type="button"><span id="ticketMultiplier">100</span><span>›</span></button></label>
-              <div id="pendingOrderFields" class="pending-fields is-hidden">
-                <label>Order Type <button type="button"><span>Buy Limit</span><span>›</span></button></label>
-                <label>Entry Price <div class="lots-control"><button type="button">−</button><strong>63920.00</strong><button type="button">+</button></div></label>
-                <label>Expiry <button type="button"><span>Good Till Cancelled</span><span>›</span></button></label>
+              <div class="risk-block">
+                <div class="risk-toggle-row">
+                  <span>Set Loss</span>
+                  <button type="button" class="risk-toggle" data-risk-toggle="loss" aria-pressed="false" aria-label="Toggle stop loss"><i></i></button>
+                </div>
+                <div class="lots-control risk-stepper" data-risk-stepper="loss">
+                  <button type="button" data-risk-step="loss" data-risk-dir="-1">−</button><strong data-risk-value="loss">0</strong><button type="button" data-risk-step="loss" data-risk-dir="1">+</button>
+                </div>
               </div>
-              <div class="risk-row">
-                <span>Set Loss <i></i></span>
-                <span>Take Profit <i></i></span>
+              <div class="risk-block">
+                <div class="risk-toggle-row">
+                  <span>Take Profit</span>
+                  <button type="button" class="risk-toggle" data-risk-toggle="profit" aria-pressed="false" aria-label="Toggle take profit"><i></i></button>
+                </div>
+                <div class="lots-control risk-stepper" data-risk-stepper="profit">
+                  <button type="button" data-risk-step="profit" data-risk-dir="-1">−</button><strong data-risk-value="profit">0</strong><button type="button" data-risk-step="profit" data-risk-dir="1">+</button>
+                </div>
               </div>
-              <div class="stepper-grid">
-                <button type="button">−</button><strong>0</strong><button type="button">+</button>
-                <button type="button">−</button><strong>0</strong><button type="button">+</button>
-              </div>
-              <label>Lots <div class="lots-control"><button type="button">−</button><strong>0.01</strong><button type="button">+</button></div></label>
+              <label>Lots (Step: 0.01) <div class="lots-control"><button id="lotsDecrease" type="button">−</button><strong id="ticketLotsValue">0.01</strong><button id="lotsIncrease" type="button">+</button></div></label>
               <div class="ticket-summary">
                 <span>Each Lots <strong id="ticketLotValue">1 Lots = 1 BTCUSD</strong></span>
                 <span>Estimated Handling Fee <strong id="ticketFeeValue">0.064000</strong></span>
                 <span>Estimated Margin <strong id="ticketMarginValue">6.400000</strong></span>
-                <span>Balance <strong id="ticketBalanceValue">389201.37</strong></span>
               </div>
               <div class="trade-actions"><button id="buyOrderButton" class="buy-button" type="button">Buy</button><button id="sellOrderButton" class="sell-button" type="button">Sell</button></div>
             </aside>

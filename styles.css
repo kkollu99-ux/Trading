@@ -2371,36 +2371,8 @@ select:focus {
   scrollbar-color: rgba(120, 131, 151, 0.65) transparent;
 }
 
-.ticket-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.55rem;
-  margin-bottom: 1.1rem;
-  border-radius: 0.5rem;
-  background: var(--trade-panel-soft);
-  padding: 0.45rem;
-}
-
-.ticket-tabs button {
-  min-height: 2.15rem;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--trade-muted);
-  font-weight: 900;
-}
-
-.ticket-tabs button.is-active {
-  background: var(--blue);
-  color: white;
-}
-
-.ticket-tabs.order-mode button.is-active {
-  background: var(--blue);
-}
-
 .ticket-context {
-  margin: -0.55rem 0 1rem;
+  margin: 0 0 1rem;
   border: 1px solid rgba(0, 115, 255, 0.22);
   border-radius: 0.5rem;
   background: rgba(0, 115, 255, 0.08);
@@ -2413,6 +2385,53 @@ select:focus {
 .order-ticket h2 {
   margin-bottom: 1.3rem;
   font-size: 1.25rem;
+}
+
+.ticket-funds-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, var(--blue), #0052cc);
+  padding: 0.9rem 1rem;
+  text-align: center;
+}
+
+.ticket-funds-banner span {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ticket-funds-banner strong {
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-weight: 900;
+}
+
+.ticket-symbol-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  padding: 0 0.1rem;
+}
+
+.ticket-symbol-row strong {
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.ticket-symbol-row span {
+  color: var(--blue);
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 900;
 }
 
 .order-ticket label {
@@ -2437,40 +2456,37 @@ select:focus {
   font-variant-numeric: tabular-nums;
 }
 
-.pending-fields {
-  display: grid;
-  gap: 0.85rem;
+.risk-block {
   margin-bottom: 1rem;
 }
 
-.pending-fields label {
-  display: grid;
-  gap: 0.45rem;
-}
-
-.risk-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-  margin: 1.1rem 0 0.45rem;
-  color: var(--trade-muted);
-}
-
-.risk-row span {
+.risk-toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 0.5rem;
+  color: var(--trade-muted);
+  font-weight: 900;
 }
 
-.risk-row i {
+.risk-toggle {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.risk-toggle i {
   position: relative;
+  display: block;
   width: 2.25rem;
   height: 1.25rem;
   border-radius: 999px;
   background: var(--trade-bg);
+  transition: background 0.15s ease;
 }
 
-.risk-row i::after {
+.risk-toggle i::after {
   position: absolute;
   top: 0.2rem;
   left: 0.2rem;
@@ -2479,32 +2495,40 @@ select:focus {
   border-radius: 50%;
   background: #273245;
   content: "";
+  transition: transform 0.15s ease, background 0.15s ease;
 }
 
-.stepper-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr;
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
+.risk-toggle.is-on i {
+  background: rgba(0, 115, 255, 0.35);
 }
 
-.stepper-grid button,
+.risk-toggle.is-on i::after {
+  background: var(--blue);
+  transform: translateX(1rem);
+}
+
+.risk-stepper {
+  opacity: 0.45;
+}
+
+.risk-stepper button {
+  pointer-events: none;
+}
+
+.risk-stepper.is-enabled {
+  opacity: 1;
+}
+
+.risk-stepper.is-enabled button {
+  pointer-events: auto;
+}
+
 .lots-control button {
   border: 0;
   background: transparent;
   color: var(--trade-muted);
   font-size: 1.3rem;
   font-weight: 900;
-}
-
-.stepper-grid strong {
-  display: grid;
-  min-height: 2.4rem;
-  place-items: center;
-  border-radius: var(--radius);
-  background: var(--trade-panel-soft);
-  color: var(--trade-muted);
-  font-variant-numeric: tabular-nums;
 }
 
 .lots-control {
@@ -2545,10 +2569,11 @@ select:focus {
 
 .buy-button,
 .sell-button {
-  min-height: 2.55rem;
+  min-height: 2.9rem;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: 999px;
   color: white;
+  font-size: 1rem;
   font-weight: 900;
 }
 
@@ -2575,7 +2600,6 @@ select:focus {
 .price-marker,
 .chart-times,
 .lots-control,
-.stepper-grid strong,
 .ticket-summary strong {
   font-family: var(--font-mono);
 }
