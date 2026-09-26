@@ -75,17 +75,24 @@ function renderAccountSummary() {
   const balanceValue = document.querySelector("#dashboardBalance");
   if (balanceValue) balanceValue.textContent = formatCurrency(balance);
 
+  const marginUsed = Number(user?.marginUsed || 0);
+  // Floating P&L is computed on read server-side per open position (never
+  // persisted); openPositions is whatever GET /api/orders?status=open last
+  // returned, refreshed on load, on the Orders page, and on every order.update.
+  const floatingPnl = openPositions.reduce((sum, order) => sum + Number(order.floating_pnl || 0), 0);
+  const equity = balance + marginUsed + floatingPnl;
+
   const equityValue = document.querySelector("#dashboardEquity");
-  if (equityValue) equityValue.textContent = formatCurrency(balance);
+  if (equityValue) equityValue.textContent = formatCurrency(equity);
 
   const marginValue = document.querySelector("#dashboardAvailableMargin");
   if (marginValue) marginValue.textContent = formatCurrency(balance);
 
   const marginUsedValue = document.querySelector("#dashboardMarginUsed");
-  if (marginUsedValue) marginUsedValue.textContent = formatCurrency(0);
+  if (marginUsedValue) marginUsedValue.textContent = formatCurrency(marginUsed);
 
   const pnlValue = document.querySelector("#dashboardPnl");
-  if (pnlValue) pnlValue.textContent = `${formatCurrency(0)} (0.00%)`;
+  if (pnlValue) pnlValue.textContent = `${formatCurrency(floatingPnl)} (${equity > 0 ? ((floatingPnl / equity) * 100).toFixed(2) : "0.00"}%)`;
 
   const walletButton = document.querySelector("#walletBalance");
   if (walletButton) walletButton.textContent = `▣ ${formatCurrency(balance)}`;
@@ -167,6 +174,13 @@ async function loadTransactionHistory() {
 
 function canEditManagedUsers() {
   return currentSession?.user?.role === "admin";
+}
+
+// Balance and KYC are support-team duties too (per the backend's PATCH
+// /api/admin/users/:id, which allows team to edit those but not role/status),
+// while creating users and changing role/status stay admin-only.
+function canEditUserFinancials() {
+  return ["admin", "team"].includes(currentSession?.user?.role);
 }
 
 function saveSession(session) {
@@ -276,6 +290,9 @@ function moveSection(id) {
   }
   if (id === "markets") {
     refreshMarketsQuotes();
+  }
+  if (id === "orders") {
+    loadOrders();
   }
   drawCharts();
   renderTradeCandles();
@@ -936,11 +953,21 @@ document.querySelector("#openTradeTerminal")?.addEventListener("click", () => {
   moveSection("trade");
 });
 
-const ordersTabSummary = {
-  positions: "<strong>0</strong> positions — open trades",
-  pending: "<strong>0</strong> pending orders — waiting for trigger",
-  history: "<strong>20</strong> orders — tap any row to expand",
-};
+let openPositions = [];
+let closedOrders = [];
+
+function activeOrdersTab() {
+  return document.querySelector("[data-orders-tab].is-active")?.dataset.ordersTab || "history";
+}
+
+function updateOrdersTabSummary() {
+  const summary = document.querySelector("#ordersTabSummary");
+  if (!summary) return;
+  const tab = activeOrdersTab();
+  if (tab === "positions") summary.innerHTML = `<strong>${openPositions.length}</strong> open position${openPositions.length === 1 ? "" : "s"}`;
+  else if (tab === "pending") summary.innerHTML = `<strong>0</strong> pending orders`;
+  else summary.innerHTML = `<strong>${closedOrders.length}</strong> closed order${closedOrders.length === 1 ? "" : "s"}`;
+}
 
 document.querySelectorAll("[data-orders-tab]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -951,9 +978,90 @@ document.querySelectorAll("[data-orders-tab]").forEach((button) => {
     document.querySelectorAll("[data-orders-panel]").forEach((panel) => {
       panel.classList.toggle("is-active", panel.dataset.ordersPanel === activeTab);
     });
-    const summary = document.querySelector("#ordersTabSummary");
-    if (summary) summary.innerHTML = ordersTabSummary[activeTab] || ordersTabSummary.history;
+    updateOrdersTabSummary();
   });
+});
+
+function orderRowHtml(order, { closable }) {
+  const sideClass = order.direction === "buy" ? "buy" : "sell";
+  const arrow = order.direction === "buy" ? "↗" : "↘";
+  const opened = new Date(order.opened_at).toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const info = `<div><strong>${escapeHtml(compactSymbol(order.symbol))}</strong><small><b>${order.direction.toUpperCase()}</b> market · ${Number(order.lots).toFixed(2)} lots</small><small>@ ${Number(order.entry_price).toFixed(4)} · ${escapeHtml(opened)}</small></div>`;
+  if (closable) {
+    const pnl = Number(order.floating_pnl || 0);
+    const pnlClass = pnl >= 0 ? "" : "muted-result";
+    return `<div class="history-row ${sideClass}" data-open-order="${escapeHtml(order.id)}">
+      <span>${arrow}</span>${info}
+      <em><strong class="${pnlClass}">${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}</strong><small>margin ${formatCurrency(order.margin_held)}</small></em>
+      <button type="button" class="close-position-btn" data-close-order="${escapeHtml(order.id)}">Close</button>
+    </div>`;
+  }
+  const pnl = Number(order.realized_pnl || 0);
+  const pnlClass = pnl >= 0 ? "" : "muted-result";
+  return `<div class="history-row ${sideClass}">
+    <span>${arrow}</span>${info}
+    <em><strong class="${pnlClass}">${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}</strong><i>closed</i></em>
+  </div>`;
+}
+
+function renderOrdersPanels() {
+  const positionsPanel = document.querySelector('[data-orders-panel="positions"]');
+  const historyPanel = document.querySelector('[data-orders-panel="history"]');
+  if (positionsPanel) {
+    positionsPanel.innerHTML = openPositions.length
+      ? openPositions.map((order) => orderRowHtml(order, { closable: true })).join("")
+      : `<div class="orders-empty-state"><span>↔</span><strong>No Open Positions</strong><small>Your active trades will appear here.</small></div>`;
+  }
+  if (historyPanel) {
+    historyPanel.innerHTML = closedOrders.length
+      ? closedOrders.map((order) => orderRowHtml(order, { closable: false })).join("")
+      : `<div class="orders-empty-state"><span>🕘</span><strong>No Closed Orders</strong><small>Your closed trades will appear here.</small></div>`;
+  }
+  updateOrdersTabSummary();
+}
+
+async function loadOrders() {
+  if (!currentSession?.token) return;
+  try {
+    const [openResult, closedResult] = await Promise.all([
+      authRequest("/api/orders?status=open"),
+      authRequest("/api/orders?status=closed"),
+    ]);
+    openPositions = openResult.orders || [];
+    closedOrders = closedResult.orders || [];
+  } catch {
+    openPositions = [];
+    closedOrders = [];
+  }
+  renderOrdersPanels();
+  if (document.querySelector("#dashboardEquity")) renderAccountSummary();
+}
+
+function setOrdersMessage(message, type = "") {
+  const element = document.querySelector("#ordersMessage");
+  if (!element) return;
+  element.textContent = message;
+  element.classList.toggle("is-success", type === "success");
+  element.classList.toggle("is-error", type === "error");
+}
+
+document.querySelector("#refreshOrders")?.addEventListener("click", loadOrders);
+
+document.querySelector('[data-orders-panel="positions"]')?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-close-order]");
+  if (!button) return;
+  button.disabled = true;
+  button.textContent = "Closing…";
+  try {
+    const result = await authRequest(`/api/orders/${button.dataset.closeOrder}/close`, { method: "POST" });
+    applyLiveBalance(result.balance);
+    setOrdersMessage(`Position closed. P&L: ${result.pnl >= 0 ? "+" : ""}${formatCurrency(result.pnl)}.`, result.pnl >= 0 ? "success" : "error");
+    await loadOrders();
+  } catch (error) {
+    setOrdersMessage(error.message, "error");
+    button.disabled = false;
+    button.textContent = "Close";
+  }
 });
 
 const processChatWindow = document.querySelector("#processChatWindow");
@@ -1045,6 +1153,24 @@ function applyIncomingChatMessage(message) {
 function applyIncomingRequestStatus(serviceRequest) {
   if (!serviceRequest || serviceRequest.user_id !== currentSession?.user?.id) return;
   if (document.querySelector("#profile")?.classList.contains("is-active")) loadTransactionHistory();
+}
+
+function applyLiveBalance(balance) {
+  if (typeof balance !== "number" || !currentSession?.user) return;
+  currentSession.user.balance = balance;
+  localStorage.setItem("fxccUser", JSON.stringify(currentSession.user));
+  renderAccountSummary();
+}
+
+function applyIncomingBalanceUpdate(payload) {
+  if (!payload || payload.userId !== currentSession?.user?.id) return;
+  applyLiveBalance(payload.balance);
+}
+
+function applyIncomingOrderUpdate(payload) {
+  if (!payload || payload.userId !== currentSession?.user?.id) return;
+  applyLiveBalance(payload.balance);
+  if (document.querySelector("#orders")?.classList.contains("is-active")) loadOrders();
 }
 
 function appendProcessChatMessage(message, options = {}) {
@@ -1961,6 +2087,8 @@ function connectPriceStream() {
       applyIncomingChatMessage(payload.message);
       applyIncomingRequestMessageForAdmin(payload.message);
     } else if (payload.type === "service-request.status") applyIncomingRequestStatus(payload.serviceRequest);
+    else if (payload.type === "user.balance") applyIncomingBalanceUpdate(payload);
+    else if (payload.type === "order.update") applyIncomingOrderUpdate(payload);
   });
 
   priceStreamSocket.addEventListener("close", () => {
@@ -2207,18 +2335,29 @@ connectPriceStream();
 
 const tradeTicketCopy = {
   multiplier: "100",
-  fee: "0.064000",
-  margin: "6.400000",
 };
+
+// Mirrors the server's margin formula exactly (server.js: orderUnitsPerLot/
+// orderFeeRate) so what the ticket previews matches what actually gets
+// charged - but this is a preview only, the server always recomputes and
+// enforces the real numbers itself rather than trusting these.
+const orderUnitsPerLot = 100;
+const orderFeeRate = 0.001;
 
 function renderTradeTicket() {
   const symbol = tradeChartState.symbol;
+  const multiplier = Number(tradeTicketCopy.multiplier) || 100;
+  const lots = Number(document.querySelector("#ticketLotsValue")?.textContent) || 0;
+  const price = tradeChartState.candles.at(-1)?.close || 0;
+  const notional = lots * orderUnitsPerLot * price;
+  const margin = multiplier > 0 ? notional / multiplier : 0;
+  const fee = margin * orderFeeRate;
 
   document.querySelector("#ticketKindNote").textContent = `Spot order · ${symbol} settlement`;
   document.querySelector("#ticketMultiplier").textContent = tradeTicketCopy.multiplier;
-  document.querySelector("#ticketLotValue").textContent = `1 Lots = 1 ${symbol}`;
-  document.querySelector("#ticketFeeValue").textContent = tradeTicketCopy.fee;
-  document.querySelector("#ticketMarginValue").textContent = tradeTicketCopy.margin;
+  document.querySelector("#ticketLotValue").textContent = `1 Lots = ${orderUnitsPerLot} ${symbol}`;
+  document.querySelector("#ticketFeeValue").textContent = fee.toFixed(6);
+  document.querySelector("#ticketMarginValue").textContent = margin.toFixed(6);
   document.querySelector("#ticketBalanceValue").textContent = Number(currentSession?.user?.balance || 0).toFixed(2);
 }
 
@@ -2244,12 +2383,54 @@ document.querySelectorAll("[data-risk-step]").forEach((button) => {
 document.querySelector("#lotsIncrease")?.addEventListener("click", () => {
   const valueEl = document.querySelector("#ticketLotsValue");
   valueEl.textContent = (Number(valueEl.textContent) + 0.01).toFixed(2);
+  renderTradeTicket();
 });
 
 document.querySelector("#lotsDecrease")?.addEventListener("click", () => {
   const valueEl = document.querySelector("#ticketLotsValue");
   valueEl.textContent = Math.max(0.01, Number(valueEl.textContent) - 0.01).toFixed(2);
+  renderTradeTicket();
 });
+
+function setTicketOrderMessage(message, type = "") {
+  const element = document.querySelector("#ticketOrderMessage");
+  if (!element) return;
+  element.textContent = message;
+  element.classList.toggle("is-success", type === "success");
+  element.classList.toggle("is-error", type === "error");
+}
+
+async function placeOrder(direction) {
+  if (!currentSession?.token) {
+    setTicketOrderMessage("Sign in to place a real order.", "error");
+    return;
+  }
+  const symbol = tradeChartState.apiSymbol;
+  const lots = Number(document.querySelector("#ticketLotsValue")?.textContent) || 0;
+  const multiplier = Number(tradeTicketCopy.multiplier) || 100;
+  const button = document.querySelector(direction === "buy" ? "#buyOrderButton" : "#sellOrderButton");
+  if (button) button.disabled = true;
+  try {
+    const result = await authRequest("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol, side: direction, lots, multiplier }),
+    });
+    applyLiveBalance(result.balance);
+    setTicketOrderMessage(
+      `${direction === "buy" ? "Bought" : "Sold"} ${lots.toFixed(2)} lots of ${compactSymbol(symbol)} @ ${Number(result.order.entry_price).toFixed(4)}.`,
+      "success",
+    );
+    if (document.querySelector("#orders")?.classList.contains("is-active")) loadOrders();
+  } catch (error) {
+    setTicketOrderMessage(error.message, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+document.querySelector("#buyOrderButton")?.addEventListener("click", () => placeOrder("buy"));
+document.querySelector("#sellOrderButton")?.addEventListener("click", () => placeOrder("sell"));
 
 async function tickLiveCandle() {
   if (!document.querySelector("#trade")?.classList.contains("is-active")) return;
@@ -2378,20 +2559,21 @@ function renderManagedUsers() {
   table.innerHTML = visibleUsers.map((user) => {
     const statusClass = user.status === "suspended" ? "is-suspended" : user.status === "pending" ? "is-pending" : "";
     const kycClass = user.kycStatus === "rejected" ? "is-rejected" : user.kycStatus === "pending" ? "is-pending" : "";
-    const disabled = canEditManagedUsers() ? "" : "disabled";
-    const actionCell = canEditManagedUsers() ? `<button class="managed-save-button" type="button" data-managed-user="${escapeHtml(user.id)}">Save</button>` : `<span class="status-pill">view only</span>`;
+    const roleDisabled = canEditManagedUsers() ? "" : "disabled";
+    const financeDisabled = canEditUserFinancials() ? "" : "disabled";
+    const actionCell = canEditUserFinancials() ? `<button class="managed-save-button" type="button" data-managed-user="${escapeHtml(user.id)}">Save</button>` : `<span class="status-pill">view only</span>`;
     return `
       <tr data-managed-user-row="${escapeHtml(user.id)}">
         <td><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.email)}</small></td>
         <td>
-          <select data-user-field="role" ${disabled}>
+          <select data-user-field="role" ${roleDisabled}>
             <option value="user" ${user.role === "user" ? "selected" : ""}>User</option>
             <option value="team" ${user.role === "team" ? "selected" : ""}>Team</option>
             <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
           </select>
         </td>
         <td>
-          <select data-user-field="status" ${disabled}>
+          <select data-user-field="status" ${roleDisabled}>
             <option value="active" ${user.status === "active" ? "selected" : ""}>Active</option>
             <option value="pending" ${user.status === "pending" ? "selected" : ""}>Pending</option>
             <option value="suspended" ${user.status === "suspended" ? "selected" : ""}>Suspended</option>
@@ -2399,14 +2581,25 @@ function renderManagedUsers() {
           <span class="status-pill ${statusClass}">${escapeHtml(user.status || "active")}</span>
         </td>
         <td>
-          <select data-user-field="kycStatus" ${disabled}>
+          <select data-user-field="kycStatus" ${financeDisabled}>
             <option value="pending" ${user.kycStatus === "pending" ? "selected" : ""}>Pending</option>
             <option value="verified" ${user.kycStatus === "verified" ? "selected" : ""}>Verified</option>
             <option value="rejected" ${user.kycStatus === "rejected" ? "selected" : ""}>Rejected</option>
           </select>
           <span class="status-pill ${kycClass}">${escapeHtml(user.kycStatus || "pending")}</span>
         </td>
-        <td><input data-user-field="balance" type="number" min="0" step="0.01" value="${Number(user.balance || 0).toFixed(2)}" ${disabled} /></td>
+        <td class="balance-cell">
+          <strong>${formatCurrency(user.balance)}</strong>
+          ${canEditUserFinancials()
+            ? user.kycStatus === "verified"
+              ? `<div class="wallet-action-row" data-wallet-user="${escapeHtml(user.id)}">
+                   <input type="number" min="0.01" step="0.01" placeholder="Amount" class="wallet-amount-input" />
+                   <button type="button" class="wallet-deposit-btn" data-wallet-action="deposit">+ Deposit</button>
+                   <button type="button" class="wallet-withdraw-btn" data-wallet-action="withdraw">− Withdraw</button>
+                 </div>`
+              : `<small class="wallet-kyc-hint">Verify KYC to enable deposits</small>`
+            : ""}
+        </td>
         <td>${actionCell}</td>
       </tr>`;
   }).join("");
@@ -2587,7 +2780,7 @@ async function openRequestDetail(id) {
   subtitleEl.textContent = details.join(" · ");
 
   actionsEl.innerHTML = "";
-  if (item.type === "kyc" && currentSession?.user?.role === "admin") {
+  if (item.type === "kyc" && ["admin", "team"].includes(currentSession?.user?.role)) {
     const approveBtn = document.createElement("button");
     approveBtn.type = "button";
     approveBtn.className = "approve-btn";
@@ -2657,7 +2850,6 @@ document.querySelector("#managedUserForm")?.addEventListener("submit", async (ev
     return;
   }
   const data = Object.fromEntries(new FormData(event.target).entries());
-  data.balance = Number(data.balance || 0);
   try {
     const result = await adminFetch("/api/admin/users", {
       method: "POST",
@@ -2666,7 +2858,6 @@ document.querySelector("#managedUserForm")?.addEventListener("submit", async (ev
     managedUsers = [result.user, ...managedUsers];
     event.target.reset();
     event.target.elements.password.value = "Client@12345";
-    event.target.elements.balance.value = "0";
     renderManagedUsers();
     setManagedMessage(`Created ${result.user.email}. Temporary password: ${result.temporaryPassword}`, "success");
   } catch (error) {
@@ -2677,14 +2868,17 @@ document.querySelector("#managedUserForm")?.addEventListener("submit", async (ev
 document.querySelector("#managedUserTable")?.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-managed-user]");
   if (!button) return;
-  if (!canEditManagedUsers()) {
-    setManagedMessage("Only admin can update users.", "error");
+  if (!canEditUserFinancials()) {
+    setManagedMessage("Only admin or team can update users.", "error");
     return;
   }
   const row = button.closest("[data-managed-user-row]");
   const id = button.dataset.managedUser;
-  const patch = Object.fromEntries([...row.querySelectorAll("[data-user-field]")].map((input) => [input.dataset.userField, input.value]));
-  patch.balance = Number(patch.balance || 0);
+  const patch = Object.fromEntries(
+    [...row.querySelectorAll("[data-user-field]")]
+      .filter((input) => !input.disabled)
+      .map((input) => [input.dataset.userField, input.value]),
+  );
 
   try {
     const result = await adminFetch(`/api/admin/users/${id}`, {
@@ -2694,6 +2888,31 @@ document.querySelector("#managedUserTable")?.addEventListener("click", async (ev
     managedUsers = managedUsers.map((user) => (user.id === id ? result.user : user));
     renderManagedUsers();
     setManagedMessage(`Updated ${result.user.email}.`, "success");
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+});
+
+document.querySelector("#managedUserTable")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-wallet-action]");
+  if (!button) return;
+  const row = button.closest("[data-wallet-user]");
+  const userId = row?.dataset.walletUser;
+  const amountInput = row?.querySelector(".wallet-amount-input");
+  const amount = Number(amountInput?.value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    setManagedMessage("Enter a valid amount.", "error");
+    return;
+  }
+  const action = button.dataset.walletAction;
+  try {
+    const result = await adminFetch(`/api/admin/users/${userId}/${action}`, {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    });
+    managedUsers = managedUsers.map((user) => (user.id === userId ? result.user : user));
+    renderManagedUsers();
+    setManagedMessage(`${action === "deposit" ? "Deposited" : "Withdrew"} ${formatCurrency(amount)} for ${result.user.email}. New balance: ${formatCurrency(result.user.balance)}.`, "success");
   } catch (error) {
     setManagedMessage(error.message, "error");
   }
@@ -2818,6 +3037,7 @@ loadTradeInstruments();
 loadMarketsInstruments();
 loadManagedUsers();
 loadManagedInstruments();
+loadOrders();
 setInterval(tickMarkets, 1500);
 setInterval(refreshMarketsQuotes, 7000);
 setInterval(tickTradeCandles, 1500);

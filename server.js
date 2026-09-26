@@ -113,6 +113,8 @@ const memory = {
   instruments: defaultInstruments.map((instrument) => ({ id: crypto.randomUUID(), ...instrument })),
   serviceRequests: [],
   chatMessages: [],
+  orders: [],
+  ledger: [],
 };
 
 let pool = null;
@@ -145,6 +147,7 @@ function normalizeUser(row) {
     referredBy: row.referred_by || row.referredBy,
     kycStatus: row.kyc_status || row.kycStatus,
     balance: Number(row.balance || 0),
+    marginUsed: Number(row.margin_used ?? row.marginUsed ?? 0),
     passwordHash: row.password_hash || row.passwordHash,
     createdAt: row.created_at || row.createdAt,
   };
@@ -161,9 +164,12 @@ function normalizeInstrument(row) {
   };
 }
 
-async function query(text, params = []) {
-  if (!pool) return null;
-  const result = await pool.query(text, params);
+// `client` lets a caller run this inside an existing transaction (see
+// withUserLock) instead of a fresh pool connection.
+async function query(text, params = [], client = null) {
+  const runner = client || pool;
+  if (!runner) return null;
+  const result = await runner.query(text, params);
   return result.rows;
 }
 
@@ -207,6 +213,7 @@ async function createUser({ email, password, name, role = "user", referredBy = n
     referredBy,
     kycStatus,
     balance,
+    marginUsed: 0,
     createdAt: new Date().toISOString(),
   };
   memory.users.push(user);
@@ -235,7 +242,6 @@ function normalizeManagedUserPatch(body) {
   if (body.role !== undefined) patch.role = String(body.role).toLowerCase();
   if (body.status !== undefined) patch.status = String(body.status).toLowerCase();
   if (body.kycStatus !== undefined) patch.kycStatus = String(body.kycStatus).toLowerCase();
-  if (body.balance !== undefined) patch.balance = Number(body.balance);
   return patch;
 }
 
@@ -244,10 +250,13 @@ function validateManagedUserPatch(patch) {
   if (patch.role !== undefined && !["admin", "team", "user"].includes(patch.role)) return "Invalid role";
   if (patch.status !== undefined && !["active", "pending", "suspended"].includes(patch.status)) return "Invalid status";
   if (patch.kycStatus !== undefined && !["pending", "verified", "rejected"].includes(patch.kycStatus)) return "Invalid KYC status";
-  if (patch.balance !== undefined && (!Number.isFinite(patch.balance) || patch.balance < 0)) return "Invalid balance";
   return null;
 }
 
+// Handles name/role/status/kycStatus only - never balance. Balance only ever
+// moves through withUserLock + a ledger entry (deposit, withdrawal, order
+// margin/P&L), so every change is atomic, audited, and race-safe. This blind
+// COALESCE overwrite would bypass all of that.
 async function updateUser(id, patch) {
   if (pool) {
     const rows = await query(
@@ -255,11 +264,10 @@ async function updateUser(id, patch) {
        SET name = COALESCE($2, name),
            role = COALESCE($3, role),
            status = COALESCE($4, status),
-           kyc_status = COALESCE($5, kyc_status),
-           balance = COALESCE($6, balance)
+           kyc_status = COALESCE($5, kyc_status)
        WHERE id = $1
        RETURNING *`,
-      [id, patch.name ?? null, patch.role ?? null, patch.status ?? null, patch.kycStatus ?? null, patch.balance ?? null],
+      [id, patch.name ?? null, patch.role ?? null, patch.status ?? null, patch.kycStatus ?? null],
     );
     return normalizeUser(rows[0]);
   }
@@ -268,6 +276,113 @@ async function updateUser(id, patch) {
   if (!user) return null;
   Object.assign(user, patch);
   return user;
+}
+
+// Runs `fn(user, client)` with the user's row locked for the duration of a
+// single DB transaction (Postgres: SELECT ... FOR UPDATE inside BEGIN/COMMIT),
+// so a deposit, an order open, and an order close can never race each other
+// into an inconsistent balance. In memory mode there's no real concurrency
+// (Node is single-threaded and fn never awaits between reading and writing
+// the user object), so it just runs fn directly against the live record.
+// fn should return { error, status } to abort/rollback, or its own result.
+async function withUserLock(userId, fn) {
+  if (!pool) {
+    const user = memory.users.find((item) => item.id === userId);
+    if (!user) return { error: "User not found", status: 404 };
+    return fn({ ...user }, null);
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query("SELECT * FROM users WHERE id = $1 FOR UPDATE", [userId]);
+    if (!rows[0]) {
+      await client.query("ROLLBACK");
+      return { error: "User not found", status: 404 };
+    }
+    const result = await fn(normalizeUser(rows[0]), client);
+    if (result.error) {
+      await client.query("ROLLBACK");
+      return result;
+    }
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function setUserWallet(userId, { balance, marginUsed }, client = null) {
+  if (pool) {
+    await query(
+      "UPDATE users SET balance = COALESCE($2, balance), margin_used = COALESCE($3, margin_used) WHERE id = $1",
+      [userId, balance ?? null, marginUsed ?? null],
+      client,
+    );
+    return;
+  }
+  const user = memory.users.find((item) => item.id === userId);
+  if (!user) return;
+  if (balance !== undefined) user.balance = balance;
+  if (marginUsed !== undefined) user.marginUsed = marginUsed;
+}
+
+async function insertLedgerEntry({ userId, type, amount, balanceBefore, balanceAfter, referenceId = null, createdBy = null }, client = null) {
+  if (pool) {
+    const rows = await query(
+      `INSERT INTO ledger (user_id, type, amount, balance_before, balance_after, reference_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [userId, type, amount, balanceBefore, balanceAfter, referenceId, createdBy],
+      client,
+    );
+    return rows[0];
+  }
+  const entry = {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    type,
+    amount,
+    balance_before: balanceBefore,
+    balance_after: balanceAfter,
+    reference_id: referenceId,
+    created_by: createdBy,
+    created_at: new Date().toISOString(),
+  };
+  memory.ledger.push(entry);
+  return entry;
+}
+
+async function listLedgerEntries(userId) {
+  if (pool) {
+    return query("SELECT * FROM ledger WHERE user_id = $1 ORDER BY created_at DESC", [userId]);
+  }
+  return memory.ledger.filter((entry) => entry.user_id === userId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+}
+
+async function recordDeposit({ userId, amount, createdBy }) {
+  return withUserLock(userId, async (user, client) => {
+    if (user.kycStatus !== "verified") return { error: "User must complete KYC verification before deposits", status: 403 };
+    const balanceBefore = user.balance;
+    const balanceAfter = Math.round((balanceBefore + amount) * 100) / 100;
+    await setUserWallet(userId, { balance: balanceAfter }, client);
+    const ledgerEntry = await insertLedgerEntry({ userId, type: "deposit", amount, balanceBefore, balanceAfter, createdBy }, client);
+    return { user: { ...user, balance: balanceAfter }, ledgerEntry };
+  });
+}
+
+async function recordWithdrawal({ userId, amount, createdBy }) {
+  return withUserLock(userId, async (user, client) => {
+    if (user.kycStatus !== "verified") return { error: "User must complete KYC verification before withdrawals", status: 403 };
+    if (user.balance < amount) return { error: "Insufficient balance", status: 400 };
+    const balanceBefore = user.balance;
+    const balanceAfter = Math.round((balanceBefore - amount) * 100) / 100;
+    await setUserWallet(userId, { balance: balanceAfter }, client);
+    const ledgerEntry = await insertLedgerEntry({ userId, type: "withdrawal", amount: -amount, balanceBefore, balanceAfter, createdBy }, client);
+    return { user: { ...user, balance: balanceAfter }, ledgerEntry };
+  });
 }
 
 async function listInstruments({ tradeOnly = false, includeDisabled = false } = {}) {
@@ -409,6 +524,75 @@ async function listChatMessages(requestId) {
   return memory.chatMessages.filter((message) => message.request_id === requestId);
 }
 
+async function createOrder({ userId, symbol, direction, lots, multiplier, entryPrice, marginHeld, fee }, client = null) {
+  if (pool) {
+    const rows = await query(
+      `INSERT INTO orders (user_id, symbol, direction, lots, multiplier, entry_price, margin_held, fee)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [userId, symbol, direction, lots, multiplier, entryPrice, marginHeld, fee],
+      client,
+    );
+    return rows[0];
+  }
+  const order = {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    symbol,
+    direction,
+    lots,
+    multiplier,
+    entry_price: entryPrice,
+    exit_price: null,
+    margin_held: marginHeld,
+    fee,
+    realized_pnl: null,
+    status: "open",
+    opened_at: new Date().toISOString(),
+    closed_at: null,
+  };
+  memory.orders.push(order);
+  return order;
+}
+
+async function listOrders(userId, status) {
+  if (pool) {
+    const rows = status
+      ? await query("SELECT * FROM orders WHERE user_id = $1 AND status = $2 ORDER BY opened_at DESC", [userId, status])
+      : await query("SELECT * FROM orders WHERE user_id = $1 ORDER BY opened_at DESC", [userId]);
+    return rows;
+  }
+  return memory.orders
+    .filter((order) => order.user_id === userId && (!status || order.status === status))
+    .sort((a, b) => String(b.opened_at).localeCompare(String(a.opened_at)));
+}
+
+async function findOrderById(id) {
+  if (pool) {
+    const rows = await query("SELECT * FROM orders WHERE id = $1", [id]);
+    return rows[0] || null;
+  }
+  return memory.orders.find((order) => order.id === id) || null;
+}
+
+async function closeOrderRecord(id, { exitPrice, realizedPnl }, client = null) {
+  if (pool) {
+    const rows = await query(
+      `UPDATE orders SET status = 'closed', exit_price = $2, realized_pnl = $3, closed_at = NOW() WHERE id = $1 RETURNING *`,
+      [id, exitPrice, realizedPnl],
+      client,
+    );
+    return rows[0] || null;
+  }
+  const order = memory.orders.find((item) => item.id === id);
+  if (!order) return null;
+  order.status = "closed";
+  order.exit_price = exitPrice;
+  order.realized_pnl = realizedPnl;
+  order.closed_at = new Date().toISOString();
+  return order;
+}
+
 function requireAuth(request, response, next) {
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, "");
   if (!token) return response.status(401).json({ error: "Missing auth token" });
@@ -440,6 +624,7 @@ async function seedDefaults() {
     const schemaPath = path.join(rootDir, "db", "schema.sql");
     await query(fs.readFileSync(schemaPath, "utf8"));
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0`);
     for (const instrument of defaultInstruments) await seedInstrument(instrument);
   }
 
@@ -646,6 +831,8 @@ app.post("/api/admin/users", requireAuth, attachUser, requireRole("admin"), asyn
   if (validationError) return response.status(400).json({ error: validationError });
   if (await findUserByEmail(email)) return response.status(409).json({ error: "Email already registered" });
 
+  // New accounts always start at a zero balance - funding only ever happens
+  // through the audited deposit endpoint below, never as a raw create-time value.
   const user = await createUser({
     email,
     password,
@@ -653,19 +840,56 @@ app.post("/api/admin/users", requireAuth, attachUser, requireRole("admin"), asyn
     role: patch.role || "user",
     status: patch.status || "active",
     kycStatus: patch.kycStatus || "pending",
-    balance: patch.balance || 0,
+    balance: 0,
   });
   response.status(201).json({ user: publicUser(user), temporaryPassword: password });
 });
 
-app.patch("/api/admin/users/:id", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
+app.patch("/api/admin/users/:id", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
   const patch = normalizeManagedUserPatch(request.body);
+  // Team can update balance/KYC/name (their day-to-day support duties) but not
+  // promote/demote roles or change account status - those stay admin-only to
+  // avoid a team member escalating their own or another account's privileges.
+  if (request.user.role === "team" && (patch.role !== undefined || patch.status !== undefined)) {
+    return response.status(403).json({ error: "Only admin can change role or account status" });
+  }
   const validationError = validateManagedUserPatch(patch);
   if (validationError) return response.status(400).json({ error: validationError });
 
   const user = await updateUser(request.params.id, patch);
   if (!user) return response.status(404).json({ error: "User not found" });
   response.json({ user: publicUser(user) });
+});
+
+// Deposits and withdrawals are the only way a user's balance moves outside of
+// their own order activity, and both require the target account to have
+// completed KYC. Every call writes a ledger entry (audit trail) atomically
+// alongside the balance change via withUserLock/recordDeposit/recordWithdrawal.
+app.post("/api/admin/users/:id/deposit", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+  const amount = Math.round(Number(request.body.amount) * 100) / 100;
+  if (!Number.isFinite(amount) || amount <= 0) return response.status(400).json({ error: "Invalid amount" });
+
+  const result = await recordDeposit({ userId: request.params.id, amount, createdBy: request.user.id });
+  if (result.error) return response.status(result.status || 400).json({ error: result.error });
+
+  broadcast({ type: "user.balance", userId: result.user.id, balance: result.user.balance });
+  response.json({ user: publicUser(result.user), ledgerEntry: result.ledgerEntry });
+});
+
+app.post("/api/admin/users/:id/withdraw", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+  const amount = Math.round(Number(request.body.amount) * 100) / 100;
+  if (!Number.isFinite(amount) || amount <= 0) return response.status(400).json({ error: "Invalid amount" });
+
+  const result = await recordWithdrawal({ userId: request.params.id, amount, createdBy: request.user.id });
+  if (result.error) return response.status(result.status || 400).json({ error: result.error });
+
+  broadcast({ type: "user.balance", userId: result.user.id, balance: result.user.balance });
+  response.json({ user: publicUser(result.user), ledgerEntry: result.ledgerEntry });
+});
+
+app.get("/api/admin/users/:id/ledger", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+  const entries = await listLedgerEntries(request.params.id);
+  response.json({ entries });
 });
 
 app.get("/api/referrals", requireAuth, attachUser, async (request, response) => {
@@ -932,6 +1156,118 @@ function scheduleStreamReconnect() {
   }, twelveDataStreamReconnectMs);
   twelveDataStreamReconnectMs = Math.min(twelveDataStreamMaxReconnectMs, twelveDataStreamReconnectMs * 2);
 }
+
+// Standard forex/CFD convention: 1 lot = 100 units of the instrument. Margin
+// required = (lots * unitsPerLot * price) / multiplier (multiplier acting as
+// leverage, e.g. 100 = 1:100), plus a small handling fee on top of margin.
+const orderUnitsPerLot = 100;
+const orderFeeRate = 0.001;
+
+// Best-effort current price for order pricing: prefer the live quoteStore
+// (populated by the twelvedata pollers/stream), and fall back to a
+// deterministic, slowly-drifting per-symbol price when no real feed is
+// configured (mock mode) or the poller hasn't reached this symbol yet - so
+// opening and closing a position still produce a sane, non-random P&L instead
+// of two unrelated Math.random() calls.
+function getCurrentPrice(symbol) {
+  const entry = quoteStore.get(symbol);
+  const price = Number(entry?.data?.close ?? entry?.data?.price);
+  if (Number.isFinite(price) && price > 0) return price;
+
+  const seed = [...symbol].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return Number((50 + (seed % 200) + Math.sin(Date.now() / 60000 + seed) * 5).toFixed(4));
+}
+
+function floatingPnl(order, currentPrice) {
+  const directionSign = order.direction === "buy" ? 1 : -1;
+  return Math.round(directionSign * (currentPrice - Number(order.entry_price)) * Number(order.lots) * orderUnitsPerLot * 100) / 100;
+}
+
+app.post("/api/orders", requireAuth, attachUser, async (request, response) => {
+  const symbol = String(request.body.symbol || "").trim().toUpperCase();
+  const direction = String(request.body.side || request.body.direction || "").toLowerCase();
+  const lots = Number(request.body.lots);
+  const multiplier = Number(request.body.multiplier) || 100;
+
+  if (!["buy", "sell"].includes(direction)) return response.status(400).json({ error: "Invalid direction" });
+  if (!Number.isFinite(lots) || lots < 0.01 || lots > 100) return response.status(400).json({ error: "Invalid lot size" });
+  if (!Number.isFinite(multiplier) || multiplier <= 0 || multiplier > 1000) return response.status(400).json({ error: "Invalid multiplier" });
+
+  const tradableSymbols = new Set((await listInstruments({ tradeOnly: true })).map((instrument) => instrument.symbol));
+  if (!tradableSymbols.has(symbol)) return response.status(400).json({ error: "Symbol is not tradable" });
+
+  // Server computes, client displays: price/margin/fee are recomputed here
+  // from the live feed, never taken from the request body.
+  const price = getCurrentPrice(symbol);
+  if (!Number.isFinite(price) || price <= 0) return response.status(503).json({ error: "Price unavailable, try again shortly" });
+
+  const notional = lots * orderUnitsPerLot * price;
+  const margin = Math.round((notional / multiplier) * 100) / 100;
+  const fee = Math.round(margin * orderFeeRate * 100) / 100;
+
+  const result = await withUserLock(request.user.id, async (user, client) => {
+    if (user.balance < margin + fee) return { error: "Insufficient balance", status: 400 };
+
+    const balanceBeforeMargin = user.balance;
+    const afterMargin = Math.round((balanceBeforeMargin - margin) * 100) / 100;
+    const afterFee = Math.round((afterMargin - fee) * 100) / 100;
+    const marginUsedAfter = Math.round((user.marginUsed + margin) * 100) / 100;
+
+    await setUserWallet(user.id, { balance: afterFee, marginUsed: marginUsedAfter }, client);
+    const order = await createOrder({ userId: user.id, symbol, direction, lots, multiplier, entryPrice: price, marginHeld: margin, fee }, client);
+    await insertLedgerEntry({ userId: user.id, type: "margin_hold", amount: -margin, balanceBefore: balanceBeforeMargin, balanceAfter: afterMargin, referenceId: order.id, createdBy: user.id }, client);
+    if (fee > 0) {
+      await insertLedgerEntry({ userId: user.id, type: "fee", amount: -fee, balanceBefore: afterMargin, balanceAfter: afterFee, referenceId: order.id, createdBy: user.id }, client);
+    }
+    return { order, balance: afterFee };
+  });
+
+  if (result.error) return response.status(result.status || 400).json({ error: result.error });
+  broadcast({ type: "order.update", order: result.order, userId: request.user.id, balance: result.balance });
+  response.status(201).json({ order: result.order, balance: result.balance });
+});
+
+app.get("/api/orders", requireAuth, attachUser, async (request, response) => {
+  const status = ["open", "closed"].includes(request.query.status) ? request.query.status : undefined;
+  const orders = await listOrders(request.user.id, status);
+  // Floating P&L is computed fresh on every read, never persisted per tick.
+  const enriched = orders.map((order) => {
+    if (order.status !== "open") return order;
+    const currentPrice = getCurrentPrice(order.symbol);
+    return { ...order, current_price: currentPrice, floating_pnl: floatingPnl(order, currentPrice) };
+  });
+  response.json({ orders: enriched });
+});
+
+app.post("/api/orders/:id/close", requireAuth, attachUser, async (request, response) => {
+  const order = await findOrderById(request.params.id);
+  if (!order) return response.status(404).json({ error: "Order not found" });
+  if (order.user_id !== request.user.id && !["admin", "team"].includes(request.user.role)) {
+    return response.status(403).json({ error: "Forbidden" });
+  }
+  if (order.status !== "open") return response.status(400).json({ error: "Order already closed" });
+
+  const exitPrice = getCurrentPrice(order.symbol);
+  const realizedPnl = floatingPnl(order, exitPrice);
+  const marginHeld = Number(order.margin_held);
+
+  const result = await withUserLock(order.user_id, async (user, client) => {
+    const balanceBeforeRelease = user.balance;
+    const afterRelease = Math.round((balanceBeforeRelease + marginHeld) * 100) / 100;
+    const afterPnl = Math.round((afterRelease + realizedPnl) * 100) / 100;
+    const marginUsedAfter = Math.max(0, Math.round((user.marginUsed - marginHeld) * 100) / 100);
+
+    await setUserWallet(user.id, { balance: afterPnl, marginUsed: marginUsedAfter }, client);
+    const closedOrder = await closeOrderRecord(order.id, { exitPrice, realizedPnl }, client);
+    await insertLedgerEntry({ userId: user.id, type: "margin_release", amount: marginHeld, balanceBefore: balanceBeforeRelease, balanceAfter: afterRelease, referenceId: order.id, createdBy: request.user.id }, client);
+    await insertLedgerEntry({ userId: user.id, type: "trade_pnl", amount: realizedPnl, balanceBefore: afterRelease, balanceAfter: afterPnl, referenceId: order.id, createdBy: request.user.id }, client);
+    return { order: closedOrder, balance: afterPnl };
+  });
+
+  if (result.error) return response.status(result.status || 400).json({ error: result.error });
+  broadcast({ type: "order.update", order: result.order, userId: order.user_id, balance: result.balance });
+  response.json({ order: result.order, balance: result.balance, pnl: realizedPnl });
+});
 
 app.get("/api/markets/quotes", async (request, response) => {
   const requestedSymbols = String(request.query.symbols || "")

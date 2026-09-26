@@ -3016,6 +3016,60 @@ tr.is-selected-request {
   font-weight: 900;
 }
 
+.managed-user-hint {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.balance-cell {
+  min-width: 11rem;
+}
+
+.balance-cell strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-family: var(--font-mono);
+}
+
+.wallet-kyc-hint {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.wallet-action-row {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.wallet-amount-input {
+  width: 5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.3rem;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.35rem 0.4rem;
+  font-size: 0.72rem;
+}
+
+.wallet-deposit-btn,
+.wallet-withdraw-btn {
+  border: 0;
+  border-radius: 0.3rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.wallet-deposit-btn {
+  background: var(--green);
+}
+
+.wallet-withdraw-btn {
+  background: var(--red);
+}
+
 .status-pill.is-pending {
   background: rgba(255, 176, 0, 0.13);
   color: var(--gold);
@@ -3802,6 +3856,19 @@ input[type="checkbox"] {
   background: transparent;
   color: var(--muted);
   font-weight: 900;
+}
+
+.close-position-btn {
+  border: 1px solid rgba(232, 61, 48, 0.5) !important;
+  border-radius: 0.35rem;
+  background: rgba(232, 61, 48, 0.12) !important;
+  color: #f87171 !important;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.72rem;
+}
+
+.close-position-btn:disabled {
+  opacity: 0.6;
 }
 
 .load-more {
