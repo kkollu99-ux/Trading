@@ -231,6 +231,8 @@ function updateRoleAccess() {
   document.querySelector("#products")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector(".managed-form-card")?.classList.toggle("is-hidden", allowed && !editable);
   document.querySelector(".managed-instrument-card")?.classList.toggle("is-hidden", !allowed);
+  document.querySelector("#clientServiceCard")?.classList.toggle("is-hidden", allowed);
+  document.querySelector("#adminServiceInboxCard")?.classList.toggle("is-hidden", !allowed);
 
   if (!allowed) {
     managedUsers = [];
@@ -307,6 +309,9 @@ function moveSection(id) {
   }
   if (id === "orders") {
     loadOrders();
+  }
+  if (id === "service" && canManageUsers()) {
+    loadServiceInbox();
   }
   drawCharts();
   renderTradeCandles();
@@ -1439,6 +1444,88 @@ document.querySelectorAll("[data-chat-topic]").forEach((button) => {
     openProcessChat(button.dataset.chatTopic);
   });
 });
+
+// Admin/team "Online Service" inbox: opens the same floating chat widget
+// used for the client-side deposit/withdrawal/verification/support chats,
+// but pointed at an existing user's service-request thread rather than
+// finding-or-creating one for the current session's own account.
+async function openAdminChatThread(serviceRequest, clientLabel) {
+  if (!processChatWindow) return;
+  currentProcessChatTopic = null;
+  processChatTitle.textContent = `${serviceRequest.type.toUpperCase()} · ${clientLabel}`;
+  processChatSubtitle.textContent = `Status: ${serviceRequest.status}`;
+  processChatWindow.classList.remove("is-hidden");
+  processChatLauncher?.classList.add("is-hidden");
+  activeServiceRequestId = serviceRequest.id;
+  processChatMessages.innerHTML = "";
+  try {
+    const history = await adminFetch(`/api/service-requests/${serviceRequest.id}/messages`);
+    (history?.messages || []).forEach((message) => {
+      appendProcessChatMessage(message.body, {
+        self: message.sender_id === currentSession.user.id,
+        imageSrc: message.attachment_url ? `${apiBase}${message.attachment_url}` : undefined,
+      });
+    });
+  } catch (error) {
+    appendProcessChatMessage(error.message);
+  }
+  processChatInput?.focus();
+}
+
+function renderServiceInbox() {
+  const list = document.querySelector("#serviceInboxList");
+  if (!list) return;
+  const latestByUser = new Map();
+  for (const item of serviceRequests) {
+    if (!latestByUser.has(item.user_id)) latestByUser.set(item.user_id, item);
+  }
+  const entries = [...latestByUser.values()];
+  if (!entries.length) {
+    list.innerHTML = `<div class="profile-empty-state"><span>💬</span><strong>No conversations yet</strong><small>Client chats will appear here.</small></div>`;
+    return;
+  }
+  list.innerHTML = entries
+    .map((item) => {
+      const client = findManagedUserById(item.user_id);
+      const label = client ? client.name || client.email : item.user_id;
+      const initial = (client?.name || client?.email || "?").charAt(0).toUpperCase();
+      const date = item.created_at ? new Date(item.created_at).toLocaleString() : "";
+      return `<button class="chat-history-row" type="button" data-service-request-id="${escapeHtml(item.id)}">
+        <span>${escapeHtml(initial)}</span>
+        <div>
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml(item.type)} · ${escapeHtml(item.status)} · ${escapeHtml(date)}</small>
+        </div>
+        <i>›</i>
+      </button>`;
+    })
+    .join("");
+}
+
+async function loadServiceInbox() {
+  if (!canManageUsers()) return;
+  if (!managedUsers.length) {
+    try {
+      const usersData = await adminFetch("/api/admin/users");
+      managedUsers = usersData.users || [];
+    } catch {
+      // Cards still render with the raw user id as a fallback label.
+    }
+  }
+  await refreshServiceRequestsCache();
+  renderServiceInbox();
+}
+
+document.querySelector("#serviceInboxList")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-service-request-id]");
+  if (!button) return;
+  const item = serviceRequests.find((request) => request.id === button.dataset.serviceRequestId);
+  if (!item) return;
+  const client = findManagedUserById(item.user_id);
+  openAdminChatThread(item, client ? client.name || client.email : item.user_id);
+});
+
+document.querySelector("#refreshServiceInbox")?.addEventListener("click", loadServiceInbox);
 
 document.querySelector("#closeProcessChat")?.addEventListener("click", () => {
   processChatWindow?.classList.add("is-hidden");
@@ -3095,6 +3182,7 @@ async function refreshServiceRequestsCache() {
     pendingRequestUserIds = new Set(serviceRequests.filter((item) => item.status === "pending").map((item) => item.user_id));
     renderManagedUsers();
     if (activeUserDetailId) renderUserDetailRequestsList();
+    if (document.querySelector("#service")?.classList.contains("is-active")) renderServiceInbox();
   } catch {
     // A stale badge/list until the next refresh isn't worth surfacing as an error.
   }
