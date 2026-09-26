@@ -361,6 +361,25 @@ async function listServiceRequests(user) {
   return memory.serviceRequests.filter((request) => user.role !== "user" || request.user_id === user.id);
 }
 
+async function findServiceRequestById(id) {
+  if (pool) {
+    const rows = await query("SELECT * FROM service_requests WHERE id = $1", [id]);
+    return rows[0] || null;
+  }
+  return memory.serviceRequests.find((request) => request.id === id) || null;
+}
+
+async function updateServiceRequestStatus(id, status) {
+  if (pool) {
+    const rows = await query("UPDATE service_requests SET status = $2 WHERE id = $1 RETURNING *", [id, status]);
+    return rows[0] || null;
+  }
+  const request = memory.serviceRequests.find((item) => item.id === id);
+  if (!request) return null;
+  request.status = status;
+  return request;
+}
+
 async function createChatMessage({ requestId, senderId, body, attachmentUrl }) {
   if (pool) {
     const rows = await query(
@@ -1077,21 +1096,54 @@ app.get("/api/service-requests", requireAuth, attachUser, async (request, respon
   response.json({ serviceRequests: await listServiceRequests(request.user) });
 });
 
-app.get("/api/service-requests/:id/messages", requireAuth, attachUser, async (request, response) => {
+app.patch("/api/service-requests/:id", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+  const status = String(request.body.status || "").toLowerCase();
+  if (!["pending", "approved", "rejected", "resolved"].includes(status)) {
+    return response.status(400).json({ error: "Invalid status" });
+  }
+  const serviceRequest = await updateServiceRequestStatus(request.params.id, status);
+  if (!serviceRequest) return response.status(404).json({ error: "Service request not found" });
+  broadcast({ type: "service-request.status", serviceRequest });
+  response.json({ serviceRequest });
+});
+
+// Both message endpoints below previously had no ownership check at all - any
+// authenticated user could read or post into any OTHER user's request thread
+// just by guessing/incrementing an id. Team/admin legitimately need access to
+// every thread (that's the inbox), but a plain "user" role only ever gets
+// their own.
+async function requireRequestAccess(request, response, next) {
+  const serviceRequest = await findServiceRequestById(request.params.id);
+  if (!serviceRequest) return response.status(404).json({ error: "Service request not found" });
+  if (request.user.role === "user" && serviceRequest.user_id !== request.user.id) {
+    return response.status(403).json({ error: "Forbidden" });
+  }
+  request.serviceRequest = serviceRequest;
+  return next();
+}
+
+app.get("/api/service-requests/:id/messages", requireAuth, attachUser, requireRequestAccess, async (request, response) => {
   response.json({ messages: await listChatMessages(request.params.id) });
 });
 
-app.post("/api/service-requests/:id/messages", requireAuth, attachUser, upload.single("attachment"), async (request, response) => {
-  const attachmentUrl = request.file ? `/uploads/${request.file.filename}` : null;
-  const message = await createChatMessage({
-    requestId: request.params.id,
-    senderId: request.user.id,
-    body: request.body.body || "",
-    attachmentUrl,
-  });
-  broadcast({ type: "chat.message", message });
-  response.status(201).json({ message });
-});
+app.post(
+  "/api/service-requests/:id/messages",
+  requireAuth,
+  attachUser,
+  requireRequestAccess,
+  upload.single("attachment"),
+  async (request, response) => {
+    const attachmentUrl = request.file ? `/uploads/${request.file.filename}` : null;
+    const message = await createChatMessage({
+      requestId: request.params.id,
+      senderId: request.user.id,
+      body: request.body.body || "",
+      attachmentUrl,
+    });
+    broadcast({ type: "chat.message", message });
+    response.status(201).json({ message });
+  },
+);
 
 app.use(express.static(rootDir));
 app.get("*", (_request, response) => {

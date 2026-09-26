@@ -188,7 +188,7 @@ function updateRoleAccess() {
   renderAccountSummary();
   const allowed = canManageUsers();
   const editable = canEditManagedUsers();
-  document.querySelectorAll('[data-section="users"]').forEach((item) => {
+  document.querySelectorAll('[data-section="users"], [data-section="requests"]').forEach((item) => {
     item.hidden = !allowed;
     item.classList.toggle("is-hidden", !allowed);
   });
@@ -202,6 +202,7 @@ function updateRoleAccess() {
     renderManagedUsers();
     renderManagedInstruments();
     if (document.querySelector("#users")?.classList.contains("is-active")) moveSection("dashboard");
+    if (document.querySelector("#requests")?.classList.contains("is-active")) moveSection("dashboard");
   }
 }
 
@@ -251,7 +252,7 @@ function getNavLabel(item) {
 }
 
 function moveSection(id) {
-  if (id === "users" && !canManageUsers()) id = "dashboard";
+  if ((id === "users" || id === "requests") && !canManageUsers()) id = "dashboard";
   navItems.forEach((item) => item.classList.toggle("is-active", item.dataset.section === id));
   sections.forEach((section) => section.classList.toggle("is-active", section.id === id));
   if (id === "dashboard") {
@@ -262,6 +263,12 @@ function moveSection(id) {
   if (id === "users" && canManageUsers()) {
     loadManagedUsers();
     loadManagedInstruments();
+  }
+  if (id === "requests" && canManageUsers()) {
+    loadServiceRequestsInbox();
+  }
+  if (id === "profile") {
+    loadTransactionHistory();
   }
   if (id === "markets") {
     refreshMarketsQuotes();
@@ -977,6 +984,65 @@ const processChatTopics = {
   },
 };
 
+// Deposit/withdrawal/verification chats are backed by real service-request
+// threads (persisted, visible to admin/team in the Requests inbox); "support"
+// has no matching request type in the schema, so it stays the local-only
+// cosmetic chat it always was, same as for anyone without a real session.
+const chatTopicToRequestType = { deposit: "deposit", withdrawal: "withdrawal", verification: "kyc" };
+let activeServiceRequestId = null;
+
+async function authRequest(path, options = {}) {
+  if (!currentSession?.token) throw new Error("Not signed in");
+  const response = await fetch(`${apiBase}${path}`, {
+    ...options,
+    headers: { Authorization: `Bearer ${currentSession.token}`, ...(options.headers || {}) },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+async function loadOrCreateServiceRequestChat(type, introMessage) {
+  processChatMessages.innerHTML = "";
+  try {
+    const existing = await authFetch("/api/service-requests");
+    let serviceRequest = (existing?.serviceRequests || []).find((item) => item.type === type && item.status === "pending");
+    if (!serviceRequest) {
+      const created = await authRequest("/api/service-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type }),
+      });
+      serviceRequest = created.serviceRequest;
+    }
+    activeServiceRequestId = serviceRequest.id;
+    appendProcessChatMessage(introMessage);
+    const history = await authFetch(`/api/service-requests/${serviceRequest.id}/messages`);
+    (history?.messages || []).forEach((message) => {
+      appendProcessChatMessage(message.body, {
+        self: message.sender_id === currentSession.user.id,
+        imageSrc: message.attachment_url ? `${apiBase}${message.attachment_url}` : undefined,
+      });
+    });
+  } catch {
+    activeServiceRequestId = null;
+    appendProcessChatMessage(introMessage);
+  }
+}
+
+function applyIncomingChatMessage(message) {
+  if (!message || message.request_id !== activeServiceRequestId) return;
+  if (message.sender_id === currentSession?.user?.id) return; // already shown when we sent it
+  appendProcessChatMessage(message.body, {
+    imageSrc: message.attachment_url ? `${apiBase}${message.attachment_url}` : undefined,
+  });
+}
+
+function applyIncomingRequestStatus(serviceRequest) {
+  if (!serviceRequest || serviceRequest.user_id !== currentSession?.user?.id) return;
+  if (document.querySelector("#profile")?.classList.contains("is-active")) loadTransactionHistory();
+}
+
 function appendProcessChatMessage(message, options = {}) {
   if (!processChatMessages) return;
   const bubble = document.createElement("div");
@@ -1002,7 +1068,7 @@ function appendProcessChatMessage(message, options = {}) {
   if (chatHistoryPreview) chatHistoryPreview.textContent = message;
 }
 
-function openProcessChat(topicName = "deposit") {
+async function openProcessChat(topicName = "deposit") {
   if (!processChatWindow) return;
   const topic = processChatTopics[topicName] || processChatTopics.deposit;
   const shouldAddTopicMessage = currentProcessChatTopic !== topicName || processChatWindow.classList.contains("is-hidden");
@@ -1011,7 +1077,14 @@ function openProcessChat(topicName = "deposit") {
   processChatSubtitle.textContent = topic.subtitle;
   processChatWindow.classList.remove("is-hidden");
   processChatLauncher?.classList.add("is-hidden");
-  if (shouldAddTopicMessage) appendProcessChatMessage(topic.message);
+
+  const requestType = chatTopicToRequestType[topicName];
+  if (requestType && currentSession?.token) {
+    await loadOrCreateServiceRequestChat(requestType, topic.message);
+  } else {
+    activeServiceRequestId = null;
+    if (shouldAddTopicMessage) appendProcessChatMessage(topic.message);
+  }
   processChatInput?.focus();
 }
 
@@ -1041,20 +1114,42 @@ document.querySelector("#openSupportChat")?.addEventListener("click", () => {
   openProcessChat("support");
 });
 
-document.querySelector("#processChatForm")?.addEventListener("submit", (event) => {
+document.querySelector("#processChatForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const message = processChatInput?.value.trim();
   if (!message) return;
-  appendProcessChatMessage(message, { self: true });
   processChatInput.value = "";
+  appendProcessChatMessage(message, { self: true });
+  if (activeServiceRequestId && currentSession?.token) {
+    try {
+      await authRequest(`/api/service-requests/${activeServiceRequestId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: message }),
+      });
+    } catch {
+      appendProcessChatMessage("Message failed to send — please try again.");
+    }
+  }
 });
 
-document.querySelector("#processChatImageInput")?.addEventListener("change", (event) => {
+document.querySelector("#processChatImageInput")?.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
-  const imageUrl = URL.createObjectURL(file);
-  appendProcessChatMessage(`Uploaded image: ${file.name}`, { self: true, imageSrc: imageUrl, imageAlt: file.name });
   event.target.value = "";
+  const imageUrl = URL.createObjectURL(file);
+  const caption = `Uploaded image: ${file.name}`;
+  appendProcessChatMessage(caption, { self: true, imageSrc: imageUrl, imageAlt: file.name });
+  if (activeServiceRequestId && currentSession?.token) {
+    try {
+      const formData = new FormData();
+      formData.append("attachment", file);
+      formData.append("body", caption);
+      await authRequest(`/api/service-requests/${activeServiceRequestId}/messages`, { method: "POST", body: formData });
+    } catch {
+      appendProcessChatMessage("Image upload failed — please try again.");
+    }
+  }
 });
 
 function filterWatchlist() {
@@ -1856,6 +1951,10 @@ function connectPriceStream() {
     }
     if (payload.type === "price-tick") applyLiveTick(payload);
     else if (payload.type === "market-status") applyMarketStatus(payload);
+    else if (payload.type === "chat.message") {
+      applyIncomingChatMessage(payload.message);
+      applyIncomingRequestMessageForAdmin(payload.message);
+    } else if (payload.type === "service-request.status") applyIncomingRequestStatus(payload.serviceRequest);
   });
 
   priceStreamSocket.addEventListener("close", () => {
@@ -2378,6 +2477,182 @@ async function loadManagedInstruments() {
 document.querySelector("#managedUserSearch")?.addEventListener("input", renderManagedUsers);
 document.querySelector("#refreshManagedUsers")?.addEventListener("click", loadManagedUsers);
 document.querySelector("#refreshManagedInstruments")?.addEventListener("click", loadManagedInstruments);
+
+// Admin/team "Requests" inbox: the real client-facing chat (see
+// loadOrCreateServiceRequestChat above) persists to the same service_requests/
+// chat_messages tables this reads, so a client's deposit/withdrawal/KYC
+// message shows up here live via the same "chat.message" WS broadcast.
+let serviceRequests = [];
+let activeRequestDetailId = null;
+
+function findManagedUserById(id) {
+  return managedUsers.find((user) => user.id === id) || null;
+}
+
+function renderRequestsTable() {
+  const table = document.querySelector("#requestsTable");
+  if (!table) return;
+  if (!serviceRequests.length) {
+    table.innerHTML = '<tr><td colspan="5">No service requests yet.</td></tr>';
+    return;
+  }
+  table.innerHTML = serviceRequests
+    .map((item) => {
+      const client = findManagedUserById(item.user_id);
+      const clientLabel = client ? client.name || client.email : item.user_id;
+      const date = item.created_at ? new Date(item.created_at).toLocaleString() : "";
+      const isSelected = item.id === activeRequestDetailId;
+      return `<tr class="${isSelected ? "is-selected-request" : ""}">
+        <td>${escapeHtml(date)}</td>
+        <td>${escapeHtml(clientLabel)}</td>
+        <td>${escapeHtml(item.type)}</td>
+        <td><span class="status-pill">${escapeHtml(item.status)}</span></td>
+        <td><button type="button" class="secondary-action compact-action open-request-btn" data-request-id="${item.id}">View</button></td>
+      </tr>`;
+    })
+    .join("");
+}
+
+async function loadServiceRequestsInbox() {
+  const table = document.querySelector("#requestsTable");
+  if (!table || !canManageUsers()) return;
+  try {
+    if (!managedUsers.length) {
+      const usersData = await adminFetch("/api/admin/users");
+      managedUsers = usersData.users || [];
+    }
+    const data = await adminFetch("/api/service-requests");
+    serviceRequests = (data.serviceRequests || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    renderRequestsTable();
+  } catch (error) {
+    table.innerHTML = `<tr><td colspan="5">${escapeHtml(error.message)}</td></tr>`;
+  }
+}
+
+function appendRequestDetailMessage(message) {
+  const messagesEl = document.querySelector("#requestDetailMessages");
+  if (!messagesEl) return;
+  const isSelf = message.sender_id === currentSession?.user?.id;
+  const bubble = document.createElement("div");
+  bubble.className = `support-bubble${isSelf ? " self" : ""}`;
+  const content = document.createElement("p");
+  content.textContent = message.body;
+  if (message.attachment_url) {
+    const image = document.createElement("img");
+    image.src = `${apiBase}${message.attachment_url}`;
+    image.alt = "Attachment";
+    content.append(image);
+  }
+  bubble.append(content);
+  messagesEl.append(bubble);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+async function updateRequestStatus(item, status) {
+  try {
+    await adminFetch(`/api/service-requests/${item.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+    item.status = status;
+    renderRequestsTable();
+    if (activeRequestDetailId === item.id) openRequestDetail(item.id);
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+}
+
+async function approveOrRejectKyc(item, kycStatus) {
+  try {
+    await adminFetch(`/api/admin/users/${item.user_id}`, { method: "PATCH", body: JSON.stringify({ kycStatus }) });
+    await updateRequestStatus(item, "resolved");
+    const client = findManagedUserById(item.user_id);
+    if (client) client.kycStatus = kycStatus;
+    renderManagedUsers();
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+}
+
+async function openRequestDetail(id) {
+  activeRequestDetailId = id;
+  renderRequestsTable();
+  const card = document.querySelector("#requestDetailCard");
+  const messagesEl = document.querySelector("#requestDetailMessages");
+  const titleEl = document.querySelector("#requestDetailTitle");
+  const subtitleEl = document.querySelector("#requestDetailSubtitle");
+  const actionsEl = document.querySelector("#requestDetailActions");
+  const item = serviceRequests.find((request) => request.id === id);
+  if (!card || !messagesEl || !item) return;
+  card.hidden = false;
+
+  const client = findManagedUserById(item.user_id);
+  titleEl.textContent = `${item.type.toUpperCase()} · ${client ? client.name || client.email : item.user_id}`;
+  const details = [`Status: ${item.status}`];
+  if (item.amount) details.push(`Amount: ${formatCurrency(item.amount)}`);
+  if (item.note) details.push(item.note);
+  subtitleEl.textContent = details.join(" · ");
+
+  actionsEl.innerHTML = "";
+  if (item.type === "kyc" && currentSession?.user?.role === "admin") {
+    const approveBtn = document.createElement("button");
+    approveBtn.type = "button";
+    approveBtn.className = "approve-btn";
+    approveBtn.textContent = "Approve KYC";
+    approveBtn.addEventListener("click", () => approveOrRejectKyc(item, "verified"));
+    const rejectBtn = document.createElement("button");
+    rejectBtn.type = "button";
+    rejectBtn.className = "reject-btn";
+    rejectBtn.textContent = "Reject KYC";
+    rejectBtn.addEventListener("click", () => approveOrRejectKyc(item, "rejected"));
+    actionsEl.append(approveBtn, rejectBtn);
+  }
+  if (item.status !== "resolved") {
+    const resolveBtn = document.createElement("button");
+    resolveBtn.type = "button";
+    resolveBtn.className = "resolve-btn";
+    resolveBtn.textContent = "Mark Resolved";
+    resolveBtn.addEventListener("click", () => updateRequestStatus(item, "resolved"));
+    actionsEl.append(resolveBtn);
+  }
+
+  messagesEl.innerHTML = "";
+  try {
+    const data = await adminFetch(`/api/service-requests/${id}/messages`);
+    (data.messages || []).forEach(appendRequestDetailMessage);
+  } catch (error) {
+    messagesEl.innerHTML = `<div class="support-bubble"><p>${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+document.querySelector("#refreshServiceRequests")?.addEventListener("click", loadServiceRequestsInbox);
+
+document.querySelector("#requestsTable")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-request-id]");
+  if (button) openRequestDetail(button.dataset.requestId);
+});
+
+document.querySelector("#requestDetailForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.querySelector("#requestDetailInput");
+  const body = input?.value.trim();
+  if (!body || !activeRequestDetailId) return;
+  input.value = "";
+  try {
+    const data = await adminFetch(`/api/service-requests/${activeRequestDetailId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    });
+    appendRequestDetailMessage(data.message);
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+});
+
+// Live updates in the open thread when a client (or another team member)
+// sends a message, without needing to reopen the detail panel.
+function applyIncomingRequestMessageForAdmin(message) {
+  if (!message || message.request_id !== activeRequestDetailId) return;
+  if (message.sender_id === currentSession?.user?.id) return; // already shown when we sent it
+  appendRequestDetailMessage(message);
+}
 
 document.querySelector("#managedUserForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();

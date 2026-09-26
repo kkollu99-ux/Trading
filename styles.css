@@ -2810,6 +2810,57 @@ canvas {
   grid-template-columns: minmax(18rem, 0.54fr) minmax(0, 1.46fr);
 }
 
+.request-detail-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 24rem;
+}
+
+.request-detail-messages {
+  flex: 1;
+  min-height: 14rem;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.request-detail-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.request-detail-actions button {
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0.4rem 0.7rem;
+  font-weight: 800;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.request-detail-actions .approve-btn {
+  background: var(--green);
+  color: white;
+}
+
+.request-detail-actions .reject-btn {
+  background: var(--red);
+  color: white;
+}
+
+.request-detail-actions .resolve-btn {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.managed-user-table td.request-row {
+  cursor: pointer;
+}
+
+tr.is-selected-request {
+  background: rgba(0, 115, 255, 0.1);
+}
+
 .managed-form-card h3,
 .managed-table-head h3 {
   font-size: 1rem;
