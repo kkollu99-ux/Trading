@@ -1421,6 +1421,8 @@ function syncTradeTerminal(ohlcCandle) {
   setTradeText("#tradeSymbolCategory", tradeChartState.category[0] + tradeChartState.category.slice(1).toLowerCase());
   setTradeText("#tradeSymbolPrice", formatTradeNumber(latest.close));
   setTradeText("#tradeSymbolChange", moveText);
+  setTradeText("#ticketSymbolName", tradeChartState.symbol);
+  setTradeText("#ticketSymbolPrice", formatTradeNumber(latest.close));
   // The O/H/L/C readout follows whatever candle is under the cursor (hover
   // inspection); everything else (price, bid/ask, spread) always reflects the
   // true live candle regardless of what's being hovered.
@@ -2203,60 +2205,50 @@ connectPriceStream();
   });
 })();
 
-const tradeTicketState = {
-  kind: "spot",
-  mode: "market",
-};
-
 const tradeTicketCopy = {
-  spot: {
-    note: "Spot order · BTCUSD settlement",
-    multiplier: "100",
-    lot: "1 Lots = 1 BTCUSD",
-    fee: "0.064000",
-    margin: "6.400000",
-  },
-  futures: {
-    note: "Futures order · BTCUSD perpetual",
-    multiplier: "500",
-    lot: "1 Lots = 1 BTCUSD Perp",
-    fee: "0.128000",
-    margin: "12.800000",
-  },
+  multiplier: "100",
+  fee: "0.064000",
+  margin: "6.400000",
 };
 
 function renderTradeTicket() {
-  const ticket = tradeTicketCopy[tradeTicketState.kind];
-  const isPending = tradeTicketState.mode === "pending";
-  const settlement = tradeTicketState.kind === "spot" ? "settlement" : "perpetual";
   const symbol = tradeChartState.symbol;
 
-  document.querySelector("#ticketKindNote").textContent = `${tradeTicketState.kind === "spot" ? "Spot" : "Futures"} order · ${symbol} ${settlement}`;
-  document.querySelector("#ticketMultiplier").textContent = ticket.multiplier;
-  document.querySelector("#ticketLotValue").textContent = `1 Lots = 1 ${symbol}${tradeTicketState.kind === "futures" ? " Perp" : ""}`;
-  document.querySelector("#ticketFeeValue").textContent = ticket.fee;
-  document.querySelector("#ticketMarginValue").textContent = ticket.margin;
+  document.querySelector("#ticketKindNote").textContent = `Spot order · ${symbol} settlement`;
+  document.querySelector("#ticketMultiplier").textContent = tradeTicketCopy.multiplier;
+  document.querySelector("#ticketLotValue").textContent = `1 Lots = 1 ${symbol}`;
+  document.querySelector("#ticketFeeValue").textContent = tradeTicketCopy.fee;
+  document.querySelector("#ticketMarginValue").textContent = tradeTicketCopy.margin;
   document.querySelector("#ticketBalanceValue").textContent = Number(currentSession?.user?.balance || 0).toFixed(2);
-  document.querySelector("#ticketModeTitle").textContent = isPending ? "Pending Orders" : "Market Price";
-  document.querySelector("#pendingOrderFields").classList.toggle("is-hidden", !isPending);
-  document.querySelector("#buyOrderButton").textContent = isPending ? "Place Buy" : "Buy";
-  document.querySelector("#sellOrderButton").textContent = isPending ? "Place Sell" : "Sell";
 }
 
-document.querySelectorAll("[data-ticket-kind]").forEach((button) => {
+document.querySelectorAll("[data-risk-toggle]").forEach((button) => {
   button.addEventListener("click", () => {
-    tradeTicketState.kind = button.dataset.ticketKind;
-    document.querySelectorAll("[data-ticket-kind]").forEach((item) => item.classList.toggle("is-active", item === button));
-    renderTradeTicket();
+    const isOn = !button.classList.contains("is-on");
+    button.classList.toggle("is-on", isOn);
+    button.setAttribute("aria-pressed", String(isOn));
+    document.querySelector(`[data-risk-stepper="${button.dataset.riskToggle}"]`)?.classList.toggle("is-enabled", isOn);
   });
 });
 
-document.querySelectorAll("[data-order-mode]").forEach((button) => {
+document.querySelectorAll("[data-risk-step]").forEach((button) => {
   button.addEventListener("click", () => {
-    tradeTicketState.mode = button.dataset.orderMode;
-    document.querySelectorAll("[data-order-mode]").forEach((item) => item.classList.toggle("is-active", item === button));
-    renderTradeTicket();
+    const key = button.dataset.riskStep;
+    const valueEl = document.querySelector(`[data-risk-value="${key}"]`);
+    if (!valueEl) return;
+    const next = Math.max(0, Number(valueEl.textContent) + Number(button.dataset.riskDir));
+    valueEl.textContent = next % 1 === 0 ? String(next) : next.toFixed(2);
   });
+});
+
+document.querySelector("#lotsIncrease")?.addEventListener("click", () => {
+  const valueEl = document.querySelector("#ticketLotsValue");
+  valueEl.textContent = (Number(valueEl.textContent) + 0.01).toFixed(2);
+});
+
+document.querySelector("#lotsDecrease")?.addEventListener("click", () => {
+  const valueEl = document.querySelector("#ticketLotsValue");
+  valueEl.textContent = Math.max(0.01, Number(valueEl.textContent) - 0.01).toFixed(2);
 });
 
 async function tickLiveCandle() {
