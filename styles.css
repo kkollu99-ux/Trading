@@ -2835,12 +2835,6 @@ canvas {
   grid-template-columns: 1fr;
 }
 
-.request-detail-card {
-  display: flex;
-  flex-direction: column;
-  min-height: 24rem;
-}
-
 .request-detail-messages {
   flex: 1;
   min-height: 14rem;
@@ -2876,14 +2870,6 @@ canvas {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-}
-
-.managed-user-table td.request-row {
-  cursor: pointer;
-}
-
-tr.is-selected-request {
-  background: rgba(0, 115, 255, 0.1);
 }
 
 .managed-form-card h3,
@@ -4694,6 +4680,61 @@ input[type="checkbox"] {
 
 .user-detail-pane.is-active {
   display: block;
+}
+
+.request-badge {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-left: 0.4rem;
+  border-radius: 50%;
+  background: var(--red);
+  vertical-align: middle;
+}
+
+.user-detail-requests-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.user-detail-request-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-detail-request-row small {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.user-detail-request-row.is-selected-request {
+  border-color: var(--blue);
+  background: rgba(0, 115, 255, 0.1);
+}
+
+.user-detail-request-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.user-detail-request-thread .request-detail-messages {
+  min-height: 8rem;
+  max-height: 14rem;
 }
 
 .clone-service-list i {

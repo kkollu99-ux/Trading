@@ -204,7 +204,7 @@ function updateRoleAccess() {
   renderAccountSummary();
   const allowed = canManageUsers();
   const editable = canEditManagedUsers();
-  document.querySelectorAll('[data-section="users"], [data-section="products"], [data-section="requests"]').forEach((item) => {
+  document.querySelectorAll('[data-section="users"], [data-section="products"]').forEach((item) => {
     item.hidden = !allowed;
     item.classList.toggle("is-hidden", !allowed);
   });
@@ -220,7 +220,6 @@ function updateRoleAccess() {
     renderManagedInstruments();
     if (document.querySelector("#users")?.classList.contains("is-active")) moveSection("dashboard");
     if (document.querySelector("#products")?.classList.contains("is-active")) moveSection("dashboard");
-    if (document.querySelector("#requests")?.classList.contains("is-active")) moveSection("dashboard");
   }
 }
 
@@ -270,7 +269,7 @@ function getNavLabel(item) {
 }
 
 function moveSection(id) {
-  if ((id === "users" || id === "products" || id === "requests") && !canManageUsers()) id = "dashboard";
+  if ((id === "users" || id === "products") && !canManageUsers()) id = "dashboard";
   navItems.forEach((item) => item.classList.toggle("is-active", item.dataset.section === id));
   sections.forEach((section) => section.classList.toggle("is-active", section.id === id));
   if (id === "dashboard") {
@@ -283,9 +282,6 @@ function moveSection(id) {
   }
   if (id === "products" && canManageUsers()) {
     loadManagedInstruments();
-  }
-  if (id === "requests" && canManageUsers()) {
-    loadServiceRequestsInbox();
   }
   if (id === "markets") {
     refreshMarketsQuotes();
@@ -2786,7 +2782,7 @@ function renderManagedUsers() {
     const actionCell = canEditUserFinancials() ? `<button class="managed-save-button" type="button" data-managed-user="${escapeHtml(user.id)}">Save</button>` : `<span class="status-pill">view only</span>`;
     return `
       <tr data-managed-user-row="${escapeHtml(user.id)}">
-        <td><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.email)}</small></td>
+        <td><strong>${escapeHtml(user.name)}</strong>${pendingRequestUserIds.has(user.id) ? '<span class="request-badge" title="Has an open support request"></span>' : ""}<small>${escapeHtml(user.email)}</small></td>
         <td>
           <select data-user-field="role" ${roleDisabled}>
             <option value="user" ${user.role === "user" ? "selected" : ""}>User</option>
@@ -2866,6 +2862,7 @@ async function loadManagedUsers() {
   } catch (error) {
     setManagedMessage(error.message, "error");
   }
+  refreshServiceRequestsCache();
 }
 
 async function loadManagedInstruments() {
@@ -2889,59 +2886,63 @@ document.querySelector("#managedUserSearch")?.addEventListener("input", renderMa
 document.querySelector("#refreshManagedUsers")?.addEventListener("click", loadManagedUsers);
 document.querySelector("#refreshManagedInstruments")?.addEventListener("click", loadManagedInstruments);
 
-// Admin/team "Requests" inbox: the real client-facing chat (see
+// Admin/team support requests: the real client-facing chat (see
 // loadOrCreateServiceRequestChat above) persists to the same service_requests/
 // chat_messages tables this reads, so a client's deposit/withdrawal/KYC
-// message shows up here live via the same "chat.message" WS broadcast.
+// message shows up here live via the same "chat.message" WS broadcast. This
+// is cached globally (not scoped to one user) so the Users table can flag
+// every row with an open request via a small badge next to the name; the
+// per-user Requests tab in the user-detail modal just filters this cache.
 let serviceRequests = [];
-let activeRequestDetailId = null;
+let pendingRequestUserIds = new Set();
+let activeUserDetailRequestId = null;
+// Bumped by any fetch or local mutation of serviceRequests, so a background
+// refresh (triggered by a chat.message echo, e.g. right after replying) that
+// resolves late can't clobber a more recent status change with stale data.
+let serviceRequestsCacheToken = 0;
 
 function findManagedUserById(id) {
   return managedUsers.find((user) => user.id === id) || null;
 }
 
-function renderRequestsTable() {
-  const table = document.querySelector("#requestsTable");
-  if (!table) return;
-  if (!serviceRequests.length) {
-    table.innerHTML = '<tr><td colspan="5">No service requests yet.</td></tr>';
+async function refreshServiceRequestsCache() {
+  if (!canManageUsers()) return;
+  const token = ++serviceRequestsCacheToken;
+  try {
+    const data = await adminFetch("/api/service-requests");
+    if (token !== serviceRequestsCacheToken) return;
+    serviceRequests = (data.serviceRequests || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    pendingRequestUserIds = new Set(serviceRequests.filter((item) => item.status === "pending").map((item) => item.user_id));
+    renderManagedUsers();
+    if (activeUserDetailId) renderUserDetailRequestsList();
+  } catch {
+    // A stale badge/list until the next refresh isn't worth surfacing as an error.
+  }
+}
+
+function renderUserDetailRequestsList() {
+  const list = document.querySelector("#userDetailRequestsList");
+  if (!list) return;
+  const items = serviceRequests.filter((item) => item.user_id === activeUserDetailId);
+  if (!items.length) {
+    list.innerHTML = `<div class="profile-empty-state"><span>💬</span><strong>No requests yet</strong><small>This user hasn't contacted support.</small></div>`;
     return;
   }
-  table.innerHTML = serviceRequests
+  list.innerHTML = items
     .map((item) => {
-      const client = findManagedUserById(item.user_id);
-      const clientLabel = client ? client.name || client.email : item.user_id;
       const date = item.created_at ? new Date(item.created_at).toLocaleString() : "";
-      const isSelected = item.id === activeRequestDetailId;
-      return `<tr class="${isSelected ? "is-selected-request" : ""}">
-        <td>${escapeHtml(date)}</td>
-        <td>${escapeHtml(clientLabel)}</td>
-        <td>${escapeHtml(item.type)}</td>
-        <td><span class="status-pill">${escapeHtml(item.status)}</span></td>
-        <td><button type="button" class="secondary-action compact-action open-request-btn" data-request-id="${item.id}">View</button></td>
-      </tr>`;
+      const isSelected = item.id === activeUserDetailRequestId;
+      return `<button type="button" class="user-detail-request-row${isSelected ? " is-selected-request" : ""}" data-user-detail-request-id="${item.id}">
+        <span>${escapeHtml(item.type)}${item.amount ? ` · ${formatCurrency(item.amount)}` : ""}</span>
+        <span class="status-pill">${escapeHtml(item.status)}</span>
+        <small>${escapeHtml(date)}</small>
+      </button>`;
     })
     .join("");
 }
 
-async function loadServiceRequestsInbox() {
-  const table = document.querySelector("#requestsTable");
-  if (!table || !canManageUsers()) return;
-  try {
-    if (!managedUsers.length) {
-      const usersData = await adminFetch("/api/admin/users");
-      managedUsers = usersData.users || [];
-    }
-    const data = await adminFetch("/api/service-requests");
-    serviceRequests = (data.serviceRequests || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    renderRequestsTable();
-  } catch (error) {
-    table.innerHTML = `<tr><td colspan="5">${escapeHtml(error.message)}</td></tr>`;
-  }
-}
-
-function appendRequestDetailMessage(message) {
-  const messagesEl = document.querySelector("#requestDetailMessages");
+function appendUserDetailRequestMessage(message) {
+  const messagesEl = document.querySelector("#userDetailRequestMessages");
   if (!messagesEl) return;
   const isSelf = message.sender_id === currentSession?.user?.id;
   const bubble = document.createElement("div");
@@ -2960,11 +2961,18 @@ function appendRequestDetailMessage(message) {
 }
 
 async function updateRequestStatus(item, status) {
+  // Invalidated synchronously, before the first await, so an already-in-flight
+  // refreshServiceRequestsCache() (e.g. one triggered by this same reply's own
+  // chat.message echo) can't resolve later and clobber this update with the
+  // pre-mutation snapshot it fetched.
+  serviceRequestsCacheToken++;
   try {
     await adminFetch(`/api/service-requests/${item.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
     item.status = status;
-    renderRequestsTable();
-    if (activeRequestDetailId === item.id) openRequestDetail(item.id);
+    pendingRequestUserIds = new Set(serviceRequests.filter((entry) => entry.status === "pending").map((entry) => entry.user_id));
+    renderManagedUsers();
+    renderUserDetailRequestsList();
+    if (activeUserDetailRequestId === item.id) openUserDetailRequestThread(item.id);
   } catch (error) {
     setManagedMessage(error.message, "error");
   }
@@ -2972,37 +2980,40 @@ async function updateRequestStatus(item, status) {
 
 async function approveOrRejectKyc(item, kycStatus) {
   try {
-    await adminFetch(`/api/admin/users/${item.user_id}`, { method: "PATCH", body: JSON.stringify({ kycStatus }) });
+    const result = await adminFetch(`/api/admin/users/${item.user_id}`, { method: "PATCH", body: JSON.stringify({ kycStatus }) });
     await updateRequestStatus(item, "resolved");
-    const client = findManagedUserById(item.user_id);
-    if (client) client.kycStatus = kycStatus;
+    managedUsers = managedUsers.map((user) => (user.id === item.user_id ? result.user : user));
     renderManagedUsers();
+    if (activeUserDetailId === item.user_id) {
+      renderUserDetailHeader(result.user);
+      const kycResult = await adminFetch(`/api/admin/users/${item.user_id}/kyc`);
+      renderUserDetailKyc(kycResult.submission);
+    }
   } catch (error) {
     setManagedMessage(error.message, "error");
   }
 }
 
-async function openRequestDetail(id) {
-  activeRequestDetailId = id;
-  renderRequestsTable();
-  const card = document.querySelector("#requestDetailCard");
-  const messagesEl = document.querySelector("#requestDetailMessages");
-  const titleEl = document.querySelector("#requestDetailTitle");
-  const subtitleEl = document.querySelector("#requestDetailSubtitle");
-  const actionsEl = document.querySelector("#requestDetailActions");
+async function openUserDetailRequestThread(id) {
+  activeUserDetailRequestId = id;
+  renderUserDetailRequestsList();
+  const thread = document.querySelector("#userDetailRequestThread");
+  const messagesEl = document.querySelector("#userDetailRequestMessages");
+  const titleEl = document.querySelector("#userDetailRequestTitle");
+  const subtitleEl = document.querySelector("#userDetailRequestSubtitle");
+  const actionsEl = document.querySelector("#userDetailRequestActions");
   const item = serviceRequests.find((request) => request.id === id);
-  if (!card || !messagesEl || !item) return;
-  card.hidden = false;
+  if (!thread || !messagesEl || !item) return;
+  thread.hidden = false;
 
-  const client = findManagedUserById(item.user_id);
-  titleEl.textContent = `${item.type.toUpperCase()} · ${client ? client.name || client.email : item.user_id}`;
+  titleEl.textContent = item.type.toUpperCase();
   const details = [`Status: ${item.status}`];
   if (item.amount) details.push(`Amount: ${formatCurrency(item.amount)}`);
   if (item.note) details.push(item.note);
   subtitleEl.textContent = details.join(" · ");
 
   actionsEl.innerHTML = "";
-  if (item.type === "kyc" && ["admin", "team"].includes(currentSession?.user?.role)) {
+  if (item.type === "kyc" && item.status === "pending") {
     const approveBtn = document.createElement("button");
     approveBtn.type = "button";
     approveBtn.className = "approve-btn";
@@ -3027,42 +3038,49 @@ async function openRequestDetail(id) {
   messagesEl.innerHTML = "";
   try {
     const data = await adminFetch(`/api/service-requests/${id}/messages`);
-    (data.messages || []).forEach(appendRequestDetailMessage);
+    (data.messages || []).forEach(appendUserDetailRequestMessage);
   } catch (error) {
     messagesEl.innerHTML = `<div class="support-bubble"><p>${escapeHtml(error.message)}</p></div>`;
   }
 }
 
-document.querySelector("#refreshServiceRequests")?.addEventListener("click", loadServiceRequestsInbox);
-
-document.querySelector("#requestsTable")?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-request-id]");
-  if (button) openRequestDetail(button.dataset.requestId);
+document.querySelector("#userDetailRequestsList")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-user-detail-request-id]");
+  if (button) openUserDetailRequestThread(button.dataset.userDetailRequestId);
 });
 
-document.querySelector("#requestDetailForm")?.addEventListener("submit", async (event) => {
+document.querySelector("#userDetailRequestForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const input = document.querySelector("#requestDetailInput");
+  const input = document.querySelector("#userDetailRequestInput");
   const body = input?.value.trim();
-  if (!body || !activeRequestDetailId) return;
+  if (!body || !activeUserDetailRequestId) return;
   input.value = "";
   try {
-    const data = await adminFetch(`/api/service-requests/${activeRequestDetailId}/messages`, {
+    const data = await adminFetch(`/api/service-requests/${activeUserDetailRequestId}/messages`, {
       method: "POST",
       body: JSON.stringify({ body }),
     });
-    appendRequestDetailMessage(data.message);
+    appendUserDetailRequestMessage(data.message);
   } catch (error) {
     setManagedMessage(error.message, "error");
   }
 });
 
-// Live updates in the open thread when a client (or another team member)
-// sends a message, without needing to reopen the detail panel.
+// Live updates: append into an open thread, and keep the Users-table badges
+// and this user's request list in sync whenever any client messages support.
 function applyIncomingRequestMessageForAdmin(message) {
-  if (!message || message.request_id !== activeRequestDetailId) return;
-  if (message.sender_id === currentSession?.user?.id) return; // already shown when we sent it
-  appendRequestDetailMessage(message);
+  if (!message || !canManageUsers()) return;
+  if (message.request_id === activeUserDetailRequestId) {
+    // A plain message never changes the request's status, and refreshing here
+    // (including for our own just-sent reply, echoed back over the same
+    // socket) risks a slow response landing after a status change we make a
+    // moment later and clobbering it with this pre-change snapshot.
+    if (message.sender_id !== currentSession?.user?.id) appendUserDetailRequestMessage(message);
+    return;
+  }
+  // Any other thread's message can only mean a new or reopened request from
+  // a different user, so refresh the cache to pick up its badge/status.
+  refreshServiceRequestsCache();
 }
 
 document.querySelector("#managedUserForm")?.addEventListener("submit", async (event) => {
@@ -3238,9 +3256,13 @@ async function openUserDetailModal(userId) {
   const user = findManagedUserById(userId);
   if (!user) return;
   activeUserDetailId = userId;
+  activeUserDetailRequestId = null;
   renderUserDetailHeader(user);
   document.querySelectorAll("[data-user-detail-tab]").forEach((btn) => btn.classList.toggle("is-active", btn.dataset.userDetailTab === "kyc"));
   document.querySelectorAll("[data-user-detail-pane]").forEach((pane) => pane.classList.toggle("is-active", pane.dataset.userDetailPane === "kyc"));
+  const requestThread = document.querySelector("#userDetailRequestThread");
+  if (requestThread) requestThread.hidden = true;
+  renderUserDetailRequestsList();
   document.querySelector("#userDetailModal")?.classList.remove("is-hidden");
 
   try {
@@ -3261,6 +3283,7 @@ async function openUserDetailModal(userId) {
 
 function closeUserDetailModal() {
   activeUserDetailId = null;
+  activeUserDetailRequestId = null;
   document.querySelector("#userDetailModal")?.classList.add("is-hidden");
 }
 
