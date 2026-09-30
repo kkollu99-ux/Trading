@@ -2490,11 +2490,11 @@ select:focus {
 }
 
 .ticket-funds-banner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
-  margin-bottom: 1rem;
+  /* display: flex; */
+  /* flex-direction: column; */
+  /* align-items: center; */
+  /* gap: 0.25rem; */
+  /* margin-bottom: 1rem; */
   border-radius: 0.75rem;
   background: linear-gradient(135deg, var(--blue), #0052cc);
   padding: 0.9rem 1rem;
@@ -2503,7 +2503,7 @@ select:focus {
 
 .ticket-funds-banner span {
   color: rgba(255, 255, 255, 0.85);
-  font-size: 0.7rem;
+  font-size: 1.2rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2512,16 +2512,22 @@ select:focus {
 .ticket-funds-banner strong {
   color: #fff;
   font-family: var(--font-mono);
-  font-size: 1.5rem;
+  font-size: 1.2rem;
   font-weight: 900;
 }
 
+.ticket-funds-banner strong span{
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 1.2rem;
+  font-weight: 900;
+}
 .ticket-symbol-row {
-  display: flex;
+  /* display: flex; */
   align-items: baseline;
   justify-content: space-between;
   margin-bottom: 1rem;
-  padding: 0 0.1rem;
+  padding: 0.3rem 0.3rem;
 }
 
 .ticket-symbol-row strong {
@@ -2542,20 +2548,28 @@ select:focus {
 }
 
 .order-ticket label > button,
+.order-ticket label > select,
 .lots-control,
 .ticket-summary {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: 2.1rem;
+  /* min-height: 3rem; */
   border: 0;
   border-radius: 0.5rem;
   background: var(--trade-panel-soft);
   color: var(--text);
   padding: 0.45rem 0.75rem;
   text-align: left;
-  font-weight: 900;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.order-ticket label > select {
+  width: 100%;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 1rem;
 }
 
 .risk-block {
@@ -2656,7 +2670,7 @@ select:focus {
 }
 
 .lots-control {
-  margin-top: 0.45rem;
+  /* margin-top: 0.45rem; */
   font-family: var(--font-display);
 }
 
