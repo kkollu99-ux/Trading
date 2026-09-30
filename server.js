@@ -1464,6 +1464,46 @@ app.get("/api/admin/price-simulation", requireAuth, attachUser, requireRole("adm
   response.json({ simulations });
 });
 
+// A per-symbol opt-in: once enabled, placing a buy order on that symbol
+// auto-starts an UP simulation (the favorable direction for a buy) and a
+// sell auto-starts a DOWN simulation (favorable for a sell) - see
+// maybeAutoStartSimulation, called from POST /api/orders. Lets admin/team
+// watch a fresh test order's P&L move without clicking Up/Down themselves
+// every time; the manual controls above still work independently on top.
+const autoSimulationConfig = new Map();
+
+function maybeAutoStartSimulation(symbol, orderDirection) {
+  const config = autoSimulationConfig.get(symbol);
+  if (!config) return;
+  const simDirection = orderDirection === "buy" ? "up" : "down";
+  const durationMs = Number.isFinite(config.durationSeconds) && config.durationSeconds > 0 ? config.durationSeconds * 1000 : null;
+  startPriceSimulation(symbol, simDirection, config.stepPercent, "auto-order", durationMs);
+}
+
+app.post("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+  const symbol = String(request.body.symbol || "").trim().toUpperCase();
+  const enabled = Boolean(request.body.enabled);
+  if (!symbol) return response.status(400).json({ error: "Symbol is required" });
+
+  if (enabled) {
+    const stepPercent = Number(request.body.stepPercent);
+    const durationSeconds = Number(request.body.durationSeconds);
+    autoSimulationConfig.set(symbol, {
+      stepPercent: Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent,
+      durationSeconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
+    });
+  } else {
+    autoSimulationConfig.delete(symbol);
+  }
+  broadcast({ type: "auto-simulation-status", symbol, enabled });
+  response.json({ symbol, enabled });
+});
+
+app.get("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRole("admin", "team"), (_request, response) => {
+  const autoSymbols = [...autoSimulationConfig.keys()];
+  response.json({ autoSymbols });
+});
+
 function floatingPnl(order, currentPrice) {
   const directionSign = order.direction === "buy" ? 1 : -1;
   return Math.round(directionSign * (currentPrice - Number(order.entry_price)) * Number(order.lots) * orderUnitsPerLot * 100) / 100;
@@ -1517,6 +1557,7 @@ app.post("/api/orders", requireAuth, attachUser, async (request, response) => {
 
   if (result.error) return response.status(result.status || 400).json({ error: result.error });
   broadcast({ type: "order.update", order: result.order, userId: request.user.id, balance: result.balance });
+  maybeAutoStartSimulation(symbol, direction);
   response.status(201).json({ order: result.order, balance: result.balance });
 });
 

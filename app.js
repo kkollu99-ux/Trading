@@ -1460,6 +1460,15 @@ function updateTradeSimulationBadge() {
   }
 }
 
+// Mirrors the server's per-symbol "auto on order" toggle so every open tab's
+// Products page shows the same Auto badge/checkbox state.
+function applyAutoSimulationStatus(payload) {
+  if (!payload?.symbol) return;
+  if (payload.enabled) autoSimulationSymbols.add(payload.symbol);
+  else autoSimulationSymbols.delete(payload.symbol);
+  if (document.querySelector("#managedInstrumentList")) renderManagedInstruments();
+}
+
 // Ticks every second so active countdowns ("reverts in 0:42") count down
 // smoothly without needing a full list/badge re-render (which would also
 // blow away whatever duration a team member currently has selected in the
@@ -1702,6 +1711,11 @@ let managedInstruments = [];
 // which direction, so the Products page can show a live badge and the Trade
 // page chart can tell a simulated symbol apart from a real/mock one.
 const activeSimulationsBySymbol = new Map();
+// Symbols with "auto" mode on: the next buy/sell order placed on that symbol
+// (by any user) auto-starts a simulation in the matching favorable direction
+// server-side (see maybeAutoStartSimulation) - this Set only mirrors that
+// state for the Products-page toggle, it doesn't drive anything itself.
+const autoSimulationSymbols = new Set();
 
 function compactSymbol(symbol) {
   return String(symbol || "").replace("/", "");
@@ -2554,6 +2568,7 @@ function connectPriceStream() {
     else if (payload.type === "user.balance") applyIncomingBalanceUpdate(payload);
     else if (payload.type === "order.update") applyIncomingOrderUpdate(payload);
     else if (payload.type === "simulation-status") applySimulationStatus(payload);
+    else if (payload.type === "auto-simulation-status") applyAutoSimulationStatus(payload);
   });
 
   priceStreamSocket.addEventListener("close", () => {
@@ -3221,9 +3236,11 @@ function renderManagedInstruments() {
           ? `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}" data-sim-expires="${escapeHtml(simulation.expiresAt)}"></span>`
           : `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}">Simulating ${simulation.direction === "up" ? "↑" : "↓"}</span>`
         : "";
+      const isAuto = autoSimulationSymbols.has(instrument.symbol);
       const simRow = canManageUsers()
         ? `<div class="instrument-sim-row">
             ${simBadge}
+            ${isAuto ? `<span class="status-pill instrument-auto-badge">Auto ON</span>` : ""}
             <select class="sim-duration-select" data-simulate-duration="${escapeHtml(instrument.symbol)}" title="How long before this auto-reverts to real-time">
               <option value="60" selected>Simulate for 1 min</option>
               <option value="30">30 sec</option>
@@ -3234,6 +3251,9 @@ function renderManagedInstruments() {
             <button type="button" class="sim-up-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="up">↑ Up</button>
             <button type="button" class="sim-down-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="down">↓ Down</button>
             ${simulation ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
+            <label class="sim-auto-toggle" title="Auto-simulate whenever a user places an order on this symbol: Buy → price trends up, Sell → price trends down">
+              <input type="checkbox" data-simulate-auto="${escapeHtml(instrument.symbol)}" ${isAuto ? "checked" : ""} /> Auto on order
+            </label>
           </div>`
         : "";
       return `<div class="instrument-control-row" data-instrument="${escapeHtml(instrument.id)}">
@@ -3280,6 +3300,9 @@ async function loadManagedInstruments() {
       const simData = await adminFetch("/api/admin/price-simulation");
       activeSimulationsBySymbol.clear();
       (simData.simulations || []).forEach((sim) => activeSimulationsBySymbol.set(sim.symbol, { direction: sim.direction, expiresAt: sim.expiresAt || null }));
+      const autoData = await adminFetch("/api/admin/price-simulation/auto");
+      autoSimulationSymbols.clear();
+      (autoData.autoSymbols || []).forEach((symbol) => autoSimulationSymbols.add(symbol));
     } catch {
       // Badges just stay whatever they were locally if this fetch fails - not worth blocking the instrument list over.
     }
@@ -3821,6 +3844,26 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
       });
     }
   } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+});
+
+// "Auto on order" toggle: enabling it doesn't itself start a simulation -
+// it just arms the symbol server-side so the *next* buy/sell order placed
+// on it (by any user) auto-starts one in the matching favorable direction.
+document.querySelector("#managedInstrumentList")?.addEventListener("change", async (event) => {
+  const toggle = event.target.closest("[data-simulate-auto]");
+  if (!toggle || !canManageUsers()) return;
+  const symbol = toggle.dataset.simulateAuto;
+  const durationSelect = document.querySelector(`[data-simulate-duration="${CSS.escape(symbol)}"]`);
+  const durationSeconds = durationSelect?.value ? Number(durationSelect.value) : null;
+  try {
+    await adminFetch("/api/admin/price-simulation/auto", {
+      method: "POST",
+      body: JSON.stringify({ symbol, enabled: toggle.checked, durationSeconds }),
+    });
+  } catch (error) {
+    toggle.checked = !toggle.checked;
     setManagedMessage(error.message, "error");
   }
 });

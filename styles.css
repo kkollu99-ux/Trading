@@ -3194,6 +3194,26 @@ canvas {
   vertical-align: middle;
 }
 
+.instrument-auto-badge {
+  background: rgba(0, 115, 255, 0.14);
+  color: var(--blue);
+}
+
+.sim-auto-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sim-auto-toggle input {
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
 .managed-save-button {
   border: 1px solid rgba(0, 115, 255, 0.6);
   border-radius: 0.35rem;
