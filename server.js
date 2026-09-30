@@ -1390,6 +1390,7 @@ const priceSimulationMaxDurationMs = 60 * 60 * 1000; // 1h safety cap - this is 
 function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs) {
   const existing = priceSimulations.get(symbol);
   if (existing?.timer) clearTimeout(existing.timer);
+  cancelScheduledSimulation(symbol); // a manual/auto trigger supersedes any pending scheduled window
 
   const basePrice = getCurrentPrice(symbol);
   const clampedDurationMs = Number.isFinite(durationMs) && durationMs > 0 ? Math.min(durationMs, priceSimulationMaxDurationMs) : null;
@@ -1417,6 +1418,47 @@ function stopPriceSimulation(symbol) {
   const existed = priceSimulations.delete(symbol);
   if (existed) broadcast({ type: "simulation-status", symbol, active: false });
   return existed;
+}
+
+// Scheduled simulation window: admin picks an absolute from/to time (today,
+// computed client-side in their own timezone into ISO timestamps) instead of
+// "start now for N minutes" - real-time/mock drives the price right up until
+// fromTime, the simulation runs from fromTime to toTime, then it hands back
+// off automatically, same as the duration-based auto-revert above. This is
+// the "not yet started" half; once fromTime arrives it becomes an ordinary
+// entry in priceSimulations (via startPriceSimulation, given the window's
+// length as its duration) and stops being tracked here.
+const scheduledSimulations = new Map();
+
+function cancelScheduledSimulation(symbol) {
+  const scheduled = scheduledSimulations.get(symbol);
+  if (scheduled?.startTimer) clearTimeout(scheduled.startTimer);
+  const existed = scheduledSimulations.delete(symbol);
+  if (existed) broadcast({ type: "simulation-scheduled", symbol, active: false });
+  return existed;
+}
+
+function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO, startedBy) {
+  cancelScheduledSimulation(symbol);
+  const fromMs = new Date(fromISO).getTime();
+  const toMs = new Date(toISO).getTime();
+  const now = Date.now();
+
+  if (fromMs <= now) {
+    // The window's start has already arrived (e.g. admin picked "from" a
+    // minute in the past) - just start right away for whatever's left of it.
+    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - now);
+    return { scheduled: false, active: true };
+  }
+
+  const startTimer = setTimeout(() => {
+    scheduledSimulations.delete(symbol);
+    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - Date.now());
+  }, fromMs - now);
+
+  scheduledSimulations.set(symbol, { direction, stepPercent, fromISO, toISO, startedBy, startTimer });
+  broadcast({ type: "simulation-scheduled", symbol, active: true, direction, fromISO, toISO });
+  return { scheduled: true, active: false };
 }
 
 setInterval(() => {
@@ -1502,6 +1544,50 @@ app.post("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRol
 app.get("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRole("admin", "team"), (_request, response) => {
   const autoSymbols = [...autoSimulationConfig.keys()];
   response.json({ autoSymbols });
+});
+
+app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+  const symbol = String(request.body.symbol || "").trim().toUpperCase();
+  const direction = String(request.body.direction || "").toLowerCase();
+  const stepPercent = Number(request.body.stepPercent);
+  const from = String(request.body.from || "");
+  const to = String(request.body.to || "");
+  if (!symbol) return response.status(400).json({ error: "Symbol is required" });
+  if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
+
+  const fromMs = new Date(from).getTime();
+  const toMs = new Date(to).getTime();
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return response.status(400).json({ error: "Invalid from/to time" });
+  if (toMs <= fromMs) return response.status(400).json({ error: "To time must be after From time" });
+  if (toMs <= Date.now()) return response.status(400).json({ error: "To time must be in the future" });
+  if (toMs - fromMs > priceSimulationMaxDurationMs) return response.status(400).json({ error: "Window can be at most 1 hour" });
+
+  const result = schedulePriceSimulation(
+    symbol,
+    direction,
+    Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent,
+    from,
+    to,
+    request.user.id
+  );
+  response.json({ symbol, direction, ...result });
+});
+
+app.post("/api/admin/price-simulation/schedule/cancel", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+  const symbol = String(request.body.symbol || "").trim().toUpperCase();
+  if (!symbol) return response.status(400).json({ error: "Symbol is required" });
+  cancelScheduledSimulation(symbol);
+  response.json({ symbol, active: false });
+});
+
+app.get("/api/admin/price-simulation/schedule", requireAuth, attachUser, requireRole("admin", "team"), (_request, response) => {
+  const scheduled = [...scheduledSimulations.entries()].map(([symbol, s]) => ({
+    symbol,
+    direction: s.direction,
+    fromISO: s.fromISO,
+    toISO: s.toISO,
+  }));
+  response.json({ scheduled });
 });
 
 function floatingPnl(order, currentPrice) {

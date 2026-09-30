@@ -3214,6 +3214,35 @@ canvas {
   cursor: pointer;
 }
 
+.instrument-schedule-row {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0.3rem;
+}
+
+.sim-time-input {
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.25rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  min-width: 5.5rem;
+  color-scheme: dark;
+}
+
+.sim-time-sep {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.instrument-schedule-badge {
+  background: rgba(255, 191, 0, 0.14);
+  color: var(--gold, #ffbf00);
+}
+
 .managed-save-button {
   border: 1px solid rgba(0, 115, 255, 0.6);
   border-radius: 0.35rem;
