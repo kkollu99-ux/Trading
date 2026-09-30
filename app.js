@@ -1752,6 +1752,10 @@ const activeSimulationsBySymbol = new Map();
 // today that hasn't started yet) - separate from activeSimulationsBySymbol,
 // which only covers a simulation that's actually running right now.
 const scheduledSimulationsBySymbol = new Map();
+// Guards the backfill fetch in applyLiveTick against firing once per tick
+// (ticks land every ~1.5s) while a lookup for that symbol is already in
+// flight.
+const simulationStatusFetchInFlight = new Set();
 
 function compactSymbol(symbol) {
   return String(symbol || "").replace("/", "");
@@ -2513,11 +2517,21 @@ function applyLiveTick(tick) {
   if (isSimulationTick) {
     tradeChartState.isSimulated = true;
     // Covers a client that connected after the simulation-status broadcast
-    // already went out (e.g. opened the Trade page mid-simulation) - the
-    // badge would otherwise never appear even though prices are visibly
-    // moving in one direction.
-    if (!activeSimulationsBySymbol.has(tick.symbol)) {
+    // already went out (e.g. opened the Trade page mid-simulation) - without
+    // this the badge would be stuck showing plain "Simulating" forever, with
+    // no direction/countdown, since it never received the original
+    // broadcast that carried that info.
+    if (!activeSimulationsBySymbol.has(tick.symbol) && !simulationStatusFetchInFlight.has(tick.symbol)) {
       activeSimulationsBySymbol.set(tick.symbol, { direction: null, expiresAt: null });
+      simulationStatusFetchInFlight.add(tick.symbol);
+      authFetch(`/api/price-simulation-status?symbol=${encodeURIComponent(tick.symbol)}`)
+        .then((status) => {
+          simulationStatusFetchInFlight.delete(tick.symbol);
+          if (!status?.active) return;
+          activeSimulationsBySymbol.set(tick.symbol, { direction: status.direction, expiresAt: status.expiresAt || null });
+          if (tick.symbol === tradeChartState.apiSymbol) updateTradeSimulationBadge();
+        })
+        .catch(() => simulationStatusFetchInFlight.delete(tick.symbol));
     }
     updateTradeSimulationBadge();
   }
