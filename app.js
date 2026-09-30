@@ -1416,7 +1416,7 @@ function applyIncomingOrderUpdate(payload) {
 // can show a live badge.
 function applySimulationStatus(payload) {
   if (!payload?.symbol) return;
-  if (payload.active) activeSimulationsBySymbol.set(payload.symbol, payload.direction);
+  if (payload.active) activeSimulationsBySymbol.set(payload.symbol, { direction: payload.direction, expiresAt: payload.expiresAt || null });
   else activeSimulationsBySymbol.delete(payload.symbol);
 
   if (payload.symbol === tradeChartState.apiSymbol) {
@@ -1427,10 +1427,54 @@ function applySimulationStatus(payload) {
       // resumes real/mock generation instead of picking up mid-sequence.
       loadChartForCurrentSymbol();
     }
+    updateTradeSimulationBadge();
   }
 
   if (document.querySelector("#managedInstrumentList")) renderManagedInstruments();
 }
+
+// Small header badge on the Trade page itself, so it's obvious while testing
+// that the current symbol's price is admin-simulated (and, with a duration
+// set, roughly how long until it hands back off to the real-time feed) -
+// distinct from the Products-page badge, which is about picking a symbol to
+// simulate rather than watching the one currently open.
+function updateTradeSimulationBadge() {
+  const badge = document.querySelector("#tradeSimulationBadge");
+  if (!badge) return;
+  const simulation = activeSimulationsBySymbol.get(tradeChartState.apiSymbol);
+  if (!simulation) {
+    badge.classList.add("is-hidden");
+    badge.removeAttribute("data-sim-expires");
+    return;
+  }
+  badge.classList.remove("is-hidden");
+  badge.classList.toggle("is-up", simulation.direction === "up");
+  badge.classList.toggle("is-down", simulation.direction === "down");
+  const arrow = simulation.direction === "up" ? "↑" : simulation.direction === "down" ? "↓" : "";
+  if (simulation.expiresAt) {
+    badge.dataset.simExpires = simulation.expiresAt;
+    renderSimulationCountdowns();
+  } else {
+    badge.removeAttribute("data-sim-expires");
+    badge.textContent = `Simulating ${arrow}`.trim();
+  }
+}
+
+// Ticks every second so active countdowns ("reverts in 0:42") count down
+// smoothly without needing a full list/badge re-render (which would also
+// blow away whatever duration a team member currently has selected in the
+// Products-page dropdown mid-pick).
+function renderSimulationCountdowns() {
+  document.querySelectorAll("[data-sim-expires]").forEach((node) => {
+    const remainingMs = new Date(node.dataset.simExpires).getTime() - Date.now();
+    const remainingSeconds = Math.max(0, Math.round(remainingMs / 1000));
+    const minutes = Math.floor(remainingSeconds / 60);
+    const seconds = String(remainingSeconds % 60).padStart(2, "0");
+    const directionArrow = node.classList.contains("is-up") ? "↑" : "↓";
+    node.textContent = `Simulating ${directionArrow} · ${minutes}:${seconds} left`;
+  });
+}
+setInterval(renderSimulationCountdowns, 1000);
 
 function appendProcessChatMessage(message, options = {}) {
   if (!processChatMessages) return;
@@ -2198,6 +2242,7 @@ async function loadChartForCurrentSymbol() {
   tradeChartState.slideAnim = null;
   tradeChartState.hover = null;
   tradeChartState.isSimulated = activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
+  updateTradeSimulationBadge();
   const isLive = liveCandleSymbols.has(tradeChartState.apiSymbol);
   if (!isLive) setStreamStatus(null);
   if (isLive) {
@@ -2415,7 +2460,17 @@ function applyLiveTick(tick) {
   // it overrides both real-live and offline-mock chart state so admin/team
   // can watch calculations respond to a controlled price move regardless of
   // whether a real market feed is configured.
-  if (isSimulationTick) tradeChartState.isSimulated = true;
+  if (isSimulationTick) {
+    tradeChartState.isSimulated = true;
+    // Covers a client that connected after the simulation-status broadcast
+    // already went out (e.g. opened the Trade page mid-simulation) - the
+    // badge would otherwise never appear even though prices are visibly
+    // moving in one direction.
+    if (!activeSimulationsBySymbol.has(tick.symbol)) {
+      activeSimulationsBySymbol.set(tick.symbol, { direction: null, expiresAt: null });
+    }
+    updateTradeSimulationBadge();
+  }
   if (!isSimulationTick && !tradeChartState.isLiveChart) return;
   if (!tradeChartState.candles.length) return;
   if (!document.querySelector("#trade")?.classList.contains("is-active")) return;
@@ -3160,13 +3215,25 @@ function renderManagedInstruments() {
     .map((instrument) => {
       const disabled = canEditManagedUsers() ? "" : "disabled";
       const symbol = compactSymbol(instrument.symbol);
-      const simDirection = activeSimulationsBySymbol.get(instrument.symbol);
+      const simulation = activeSimulationsBySymbol.get(instrument.symbol);
+      const simBadge = simulation
+        ? simulation.expiresAt
+          ? `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}" data-sim-expires="${escapeHtml(simulation.expiresAt)}"></span>`
+          : `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}">Simulating ${simulation.direction === "up" ? "↑" : "↓"}</span>`
+        : "";
       const simRow = canManageUsers()
         ? `<div class="instrument-sim-row">
-            ${simDirection ? `<span class="status-pill instrument-sim-badge ${simDirection === "up" ? "is-up" : "is-down"}">Simulating ${simDirection === "up" ? "↑" : "↓"}</span>` : ""}
+            ${simBadge}
+            <select class="sim-duration-select" data-simulate-duration="${escapeHtml(instrument.symbol)}" title="How long before this auto-reverts to real-time">
+              <option value="60" selected>Simulate for 1 min</option>
+              <option value="30">30 sec</option>
+              <option value="120">2 min</option>
+              <option value="300">5 min</option>
+              <option value="">No limit (manual stop)</option>
+            </select>
             <button type="button" class="sim-up-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="up">↑ Up</button>
             <button type="button" class="sim-down-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="down">↓ Down</button>
-            ${simDirection ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
+            ${simulation ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
           </div>`
         : "";
       return `<div class="instrument-control-row" data-instrument="${escapeHtml(instrument.id)}">
@@ -3212,7 +3279,7 @@ async function loadManagedInstruments() {
     try {
       const simData = await adminFetch("/api/admin/price-simulation");
       activeSimulationsBySymbol.clear();
-      (simData.simulations || []).forEach((sim) => activeSimulationsBySymbol.set(sim.symbol, sim.direction));
+      (simData.simulations || []).forEach((sim) => activeSimulationsBySymbol.set(sim.symbol, { direction: sim.direction, expiresAt: sim.expiresAt || null }));
     } catch {
       // Badges just stay whatever they were locally if this fetch fails - not worth blocking the instrument list over.
     }
@@ -3740,9 +3807,12 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
   if (!canManageUsers()) return;
   try {
     if (startButton) {
+      const symbol = startButton.dataset.simulate;
+      const durationSelect = document.querySelector(`[data-simulate-duration="${CSS.escape(symbol)}"]`);
+      const durationSeconds = durationSelect?.value ? Number(durationSelect.value) : null;
       await adminFetch("/api/admin/price-simulation", {
         method: "POST",
-        body: JSON.stringify({ symbol: startButton.dataset.simulate, direction: startButton.dataset.simulateDirection }),
+        body: JSON.stringify({ symbol, direction: startButton.dataset.simulateDirection, durationSeconds }),
       });
     } else {
       await adminFetch("/api/admin/price-simulation/stop", {

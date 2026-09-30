@@ -1379,20 +1379,41 @@ function getCurrentPrice(symbol) {
 const priceSimulations = new Map();
 const priceSimulationTickMs = 1500;
 const priceSimulationDefaultStepPercent = 0.08;
+const priceSimulationMaxDurationMs = 60 * 60 * 1000; // 1h safety cap - this is a demo/testing tool, never leave one running unbounded by accident
 
-function startPriceSimulation(symbol, direction, stepPercent, startedBy) {
+// A duration turns this into a "run for N seconds against simulated moves,
+// then hand off to the real-time feed" test: admin picks how long, an order
+// gets placed while it's active, and once the timer fires this reverts to
+// whatever getCurrentPrice would normally return (real feed or mock drift)
+// with no gap - the same clean handoff stopPriceSimulation always did, just
+// on a timer instead of a manual click.
+function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs) {
+  const existing = priceSimulations.get(symbol);
+  if (existing?.timer) clearTimeout(existing.timer);
+
   const basePrice = getCurrentPrice(symbol);
-  priceSimulations.set(symbol, {
+  const clampedDurationMs = Number.isFinite(durationMs) && durationMs > 0 ? Math.min(durationMs, priceSimulationMaxDurationMs) : null;
+  const expiresAt = clampedDurationMs ? new Date(Date.now() + clampedDurationMs).toISOString() : null;
+
+  const simulation = {
     direction,
     stepPercent: Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent,
     price: basePrice,
     startedBy,
     startedAt: new Date().toISOString(),
-  });
-  broadcast({ type: "simulation-status", symbol, active: true, direction });
+    expiresAt,
+    timer: null,
+  };
+  if (clampedDurationMs) {
+    simulation.timer = setTimeout(() => stopPriceSimulation(symbol), clampedDurationMs);
+  }
+  priceSimulations.set(symbol, simulation);
+  broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt });
 }
 
 function stopPriceSimulation(symbol) {
+  const existing = priceSimulations.get(symbol);
+  if (existing?.timer) clearTimeout(existing.timer);
   const existed = priceSimulations.delete(symbol);
   if (existed) broadcast({ type: "simulation-status", symbol, active: false });
   return existed;
@@ -1415,11 +1436,14 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   const direction = String(request.body.direction || "").toLowerCase();
   const stepPercent = Number(request.body.stepPercent);
+  const durationSeconds = Number(request.body.durationSeconds);
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
 
-  startPriceSimulation(symbol, direction, stepPercent, request.user.id);
-  response.json({ symbol, direction, active: true });
+  const durationMs = Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds * 1000 : null;
+  startPriceSimulation(symbol, direction, stepPercent, request.user.id, durationMs);
+  const simulation = priceSimulations.get(symbol);
+  response.json({ symbol, direction, active: true, expiresAt: simulation?.expiresAt || null });
 });
 
 app.post("/api/admin/price-simulation/stop", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
@@ -1435,6 +1459,7 @@ app.get("/api/admin/price-simulation", requireAuth, attachUser, requireRole("adm
     direction: simulation.direction,
     price: simulation.price,
     startedAt: simulation.startedAt,
+    expiresAt: simulation.expiresAt,
   }));
   response.json({ simulations });
 });
