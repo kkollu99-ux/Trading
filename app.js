@@ -1394,6 +1394,29 @@ function applyIncomingOrderUpdate(payload) {
   if (document.querySelector("#orders")?.classList.contains("is-active")) loadOrders();
 }
 
+// Broadcast whenever admin/team starts or stops a demo price simulation for
+// a symbol (see /api/admin/price-simulation). Every connected client - not
+// just the one that started it - needs to know, so the Trade page chart can
+// tell a simulated symbol apart from a real/mock one and the Products page
+// can show a live badge.
+function applySimulationStatus(payload) {
+  if (!payload?.symbol) return;
+  if (payload.active) activeSimulationsBySymbol.set(payload.symbol, payload.direction);
+  else activeSimulationsBySymbol.delete(payload.symbol);
+
+  if (payload.symbol === tradeChartState.apiSymbol) {
+    if (payload.active) {
+      tradeChartState.isSimulated = true;
+    } else if (tradeChartState.isSimulated) {
+      // Reload fresh rather than just flipping the flag, so the chart cleanly
+      // resumes real/mock generation instead of picking up mid-sequence.
+      loadChartForCurrentSymbol();
+    }
+  }
+
+  if (document.querySelector("#managedInstrumentList")) renderManagedInstruments();
+}
+
 function appendProcessChatMessage(message, options = {}) {
   if (!processChatMessages) return;
   const bubble = document.createElement("div");
@@ -1616,6 +1639,10 @@ const instrumentFallbacks = {
 
 let tradeInstruments = [];
 let managedInstruments = [];
+// Tracks which symbols admin/team have put into demo price simulation, and in
+// which direction, so the Products page can show a live badge and the Trade
+// page chart can tell a simulated symbol apart from a real/mock one.
+const activeSimulationsBySymbol = new Map();
 
 function compactSymbol(symbol) {
   return String(symbol || "").replace("/", "");
@@ -1745,6 +1772,7 @@ const tradeChartState = {
   candles: [],
   tick: 0,
   isLiveChart: false,
+  isSimulated: false,
   viewCount: defaultTradeViewCount,
   viewOffset: 0,
   liveBid: null,
@@ -2154,6 +2182,7 @@ async function loadChartForCurrentSymbol() {
   tradeChartState.liveAsk = null;
   tradeChartState.slideAnim = null;
   tradeChartState.hover = null;
+  tradeChartState.isSimulated = activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
   const isLive = liveCandleSymbols.has(tradeChartState.apiSymbol);
   if (!isLive) setStreamStatus(null);
   if (isLive) {
@@ -2366,7 +2395,14 @@ function bucketStartMs(timeMs, timeframe) {
 // would form instead of waiting for the next full REST refresh.
 function applyLiveTick(tick) {
   if (!tick.symbol || tick.symbol !== tradeChartState.apiSymbol) return;
-  if (!tradeChartState.isLiveChart || !tradeChartState.candles.length) return;
+  const isSimulationTick = tick.source === "simulation";
+  // A simulation tick is authoritative for whichever symbol it's targeting -
+  // it overrides both real-live and offline-mock chart state so admin/team
+  // can watch calculations respond to a controlled price move regardless of
+  // whether a real market feed is configured.
+  if (isSimulationTick) tradeChartState.isSimulated = true;
+  if (!isSimulationTick && !tradeChartState.isLiveChart) return;
+  if (!tradeChartState.candles.length) return;
   if (!document.querySelector("#trade")?.classList.contains("is-active")) return;
 
   const price = Number(tick.price);
@@ -2447,6 +2483,7 @@ function connectPriceStream() {
     } else if (payload.type === "service-request.status") applyIncomingRequestStatus(payload.serviceRequest);
     else if (payload.type === "user.balance") applyIncomingBalanceUpdate(payload);
     else if (payload.type === "order.update") applyIncomingOrderUpdate(payload);
+    else if (payload.type === "simulation-status") applySimulationStatus(payload);
   });
 
   priceStreamSocket.addEventListener("close", () => {
@@ -2940,6 +2977,10 @@ function isPriceStreamOpen() {
 
 function tickTradeCandles() {
   if (!tradeChartState.candles.length) return;
+  // A simulated symbol is driven entirely by the server's own price-tick
+  // broadcasts (see applyLiveTick) - skip both the REST-poll fallback and the
+  // offline random-walk mock so neither fights the simulated move.
+  if (tradeChartState.isSimulated) return;
   if (tradeChartState.isLiveChart) {
     // When our own /ws connection is up, the server pushes price ticks (real
     // stream or its own safe-interval fallback poll) straight to applyLiveTick,
@@ -3104,12 +3145,22 @@ function renderManagedInstruments() {
     .map((instrument) => {
       const disabled = canEditManagedUsers() ? "" : "disabled";
       const symbol = compactSymbol(instrument.symbol);
+      const simDirection = activeSimulationsBySymbol.get(instrument.symbol);
+      const simRow = canManageUsers()
+        ? `<div class="instrument-sim-row">
+            ${simDirection ? `<span class="status-pill instrument-sim-badge ${simDirection === "up" ? "is-up" : "is-down"}">Simulating ${simDirection === "up" ? "↑" : "↓"}</span>` : ""}
+            <button type="button" class="sim-up-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="up">↑ Up</button>
+            <button type="button" class="sim-down-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="down">↓ Down</button>
+            ${simDirection ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
+          </div>`
+        : "";
       return `<div class="instrument-control-row" data-instrument="${escapeHtml(instrument.id)}">
         <div>
           <strong>${escapeHtml(symbol)}</strong>
           <small>${escapeHtml(instrument.displayName)} · ${escapeHtml(displayCategory(instrument.category))}</small>
         </div>
         <label><input type="checkbox" data-instrument-trade="${escapeHtml(instrument.id)}" ${instrument.tradeEnabled ? "checked" : ""} ${disabled} /> Trade</label>
+        ${simRow}
       </div>`;
     })
     .join("");
@@ -3143,6 +3194,13 @@ async function loadManagedInstruments() {
   try {
     const data = await adminFetch("/api/admin/instruments");
     managedInstruments = data.instruments || [];
+    try {
+      const simData = await adminFetch("/api/admin/price-simulation");
+      activeSimulationsBySymbol.clear();
+      (simData.simulations || []).forEach((sim) => activeSimulationsBySymbol.set(sim.symbol, sim.direction));
+    } catch {
+      // Badges just stay whatever they were locally if this fetch fails - not worth blocking the instrument list over.
+    }
     renderManagedInstruments();
   } catch (error) {
     const list = document.querySelector("#managedInstrumentList");
@@ -3650,6 +3708,34 @@ document.querySelector("#managedInstrumentList")?.addEventListener("change", asy
     setManagedMessage(`${compactSymbol(result.instrument.symbol)} trade access ${result.instrument.tradeEnabled ? "enabled" : "disabled"}.`, "success");
   } catch (error) {
     input.checked = instrument.tradeEnabled;
+    setManagedMessage(error.message, "error");
+  }
+});
+
+// Demo price simulation controls (Products page): forces a symbol's price to
+// trend up or down at a steady rate so admin/team can watch margin/floating
+// P&L/SL-TP calculations respond to a controlled move. The badge/button state
+// itself is driven by applySimulationStatus (the WS broadcast), not by this
+// handler directly, so every open tab - not just the one that clicked - stays
+// in sync.
+document.querySelector("#managedInstrumentList")?.addEventListener("click", async (event) => {
+  const startButton = event.target.closest("[data-simulate]");
+  const stopButton = event.target.closest("[data-simulate-stop]");
+  if (!startButton && !stopButton) return;
+  if (!canManageUsers()) return;
+  try {
+    if (startButton) {
+      await adminFetch("/api/admin/price-simulation", {
+        method: "POST",
+        body: JSON.stringify({ symbol: startButton.dataset.simulate, direction: startButton.dataset.simulateDirection }),
+      });
+    } else {
+      await adminFetch("/api/admin/price-simulation/stop", {
+        method: "POST",
+        body: JSON.stringify({ symbol: stopButton.dataset.simulateStop }),
+      });
+    }
+  } catch (error) {
     setManagedMessage(error.message, "error");
   }
 });

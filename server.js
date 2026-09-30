@@ -1358,6 +1358,9 @@ const orderFeeRate = 0.001;
 // opening and closing a position still produce a sane, non-random P&L instead
 // of two unrelated Math.random() calls.
 function getCurrentPrice(symbol) {
+  const simulation = priceSimulations.get(symbol);
+  if (simulation) return simulation.price;
+
   const entry = quoteStore.get(symbol);
   const price = Number(entry?.data?.close ?? entry?.data?.price);
   if (Number.isFinite(price) && price > 0) return price;
@@ -1365,6 +1368,76 @@ function getCurrentPrice(symbol) {
   const seed = [...symbol].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return Number((50 + (seed % 200) + Math.sin(Date.now() / 60000 + seed) * 5).toFixed(4));
 }
+
+// ---------- Admin price simulation (demo/testing only) ----------
+// Lets admin/team force a symbol's price to trend steadily up or down, so
+// margin/floating-P&L/SL-TP calculations can be exercised deterministically
+// instead of waiting on real market movement or random mock drift. Checked
+// first in getCurrentPrice above, so it's the single choke point every
+// calculation (order entry, floating P&L, SL/TP sweep, close P&L) already
+// goes through - no other code path needs to know simulation exists.
+const priceSimulations = new Map();
+const priceSimulationTickMs = 1500;
+const priceSimulationDefaultStepPercent = 0.08;
+
+function startPriceSimulation(symbol, direction, stepPercent, startedBy) {
+  const basePrice = getCurrentPrice(symbol);
+  priceSimulations.set(symbol, {
+    direction,
+    stepPercent: Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent,
+    price: basePrice,
+    startedBy,
+    startedAt: new Date().toISOString(),
+  });
+  broadcast({ type: "simulation-status", symbol, active: true, direction });
+}
+
+function stopPriceSimulation(symbol) {
+  const existed = priceSimulations.delete(symbol);
+  if (existed) broadcast({ type: "simulation-status", symbol, active: false });
+  return existed;
+}
+
+setInterval(() => {
+  for (const [symbol, simulation] of priceSimulations) {
+    const delta = simulation.price * (simulation.stepPercent / 100) * (simulation.direction === "up" ? 1 : -1);
+    simulation.price = Math.max(0.00001, Number((simulation.price + delta).toFixed(6)));
+    // Deliberately NOT written into quoteStore: getCurrentPrice already checks
+    // priceSimulations first (above), so quoteStore never needs to know about
+    // this and never ends up holding a stale simulated price once the
+    // simulation stops - it just keeps reflecting whatever it always would
+    // have (real feed or the drifting mock fallback), untouched throughout.
+    broadcast({ type: "price-tick", symbol, price: simulation.price, source: "simulation", timestamp: new Date().toISOString() });
+  }
+}, priceSimulationTickMs);
+
+app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+  const symbol = String(request.body.symbol || "").trim().toUpperCase();
+  const direction = String(request.body.direction || "").toLowerCase();
+  const stepPercent = Number(request.body.stepPercent);
+  if (!symbol) return response.status(400).json({ error: "Symbol is required" });
+  if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
+
+  startPriceSimulation(symbol, direction, stepPercent, request.user.id);
+  response.json({ symbol, direction, active: true });
+});
+
+app.post("/api/admin/price-simulation/stop", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+  const symbol = String(request.body.symbol || "").trim().toUpperCase();
+  if (!symbol) return response.status(400).json({ error: "Symbol is required" });
+  stopPriceSimulation(symbol);
+  response.json({ symbol, active: false });
+});
+
+app.get("/api/admin/price-simulation", requireAuth, attachUser, requireRole("admin", "team"), (_request, response) => {
+  const simulations = [...priceSimulations.entries()].map(([symbol, simulation]) => ({
+    symbol,
+    direction: simulation.direction,
+    price: simulation.price,
+    startedAt: simulation.startedAt,
+  }));
+  response.json({ simulations });
+});
 
 function floatingPnl(order, currentPrice) {
   const directionSign = order.direction === "buy" ? 1 : -1;
