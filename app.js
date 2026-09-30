@@ -2228,8 +2228,12 @@ function renderTradeCandles() {
 
 let candleRequestToken = 0;
 
-async function loadRealCandles(symbol, range, customRange) {
-  const token = ++candleRequestToken;
+// externalToken lets a caller that also needs to compare against the token
+// afterward (loadChartForCurrentSymbol's mock-fallback guard) share the
+// exact same value this function used, instead of each side incrementing
+// candleRequestToken independently and permanently mismatching each other.
+async function loadRealCandles(symbol, range, customRange, externalToken) {
+  const token = externalToken ?? ++candleRequestToken;
   try {
     const params = new URLSearchParams({ symbol });
     if (customRange?.start && customRange?.end) {
@@ -2300,8 +2304,8 @@ async function loadChartForCurrentSymbol() {
   const isLive = liveCandleSymbols.has(tradeChartState.apiSymbol);
   if (!isLive) setStreamStatus(null);
   if (isLive) {
-    const loadingToken = candleRequestToken;
-    const ok = await loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe, tradeChartState.customRange);
+    const loadingToken = ++candleRequestToken;
+    const ok = await loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe, tradeChartState.customRange, loadingToken);
     if (ok) {
       tradeChartState.isLiveChart = true;
       resetTradeChartView();
