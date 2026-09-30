@@ -1469,6 +1469,36 @@ function applyAutoSimulationStatus(payload) {
   if (document.querySelector("#managedInstrumentList")) renderManagedInstruments();
 }
 
+// Mirrors the server's pending scheduled window for a symbol. When the
+// window's start time arrives server-side, it fires a normal
+// simulation-status broadcast (handled by applySimulationStatus above) and
+// this one clears - so the "Scheduled" badge naturally hands off to the
+// "Simulating" badge with no gap.
+function applyScheduledSimulationStatus(payload) {
+  if (!payload?.symbol) return;
+  if (payload.active) scheduledSimulationsBySymbol.set(payload.symbol, { direction: payload.direction, fromISO: payload.fromISO, toISO: payload.toISO });
+  else scheduledSimulationsBySymbol.delete(payload.symbol);
+  if (document.querySelector("#managedInstrumentList")) renderManagedInstruments();
+}
+
+// Converts a same-day <input type="time"> value ("14:30") into an absolute
+// ISO timestamp for today in the browser's own timezone, so the from/to
+// window means the same clock time the admin actually picked regardless of
+// what timezone the server runs in.
+function timeInputToTodayISO(timeValue) {
+  if (!timeValue) return null;
+  const [hours, minutes] = timeValue.split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  const date = new Date();
+  date.setHours(hours, minutes, 0, 0);
+  return date.toISOString();
+}
+
+function formatTimeOfDay(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 // Ticks every second so active countdowns ("reverts in 0:42") count down
 // smoothly without needing a full list/badge re-render (which would also
 // blow away whatever duration a team member currently has selected in the
@@ -1716,6 +1746,10 @@ const activeSimulationsBySymbol = new Map();
 // server-side (see maybeAutoStartSimulation) - this Set only mirrors that
 // state for the Products-page toggle, it doesn't drive anything itself.
 const autoSimulationSymbols = new Set();
+// Symbols with a pending scheduled window (an admin-picked from/to time
+// today that hasn't started yet) - separate from activeSimulationsBySymbol,
+// which only covers a simulation that's actually running right now.
+const scheduledSimulationsBySymbol = new Map();
 
 function compactSymbol(symbol) {
   return String(symbol || "").replace("/", "");
@@ -2569,6 +2603,7 @@ function connectPriceStream() {
     else if (payload.type === "order.update") applyIncomingOrderUpdate(payload);
     else if (payload.type === "simulation-status") applySimulationStatus(payload);
     else if (payload.type === "auto-simulation-status") applyAutoSimulationStatus(payload);
+    else if (payload.type === "simulation-scheduled") applyScheduledSimulationStatus(payload);
   });
 
   priceStreamSocket.addEventListener("close", () => {
@@ -3237,6 +3272,10 @@ function renderManagedInstruments() {
           : `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}">Simulating ${simulation.direction === "up" ? "↑" : "↓"}</span>`
         : "";
       const isAuto = autoSimulationSymbols.has(instrument.symbol);
+      const scheduled = scheduledSimulationsBySymbol.get(instrument.symbol);
+      const scheduleBadge = scheduled
+        ? `<span class="status-pill instrument-schedule-badge">⏰ ${formatTimeOfDay(scheduled.fromISO)}–${formatTimeOfDay(scheduled.toISO)} ${scheduled.direction === "up" ? "↑" : "↓"}</span>`
+        : "";
       const simRow = canManageUsers()
         ? `<div class="instrument-sim-row">
             ${simBadge}
@@ -3254,6 +3293,15 @@ function renderManagedInstruments() {
             <label class="sim-auto-toggle" title="Auto-simulate whenever a user places an order on this symbol: Buy → price trends up, Sell → price trends down">
               <input type="checkbox" data-simulate-auto="${escapeHtml(instrument.symbol)}" ${isAuto ? "checked" : ""} /> Auto on order
             </label>
+          </div>
+          <div class="instrument-sim-row instrument-schedule-row">
+            ${scheduleBadge}
+            <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" title="Start time (today)" />
+            <span class="sim-time-sep">to</span>
+            <input type="time" class="sim-time-input" data-schedule-to="${escapeHtml(instrument.symbol)}" title="End time (today) - auto-reverts to real-time here" />
+            <button type="button" class="sim-up-btn" data-schedule="${escapeHtml(instrument.symbol)}" data-schedule-direction="up">↑ Schedule</button>
+            <button type="button" class="sim-down-btn" data-schedule="${escapeHtml(instrument.symbol)}" data-schedule-direction="down">↓ Schedule</button>
+            ${scheduled ? `<button type="button" class="sim-stop-btn" data-schedule-cancel="${escapeHtml(instrument.symbol)}">Cancel</button>` : ""}
           </div>`
         : "";
       return `<div class="instrument-control-row" data-instrument="${escapeHtml(instrument.id)}">
@@ -3303,6 +3351,9 @@ async function loadManagedInstruments() {
       const autoData = await adminFetch("/api/admin/price-simulation/auto");
       autoSimulationSymbols.clear();
       (autoData.autoSymbols || []).forEach((symbol) => autoSimulationSymbols.add(symbol));
+      const scheduleData = await adminFetch("/api/admin/price-simulation/schedule");
+      scheduledSimulationsBySymbol.clear();
+      (scheduleData.scheduled || []).forEach((s) => scheduledSimulationsBySymbol.set(s.symbol, { direction: s.direction, fromISO: s.fromISO, toISO: s.toISO }));
     } catch {
       // Badges just stay whatever they were locally if this fetch fails - not worth blocking the instrument list over.
     }
@@ -3826,7 +3877,9 @@ document.querySelector("#managedInstrumentList")?.addEventListener("change", asy
 document.querySelector("#managedInstrumentList")?.addEventListener("click", async (event) => {
   const startButton = event.target.closest("[data-simulate]");
   const stopButton = event.target.closest("[data-simulate-stop]");
-  if (!startButton && !stopButton) return;
+  const scheduleButton = event.target.closest("[data-schedule]");
+  const scheduleCancelButton = event.target.closest("[data-schedule-cancel]");
+  if (!startButton && !stopButton && !scheduleButton && !scheduleCancelButton) return;
   if (!canManageUsers()) return;
   try {
     if (startButton) {
@@ -3837,10 +3890,29 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
         method: "POST",
         body: JSON.stringify({ symbol, direction: startButton.dataset.simulateDirection, durationSeconds }),
       });
-    } else {
+    } else if (stopButton) {
       await adminFetch("/api/admin/price-simulation/stop", {
         method: "POST",
         body: JSON.stringify({ symbol: stopButton.dataset.simulateStop }),
+      });
+    } else if (scheduleButton) {
+      const symbol = scheduleButton.dataset.schedule;
+      const fromInput = document.querySelector(`[data-schedule-from="${CSS.escape(symbol)}"]`);
+      const toInput = document.querySelector(`[data-schedule-to="${CSS.escape(symbol)}"]`);
+      const from = timeInputToTodayISO(fromInput?.value);
+      const to = timeInputToTodayISO(toInput?.value);
+      if (!from || !to) {
+        setManagedMessage("Pick both a From and To time first.", "error");
+        return;
+      }
+      await adminFetch("/api/admin/price-simulation/schedule", {
+        method: "POST",
+        body: JSON.stringify({ symbol, direction: scheduleButton.dataset.scheduleDirection, from, to }),
+      });
+    } else if (scheduleCancelButton) {
+      await adminFetch("/api/admin/price-simulation/schedule/cancel", {
+        method: "POST",
+        body: JSON.stringify({ symbol: scheduleCancelButton.dataset.scheduleCancel }),
       });
     }
   } catch (error) {
