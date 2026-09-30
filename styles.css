@@ -3177,17 +3177,6 @@ canvas {
   color: var(--red);
 }
 
-.sim-duration-select {
-  border: 1px solid var(--line);
-  border-radius: 0.35rem;
-  background: var(--panel-2);
-  color: var(--text);
-  padding: 0.3rem 0.4rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
 .chart-symbol-head #tradeSimulationBadge {
   margin-left: 0.4rem;
   font-size: 0.7rem;

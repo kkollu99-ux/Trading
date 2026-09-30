@@ -1422,6 +1422,12 @@ function applySimulationStatus(payload) {
   if (payload.symbol === tradeChartState.apiSymbol) {
     if (payload.active) {
       tradeChartState.isSimulated = true;
+      // A coarse timeframe (the default is 1H) absorbs a whole short test
+      // window into a single candle's wick - a real trend is invisible next
+      // to hours of unrelated history. Switching to 1M is what actually
+      // makes the point of simulating a move (watching it happen) visible,
+      // on every viewer's chart, not just admin's.
+      ensureFineTimeframeForSimulation();
     } else if (tradeChartState.isSimulated) {
       // Reload fresh rather than just flipping the flag, so the chart cleanly
       // resumes real/mock generation instead of picking up mid-sequence.
@@ -1431,6 +1437,16 @@ function applySimulationStatus(payload) {
   }
 
   if (document.querySelector("#managedInstrumentList")) renderManagedInstruments();
+}
+
+function ensureFineTimeframeForSimulation() {
+  if (tradeChartState.timeframe === "1M") return;
+  const button = document.querySelector('.timeframes button[data-timeframe="1M"]');
+  if (!button) return;
+  document.querySelectorAll(".timeframes button[data-timeframe]").forEach((item) => item.classList.toggle("is-active", item === button));
+  tradeChartState.timeframe = "1M";
+  tradeChartState.customRange = null;
+  loadChartForCurrentSymbol();
 }
 
 // Small header badge on the Trade page itself, so it's obvious while testing
@@ -3280,13 +3296,6 @@ function renderManagedInstruments() {
         ? `<div class="instrument-sim-row">
             ${simBadge}
             ${isAuto ? `<span class="status-pill instrument-auto-badge">Auto ON</span>` : ""}
-            <select class="sim-duration-select" data-simulate-duration="${escapeHtml(instrument.symbol)}" title="How long before this auto-reverts to real-time">
-              <option value="60" selected>Simulate for 1 min</option>
-              <option value="30">30 sec</option>
-              <option value="120">2 min</option>
-              <option value="300">5 min</option>
-              <option value="">No limit (manual stop)</option>
-            </select>
             <button type="button" class="sim-up-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="up">↑ Up</button>
             <button type="button" class="sim-down-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="down">↓ Down</button>
             ${simulation ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
@@ -3884,11 +3893,10 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
   try {
     if (startButton) {
       const symbol = startButton.dataset.simulate;
-      const durationSelect = document.querySelector(`[data-simulate-duration="${CSS.escape(symbol)}"]`);
-      const durationSeconds = durationSelect?.value ? Number(durationSelect.value) : null;
+      // Runs until manually stopped (use the From/To schedule fields below for a timed window).
       await adminFetch("/api/admin/price-simulation", {
         method: "POST",
-        body: JSON.stringify({ symbol, direction: startButton.dataset.simulateDirection, durationSeconds }),
+        body: JSON.stringify({ symbol, direction: startButton.dataset.simulateDirection }),
       });
     } else if (stopButton) {
       await adminFetch("/api/admin/price-simulation/stop", {
@@ -3927,12 +3935,10 @@ document.querySelector("#managedInstrumentList")?.addEventListener("change", asy
   const toggle = event.target.closest("[data-simulate-auto]");
   if (!toggle || !canManageUsers()) return;
   const symbol = toggle.dataset.simulateAuto;
-  const durationSelect = document.querySelector(`[data-simulate-duration="${CSS.escape(symbol)}"]`);
-  const durationSeconds = durationSelect?.value ? Number(durationSelect.value) : null;
   try {
     await adminFetch("/api/admin/price-simulation/auto", {
       method: "POST",
-      body: JSON.stringify({ symbol, enabled: toggle.checked, durationSeconds }),
+      body: JSON.stringify({ symbol, enabled: toggle.checked }),
     });
   } catch (error) {
     toggle.checked = !toggle.checked;
