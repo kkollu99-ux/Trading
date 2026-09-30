@@ -3183,32 +3183,6 @@ canvas {
   vertical-align: middle;
 }
 
-.instrument-auto-badge {
-  background: rgba(0, 115, 255, 0.14);
-  color: var(--blue);
-}
-
-.sim-auto-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.sim-auto-toggle input {
-  accent-color: var(--blue);
-  cursor: pointer;
-}
-
-.instrument-schedule-row {
-  border-top: none;
-  padding-top: 0;
-  margin-top: 0.3rem;
-}
-
 .sim-time-input {
   border: 1px solid var(--line);
   border-radius: 0.35rem;

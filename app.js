@@ -1476,15 +1476,6 @@ function updateTradeSimulationBadge() {
   }
 }
 
-// Mirrors the server's per-symbol "auto on order" toggle so every open tab's
-// Products page shows the same Auto badge/checkbox state.
-function applyAutoSimulationStatus(payload) {
-  if (!payload?.symbol) return;
-  if (payload.enabled) autoSimulationSymbols.add(payload.symbol);
-  else autoSimulationSymbols.delete(payload.symbol);
-  if (document.querySelector("#managedInstrumentList")) renderManagedInstruments();
-}
-
 // Mirrors the server's pending scheduled window for a symbol. When the
 // window's start time arrives server-side, it fires a normal
 // simulation-status broadcast (handled by applySimulationStatus above) and
@@ -1757,11 +1748,6 @@ let managedInstruments = [];
 // which direction, so the Products page can show a live badge and the Trade
 // page chart can tell a simulated symbol apart from a real/mock one.
 const activeSimulationsBySymbol = new Map();
-// Symbols with "auto" mode on: the next buy/sell order placed on that symbol
-// (by any user) auto-starts a simulation in the matching favorable direction
-// server-side (see maybeAutoStartSimulation) - this Set only mirrors that
-// state for the Products-page toggle, it doesn't drive anything itself.
-const autoSimulationSymbols = new Set();
 // Symbols with a pending scheduled window (an admin-picked from/to time
 // today that hasn't started yet) - separate from activeSimulationsBySymbol,
 // which only covers a simulation that's actually running right now.
@@ -2618,7 +2604,6 @@ function connectPriceStream() {
     else if (payload.type === "user.balance") applyIncomingBalanceUpdate(payload);
     else if (payload.type === "order.update") applyIncomingOrderUpdate(payload);
     else if (payload.type === "simulation-status") applySimulationStatus(payload);
-    else if (payload.type === "auto-simulation-status") applyAutoSimulationStatus(payload);
     else if (payload.type === "simulation-scheduled") applyScheduledSimulationStatus(payload);
   });
 
@@ -3287,23 +3272,13 @@ function renderManagedInstruments() {
           ? `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}" data-sim-expires="${escapeHtml(simulation.expiresAt)}"></span>`
           : `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}">Simulating ${simulation.direction === "up" ? "↑" : "↓"}</span>`
         : "";
-      const isAuto = autoSimulationSymbols.has(instrument.symbol);
       const scheduled = scheduledSimulationsBySymbol.get(instrument.symbol);
       const scheduleBadge = scheduled
         ? `<span class="status-pill instrument-schedule-badge">⏰ ${formatTimeOfDay(scheduled.fromISO)}–${formatTimeOfDay(scheduled.toISO)} ${scheduled.direction === "up" ? "↑" : "↓"}</span>`
         : "";
       const simRow = canManageUsers()
-        ? `<div class="instrument-sim-row">
+        ? `<div class="instrument-sim-row instrument-schedule-row">
             ${simBadge}
-            ${isAuto ? `<span class="status-pill instrument-auto-badge">Auto ON</span>` : ""}
-            <button type="button" class="sim-up-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="up">↑ Up</button>
-            <button type="button" class="sim-down-btn" data-simulate="${escapeHtml(instrument.symbol)}" data-simulate-direction="down">↓ Down</button>
-            ${simulation ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
-            <label class="sim-auto-toggle" title="Auto-simulate whenever a user places an order on this symbol: Buy → price trends up, Sell → price trends down">
-              <input type="checkbox" data-simulate-auto="${escapeHtml(instrument.symbol)}" ${isAuto ? "checked" : ""} /> Auto on order
-            </label>
-          </div>
-          <div class="instrument-sim-row instrument-schedule-row">
             ${scheduleBadge}
             <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" title="Start time (today)" />
             <span class="sim-time-sep">to</span>
@@ -3311,6 +3286,7 @@ function renderManagedInstruments() {
             <button type="button" class="sim-up-btn" data-schedule="${escapeHtml(instrument.symbol)}" data-schedule-direction="up">↑ Schedule</button>
             <button type="button" class="sim-down-btn" data-schedule="${escapeHtml(instrument.symbol)}" data-schedule-direction="down">↓ Schedule</button>
             ${scheduled ? `<button type="button" class="sim-stop-btn" data-schedule-cancel="${escapeHtml(instrument.symbol)}">Cancel</button>` : ""}
+            ${simulation ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
           </div>`
         : "";
       return `<div class="instrument-control-row" data-instrument="${escapeHtml(instrument.id)}">
@@ -3357,9 +3333,6 @@ async function loadManagedInstruments() {
       const simData = await adminFetch("/api/admin/price-simulation");
       activeSimulationsBySymbol.clear();
       (simData.simulations || []).forEach((sim) => activeSimulationsBySymbol.set(sim.symbol, { direction: sim.direction, expiresAt: sim.expiresAt || null }));
-      const autoData = await adminFetch("/api/admin/price-simulation/auto");
-      autoSimulationSymbols.clear();
-      (autoData.autoSymbols || []).forEach((symbol) => autoSimulationSymbols.add(symbol));
       const scheduleData = await adminFetch("/api/admin/price-simulation/schedule");
       scheduledSimulationsBySymbol.clear();
       (scheduleData.scheduled || []).forEach((s) => scheduledSimulationsBySymbol.set(s.symbol, { direction: s.direction, fromISO: s.fromISO, toISO: s.toISO }));
@@ -3884,21 +3857,13 @@ document.querySelector("#managedInstrumentList")?.addEventListener("change", asy
 // handler directly, so every open tab - not just the one that clicked - stays
 // in sync.
 document.querySelector("#managedInstrumentList")?.addEventListener("click", async (event) => {
-  const startButton = event.target.closest("[data-simulate]");
   const stopButton = event.target.closest("[data-simulate-stop]");
   const scheduleButton = event.target.closest("[data-schedule]");
   const scheduleCancelButton = event.target.closest("[data-schedule-cancel]");
-  if (!startButton && !stopButton && !scheduleButton && !scheduleCancelButton) return;
+  if (!stopButton && !scheduleButton && !scheduleCancelButton) return;
   if (!canManageUsers()) return;
   try {
-    if (startButton) {
-      const symbol = startButton.dataset.simulate;
-      // Runs until manually stopped (use the From/To schedule fields below for a timed window).
-      await adminFetch("/api/admin/price-simulation", {
-        method: "POST",
-        body: JSON.stringify({ symbol, direction: startButton.dataset.simulateDirection }),
-      });
-    } else if (stopButton) {
+    if (stopButton) {
       await adminFetch("/api/admin/price-simulation/stop", {
         method: "POST",
         body: JSON.stringify({ symbol: stopButton.dataset.simulateStop }),
@@ -3924,24 +3889,6 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
       });
     }
   } catch (error) {
-    setManagedMessage(error.message, "error");
-  }
-});
-
-// "Auto on order" toggle: enabling it doesn't itself start a simulation -
-// it just arms the symbol server-side so the *next* buy/sell order placed
-// on it (by any user) auto-starts one in the matching favorable direction.
-document.querySelector("#managedInstrumentList")?.addEventListener("change", async (event) => {
-  const toggle = event.target.closest("[data-simulate-auto]");
-  if (!toggle || !canManageUsers()) return;
-  const symbol = toggle.dataset.simulateAuto;
-  try {
-    await adminFetch("/api/admin/price-simulation/auto", {
-      method: "POST",
-      body: JSON.stringify({ symbol, enabled: toggle.checked }),
-    });
-  } catch (error) {
-    toggle.checked = !toggle.checked;
     setManagedMessage(error.message, "error");
   }
 });
