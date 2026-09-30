@@ -2691,10 +2691,6 @@ connectPriceStream();
   });
 })();
 
-const tradeTicketCopy = {
-  multiplier: "100",
-};
-
 // Mirrors the server's margin formula exactly (server.js: orderUnitsPerLot/
 // orderFeeRate) so what the ticket previews matches what actually gets
 // charged - but this is a preview only, the server always recomputes and
@@ -2702,9 +2698,13 @@ const tradeTicketCopy = {
 const orderUnitsPerLot = 100;
 const orderFeeRate = 0.001;
 
+function getSelectedMultiplier() {
+  return Number(document.querySelector("#ticketMultiplierSelect")?.value) || 100;
+}
+
 function renderTradeTicket() {
   const symbol = tradeChartState.symbol;
-  const multiplier = Number(tradeTicketCopy.multiplier) || 100;
+  const multiplier = getSelectedMultiplier();
   const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
   const price = tradeChartState.candles.at(-1)?.close || 0;
   const notional = lots * orderUnitsPerLot * price;
@@ -2712,12 +2712,13 @@ function renderTradeTicket() {
   const fee = margin * orderFeeRate;
 
   document.querySelector("#ticketKindNote").textContent = `Spot order · ${symbol} settlement`;
-  document.querySelector("#ticketMultiplier").textContent = tradeTicketCopy.multiplier;
   document.querySelector("#ticketLotValue").textContent = `1 Lots = ${orderUnitsPerLot} ${symbol}`;
   document.querySelector("#ticketFeeValue").textContent = fee.toFixed(6);
   document.querySelector("#ticketMarginValue").textContent = margin.toFixed(6);
   document.querySelector("#ticketBalanceValue").textContent = Number(currentSession?.user?.balance || 0).toFixed(2);
 }
+
+document.querySelector("#ticketMultiplierSelect")?.addEventListener("change", renderTradeTicket);
 
 document.querySelectorAll("[data-risk-toggle]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -2799,7 +2800,7 @@ async function placeOrder(direction) {
   }
   const symbol = tradeChartState.apiSymbol;
   const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
-  const multiplier = Number(tradeTicketCopy.multiplier) || 100;
+  const multiplier = getSelectedMultiplier();
   const stopLoss = readRiskThreshold("loss");
   const takeProfit = readRiskThreshold("profit");
   const button = document.querySelector(direction === "buy" ? "#buyOrderButton" : "#sellOrderButton");
@@ -2849,7 +2850,7 @@ function openOrderConfirmModal(direction) {
   if (!modal) return;
   pendingOrderDirection = direction;
   const symbol = tradeChartState.symbol;
-  const multiplier = Number(tradeTicketCopy.multiplier) || 100;
+  const multiplier = getSelectedMultiplier();
   const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
   const price = tradeChartState.candles.at(-1)?.close || 0;
   const notional = lots * orderUnitsPerLot * price;
