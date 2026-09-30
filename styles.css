@@ -3131,6 +3131,52 @@ canvas {
   accent-color: var(--blue);
 }
 
+.instrument-sim-row {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.instrument-sim-row button {
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.sim-up-btn:hover {
+  border-color: rgba(37, 177, 95, 0.5);
+  color: var(--green);
+}
+
+.sim-down-btn:hover {
+  border-color: rgba(232, 61, 48, 0.5);
+  color: var(--red);
+}
+
+.sim-stop-btn {
+  color: var(--muted);
+}
+
+.instrument-sim-badge.is-up {
+  background: rgba(37, 177, 95, 0.14);
+  color: var(--green);
+}
+
+.instrument-sim-badge.is-down {
+  background: rgba(232, 61, 48, 0.14);
+  color: var(--red);
+}
+
 .managed-save-button {
   border: 1px solid rgba(0, 115, 255, 0.6);
   border-radius: 0.35rem;
