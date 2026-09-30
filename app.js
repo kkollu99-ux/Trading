@@ -579,6 +579,8 @@ function updateDashboardTime() {
 document.querySelector("#loginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.target).entries());
+  const error = document.querySelector("#loginError");
+  if (error) error.textContent = "";
   try {
     const response = await fetch(`${apiBase}/api/auth/login`, {
       method: "POST",
@@ -586,11 +588,24 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
       body: JSON.stringify(data),
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || "Invalid email or password");
+    if (!response.ok) {
+      // A real auth error (wrong password, unknown email) — show it and
+      // stop, rather than silently dropping the user into a fake, token-less
+      // demo session that looks logged in but never talks to the backend.
+      if (error) error.textContent = result.error || "Invalid email or password";
+      return;
+    }
     enterWorkspace(result);
-  } catch (error) {
+  } catch (requestError) {
+    // A genuine network failure (server unreachable) — fall back to a local
+    // demo session so the UI doesn't just dead-end, matching this app's
+    // existing offline-friendly behavior elsewhere.
     enterWorkspace({ token: null, user: { role: "user", name: data.email?.split("@")[0] || "Client", email: data.email } });
   }
+});
+
+document.querySelector("#demoAccountButton")?.addEventListener("click", () => {
+  enterWorkspace({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital", balance: 10000 } });
 });
 
 document.querySelector("#signOut").addEventListener("click", () => {
