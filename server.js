@@ -1506,6 +1506,20 @@ app.get("/api/admin/price-simulation", requireAuth, attachUser, requireRole("adm
   response.json({ simulations });
 });
 
+// Same info as above but for a single symbol and open to any authenticated
+// user, not just admin/team - the Trade page badge needs this for a client
+// that opens the page (or switches symbol) after a simulation already
+// started, since the WS broadcast that would normally carry direction/
+// expiresAt already went out before they connected. The price itself is
+// already public via the ordinary price-tick broadcast; this just exposes
+// the same simulation metadata admin already sees, read-only.
+app.get("/api/price-simulation-status", requireAuth, attachUser, (request, response) => {
+  const symbol = String(request.query.symbol || "").trim().toUpperCase();
+  const simulation = priceSimulations.get(symbol);
+  if (!simulation) return response.json({ active: false });
+  response.json({ active: true, direction: simulation.direction, expiresAt: simulation.expiresAt });
+});
+
 // A per-symbol opt-in: once enabled, placing a buy order on that symbol
 // auto-starts an UP simulation (the favorable direction for a buy) and a
 // sell auto-starts a DOWN simulation (favorable for a sell) - see
