@@ -1999,6 +1999,14 @@ select:focus {
   display: none;
 }
 
+.instrument-control-row.is-filtered-out {
+  display: none;
+}
+
+.product-filter-tabs {
+  padding: 0 0 0.5rem;
+}
+
 .watch-empty-state {
   border-top: 1px solid var(--trade-border);
   color: var(--trade-muted);

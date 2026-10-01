@@ -3307,7 +3307,7 @@ function renderManagedInstruments() {
             ${simulation ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
           </div>`
         : "";
-      return `<div class="instrument-control-row" data-instrument="${escapeHtml(instrument.id)}">
+      return `<div class="instrument-control-row" data-instrument="${escapeHtml(instrument.id)}" data-instrument-category="${escapeHtml(categoryFilter(instrument.category))}">
         <div>
           <strong>${escapeHtml(symbol)}</strong>
           <small>${escapeHtml(instrument.displayName)} · ${escapeHtml(displayCategory(instrument.category))}</small>
@@ -3317,7 +3317,26 @@ function renderManagedInstruments() {
       </div>`;
     })
     .join("");
+  filterManagedInstruments();
 }
+
+// Mirrors filterWatchlist's pattern for the Trade page's Market Watch:
+// hides rather than removes non-matching rows, so toggling the filter back
+// doesn't require a full reload.
+function filterManagedInstruments() {
+  const activeFilter = document.querySelector(".product-filter-tabs button.is-active")?.dataset.productFilter || "all";
+  document.querySelectorAll("#managedInstrumentList [data-instrument-category]").forEach((row) => {
+    const matches = activeFilter === "all" || row.dataset.instrumentCategory === activeFilter;
+    row.classList.toggle("is-filtered-out", !matches);
+  });
+}
+
+document.querySelectorAll(".product-filter-tabs button").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".product-filter-tabs button").forEach((item) => item.classList.toggle("is-active", item === button));
+    filterManagedInstruments();
+  });
+});
 
 async function loadManagedUsers() {
   if (!document.querySelector("#managedUserTable")) return;
