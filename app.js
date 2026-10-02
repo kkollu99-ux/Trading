@@ -1321,11 +1321,12 @@ const processChatTopics = {
   },
 };
 
-// Deposit/withdrawal/verification chats are backed by real service-request
-// threads (persisted, visible to admin/team in the Requests inbox); "support"
-// has no matching request type in the schema, so it stays the local-only
-// cosmetic chat it always was, same as for anyone without a real session.
-const chatTopicToRequestType = { deposit: "deposit", withdrawal: "withdrawal", verification: "kyc" };
+// Every topic is backed by a real, persisted service-request thread so
+// admin/team can see and reply to it live (support used to be a local-only,
+// never-synced exception - see server.js's db migration for the matching
+// schema/CHECK-constraint fix). A session-less visitor (no token) still
+// falls back to a purely local chat in openProcessChat below.
+const chatTopicToRequestType = { support: "support", deposit: "deposit", withdrawal: "withdrawal", verification: "kyc" };
 let activeServiceRequestId = null;
 
 async function authRequest(path, options = {}) {

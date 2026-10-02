@@ -734,6 +734,13 @@ async function seedDefaults() {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0`);
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_loss_amount NUMERIC(14, 2)`);
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS take_profit_amount NUMERIC(14, 2)`);
+    // "support" used to have no matching request type, so that chat topic
+    // never created a real row - it just looked like a working chat while
+    // silently never reaching admin. CREATE TABLE IF NOT EXISTS above won't
+    // touch an already-existing table's CHECK constraint, so it needs its
+    // own migration here.
+    await query(`ALTER TABLE service_requests DROP CONSTRAINT IF EXISTS service_requests_type_check`);
+    await query(`ALTER TABLE service_requests ADD CONSTRAINT service_requests_type_check CHECK (type IN ('deposit', 'withdrawal', 'kyc', 'support'))`);
     for (const instrument of defaultInstruments) await seedInstrument(instrument);
   }
 
@@ -1901,7 +1908,7 @@ app.get("/api/markets/candles", async (request, response) => {
 
 app.post("/api/service-requests", requireAuth, attachUser, upload.single("attachment"), async (request, response) => {
   const { type, amount, note } = request.body;
-  if (!["deposit", "withdrawal", "kyc"].includes(type)) return response.status(400).json({ error: "Invalid request type" });
+  if (!["deposit", "withdrawal", "kyc", "support"].includes(type)) return response.status(400).json({ error: "Invalid request type" });
   const attachmentUrl = request.file ? `/uploads/${request.file.filename}` : null;
   const serviceRequest = await createServiceRequest({ userId: request.user.id, type, amount, note, attachmentUrl });
   response.status(201).json({ serviceRequest });
