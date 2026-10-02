@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS instruments (
 CREATE TABLE IF NOT EXISTS service_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id),
-  type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal', 'kyc')),
+  type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal', 'kyc', 'support')),
   amount NUMERIC(14, 2),
   status TEXT NOT NULL DEFAULT 'pending',
   note TEXT,
