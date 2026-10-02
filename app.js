@@ -2520,6 +2520,14 @@ function bucketStartMs(timeMs, timeframe) {
   return Math.floor(timeMs / stepMs) * stepMs;
 }
 
+// Simulation ticks land every 1.5s and compound a small step each time, so
+// bucketing them by the selected timeframe (e.g. 1M = 60s) let up to 40
+// ticks pile into one candle before it rolled over - the whole move showed
+// up as a single drastic jump instead of a gradual climb. Bucketing them on
+// this fixed, much shorter interval instead spreads the same move across
+// many small candles, independent of whatever timeframe is on screen.
+const simulationCandleBucketMs = 3000;
+
 // Ticks arrive from the server over /ws (either true Twelve Data stream pushes or
 // its safe-interval fallback poll — applyLiveTick doesn't care which). Each tick
 // either mutates the still-forming candle or, once its timestamp crosses into the
@@ -2572,8 +2580,12 @@ function applyLiveTick(tick) {
   const candles = tradeChartState.candles;
   const last = candles.at(-1);
   const tickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
-  const bucketMs = bucketStartMs(tickMs, tradeChartState.timeframe);
-  const lastBucketMs = bucketStartMs(new Date(last.time).getTime(), tradeChartState.timeframe);
+  const bucketMs = isSimulationTick
+    ? Math.floor(tickMs / simulationCandleBucketMs) * simulationCandleBucketMs
+    : bucketStartMs(tickMs, tradeChartState.timeframe);
+  const lastBucketMs = isSimulationTick
+    ? Math.floor(new Date(last.time).getTime() / simulationCandleBucketMs) * simulationCandleBucketMs
+    : bucketStartMs(new Date(last.time).getTime(), tradeChartState.timeframe);
   // viewOffset === 0 means the view is already pinned to the newest candle — keep
   // it pinned so the chart keeps scrolling forward as new candles land. A user who
   // has panned back into history (viewOffset > 0) keeps their place instead.
