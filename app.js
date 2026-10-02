@@ -1393,6 +1393,19 @@ function applyIncomingBalanceUpdate(payload) {
   applyLiveBalance(payload.balance);
 }
 
+// Mirrors admin/team editing a user's name/role/status/KYC via the Users
+// table Save button straight into that user's own already-open session -
+// otherwise e.g. a KYC approval only ever showed up after the affected user
+// logged out and back in, same gap applyIncomingBalanceUpdate already closed
+// for deposits/withdrawals.
+function applyIncomingUserUpdate(payload) {
+  if (!payload?.userId || payload.userId !== currentSession?.user?.id || !payload.user) return;
+  Object.assign(currentSession.user, payload.user);
+  localStorage.setItem("fxccUser", JSON.stringify(currentSession.user));
+  renderAccountSummary();
+  updateRoleAccess();
+}
+
 function applyIncomingOrderUpdate(payload) {
   if (!payload || payload.userId !== currentSession?.user?.id) return;
   applyLiveBalance(payload.balance);
@@ -2621,6 +2634,7 @@ function connectPriceStream() {
       applyIncomingRequestMessageForAdmin(payload.message);
     } else if (payload.type === "service-request.status") applyIncomingRequestStatus(payload.serviceRequest);
     else if (payload.type === "user.balance") applyIncomingBalanceUpdate(payload);
+    else if (payload.type === "user.updated") applyIncomingUserUpdate(payload);
     else if (payload.type === "order.update") applyIncomingOrderUpdate(payload);
     else if (payload.type === "simulation-status") applySimulationStatus(payload);
     else if (payload.type === "simulation-scheduled") applyScheduledSimulationStatus(payload);

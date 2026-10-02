@@ -975,6 +975,12 @@ app.patch("/api/admin/users/:id", requireAuth, attachUser, requireRole("admin", 
   const user = await updateUser(request.params.id, patch);
   if (!user) return response.status(404).json({ error: "User not found" });
   if (patch.kycStatus !== undefined) await syncLatestKycSubmissionStatus(user.id, patch.kycStatus, request.user.id);
+  // Unlike deposit/withdraw (which already broadcast user.balance), this was
+  // the one path that changed a user's own account - name, role, status, or
+  // KYC - with nothing telling their already-open session about it. It just
+  // sat stale (e.g. a Profile page still showing "Pending" after admin set
+  // it to Verified) until they logged out and back in.
+  broadcast({ type: "user.updated", userId: user.id, user: publicUser(user) });
   response.json({ user: publicUser(user) });
 });
 
