@@ -121,6 +121,7 @@ const memory = {
   ledger: [],
   kycSubmissions: [],
   bankAccounts: [],
+  auditLogs: [],
 };
 
 let pool = null;
@@ -366,6 +367,71 @@ async function listLedgerEntries(userId) {
     return query("SELECT * FROM ledger WHERE user_id = $1 ORDER BY created_at DESC", [userId]);
   }
   return memory.ledger.filter((entry) => entry.user_id === userId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+}
+
+function normalizeAuditLog(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    category: row.category,
+    action: row.action,
+    actorId: row.actor_id ?? row.actorId ?? null,
+    actorLabel: row.actor_label ?? row.actorLabel ?? null,
+    targetLabel: row.target_label ?? row.targetLabel ?? null,
+    details: row.details ?? null,
+    createdAt: row.created_at || row.createdAt,
+  };
+}
+
+// The single write path for the admin audit trail - every call site below
+// just describes what happened (category/action/actor/target/details) and
+// this takes care of persisting it consistently across the pool/memory
+// split. Never awaited by its caller's response path in a way that could
+// fail the request: logging a mistake shouldn't block the action itself,
+// so callers fire this after the real work has already succeeded.
+async function logEvent({ category, action, actorId = null, actorLabel = null, targetLabel = null, details = null }) {
+  try {
+    if (pool) {
+      await query(
+        `INSERT INTO audit_logs (category, action, actor_id, actor_label, target_label, details)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [category, action, actorId, actorLabel, targetLabel, details ? JSON.stringify(details) : null],
+      );
+      return;
+    }
+    memory.auditLogs.push({
+      id: crypto.randomUUID(),
+      category,
+      action,
+      actor_id: actorId,
+      actor_label: actorLabel,
+      target_label: targetLabel,
+      details: details ?? null,
+      created_at: new Date().toISOString(),
+    });
+    // Unbounded growth would eventually eat the whole process's memory on a
+    // long-lived in-memory deployment - keep only the most recent slice,
+    // same tradeoff the live price-tick buffers elsewhere already make.
+    if (memory.auditLogs.length > 5000) memory.auditLogs = memory.auditLogs.slice(-5000);
+  } catch (error) {
+    console.warn("logEvent failed:", error.message);
+  }
+}
+
+async function listAuditLogs({ category, limit = 100 } = {}) {
+  const cappedLimit = Math.min(Math.max(Number(limit) || 100, 1), 200);
+  if (pool) {
+    const rows = await query(
+      `SELECT * FROM audit_logs WHERE ($1::text IS NULL OR category = $1) ORDER BY created_at DESC LIMIT $2`,
+      [category || null, cappedLimit],
+    );
+    return rows.map(normalizeAuditLog);
+  }
+  return memory.auditLogs
+    .filter((entry) => !category || entry.category === category)
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    .slice(0, cappedLimit)
+    .map(normalizeAuditLog);
 }
 
 async function recordDeposit({ userId, amount, createdBy }) {
@@ -991,6 +1057,14 @@ app.post("/api/admin/users", requireAuth, attachUser, requireRole("admin"), asyn
     kycStatus: patch.kycStatus || "pending",
     balance: 0,
   });
+  logEvent({
+    category: "admin",
+    action: "user.created",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: user.email,
+    details: { role: user.role, status: user.status },
+  });
   response.status(201).json({ user: publicUser(user), temporaryPassword: password });
 });
 
@@ -1008,6 +1082,14 @@ app.patch("/api/admin/users/:id", requireAuth, attachUser, requireRole("admin"),
   // sat stale (e.g. a Profile page still showing "Pending" after admin set
   // it to Verified) until they logged out and back in.
   broadcast({ type: "user.updated", userId: user.id, user: publicUser(user) });
+  logEvent({
+    category: "admin",
+    action: "user.updated",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: user.email,
+    details: patch,
+  });
   response.json({ user: publicUser(user) });
 });
 
@@ -1023,6 +1105,14 @@ app.post("/api/admin/users/:id/deposit", requireAuth, attachUser, requireRole("a
   if (result.error) return response.status(result.status || 400).json({ error: result.error });
 
   broadcast({ type: "user.balance", userId: result.user.id, balance: result.user.balance });
+  logEvent({
+    category: "admin",
+    action: "user.deposit",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: result.user.email,
+    details: { amount, balanceAfter: result.user.balance },
+  });
   response.json({ user: publicUser(result.user), ledgerEntry: result.ledgerEntry });
 });
 
@@ -1034,6 +1124,14 @@ app.post("/api/admin/users/:id/withdraw", requireAuth, attachUser, requireRole("
   if (result.error) return response.status(result.status || 400).json({ error: result.error });
 
   broadcast({ type: "user.balance", userId: result.user.id, balance: result.user.balance });
+  logEvent({
+    category: "admin",
+    action: "user.withdraw",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: result.user.email,
+    details: { amount, balanceAfter: result.user.balance },
+  });
   response.json({ user: publicUser(result.user), ledgerEntry: result.ledgerEntry });
 });
 
@@ -1147,7 +1245,21 @@ app.post("/api/admin/instruments", requireAuth, attachUser, requireRole("admin")
     enabled: Boolean(enabled),
     tradeEnabled: Boolean(tradeEnabled),
   });
+  logEvent({
+    category: "admin",
+    action: "instrument.updated",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: instrument.symbol,
+    details: { enabled: instrument.enabled, tradeEnabled: instrument.tradeEnabled, category: instrument.category },
+  });
   response.status(201).json({ instrument });
+});
+
+app.get("/api/admin/logs", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
+  const category = ["order", "chart", "admin"].includes(request.query.category) ? request.query.category : null;
+  const logs = await listAuditLogs({ category, limit: request.query.limit });
+  response.json({ logs });
 });
 
 // Twelve Data's free/basic tier caps at ~8 credits/minute (1 credit per symbol per
@@ -1571,6 +1683,14 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
   const durationMs = Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds * 1000 : null;
   startPriceSimulation(symbol, direction, stepPercent, request.user.id, durationMs, targetPrice);
   const simulation = priceSimulations.get(symbol);
+  logEvent({
+    category: "chart",
+    action: "simulation.started",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: symbol,
+    details: { direction, stepPercent, durationSeconds: durationSeconds || null, targetPrice: simulation?.targetPrice || null },
+  });
   response.json({ symbol, direction, active: true, expiresAt: simulation?.expiresAt || null, targetPrice: simulation?.targetPrice || null });
 });
 
@@ -1578,6 +1698,13 @@ app.post("/api/admin/price-simulation/stop", requireAuth, attachUser, requireRol
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   stopPriceSimulation(symbol);
+  logEvent({
+    category: "chart",
+    action: "simulation.stopped",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: symbol,
+  });
   response.json({ symbol, active: false });
 });
 
@@ -1639,6 +1766,14 @@ app.post("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRol
     autoSimulationConfig.delete(symbol);
   }
   broadcast({ type: "auto-simulation-status", symbol, enabled });
+  logEvent({
+    category: "chart",
+    action: "simulation.auto_toggled",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: symbol,
+    details: { enabled },
+  });
   response.json({ symbol, enabled });
 });
 
@@ -1676,6 +1811,14 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
     request.user.id,
     targetPrice
   );
+  logEvent({
+    category: "chart",
+    action: "simulation.scheduled",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: symbol,
+    details: { direction, stepPercent, from, to, targetPrice },
+  });
   response.json({ symbol, direction, targetPrice, ...result });
 });
 
@@ -1683,6 +1826,13 @@ app.post("/api/admin/price-simulation/schedule/cancel", requireAuth, attachUser,
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   cancelScheduledSimulation(symbol);
+  logEvent({
+    category: "chart",
+    action: "simulation.schedule_cancelled",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: symbol,
+  });
   response.json({ symbol, active: false });
 });
 
@@ -1751,6 +1901,14 @@ app.post("/api/orders", requireAuth, attachUser, async (request, response) => {
   if (result.error) return response.status(result.status || 400).json({ error: result.error });
   broadcast({ type: "order.update", order: result.order, userId: request.user.id, balance: result.balance });
   maybeAutoStartSimulation(symbol, direction);
+  logEvent({
+    category: "order",
+    action: "order.placed",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: symbol,
+    details: { orderId: result.order.id, direction, lots, multiplier, entryPrice: price },
+  });
   response.status(201).json({ order: result.order, balance: result.balance });
 });
 
@@ -1795,6 +1953,15 @@ async function closeOrder(order, { closedBy, reason = null }) {
 
   if (!result.error) {
     broadcast({ type: "order.update", order: result.order, userId: order.user_id, balance: result.balance, closedBy, reason });
+    const actor = closedBy ? await findUserById(closedBy) : null;
+    logEvent({
+      category: "order",
+      action: "order.closed",
+      actorId: closedBy,
+      actorLabel: actor ? actor.email : reason ? `system (${reason})` : "system",
+      targetLabel: order.symbol,
+      details: { orderId: order.id, pnl: realizedPnl, reason: reason || "manual" },
+    });
   }
   return { ...result, pnl: result.error ? null : realizedPnl };
 }

@@ -234,12 +234,13 @@ function updateRoleAccess() {
   renderAccountSummary();
   const allowed = canManageUsers();
   const editable = canEditManagedUsers();
-  document.querySelectorAll('[data-section="users"], [data-section="products"]').forEach((item) => {
+  document.querySelectorAll('[data-section="users"], [data-section="products"], [data-section="logs"]').forEach((item) => {
     item.hidden = !allowed;
     item.classList.toggle("is-hidden", !allowed);
   });
   document.querySelector("#users")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector("#products")?.classList.toggle("is-role-hidden", !allowed);
+  document.querySelector("#logs")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector(".managed-form-card")?.classList.toggle("is-hidden", allowed && !editable);
   document.querySelector(".managed-instrument-card")?.classList.toggle("is-hidden", !allowed);
   document.querySelector("#clientServiceCard")?.classList.toggle("is-hidden", allowed);
@@ -252,6 +253,7 @@ function updateRoleAccess() {
     renderManagedInstruments();
     if (document.querySelector("#users")?.classList.contains("is-active")) moveSection("dashboard");
     if (document.querySelector("#products")?.classList.contains("is-active")) moveSection("dashboard");
+    if (document.querySelector("#logs")?.classList.contains("is-active")) moveSection("dashboard");
   }
 }
 
@@ -301,7 +303,7 @@ function getNavLabel(item) {
 }
 
 function moveSection(id) {
-  if ((id === "users" || id === "products") && !canManageUsers()) id = "dashboard";
+  if ((id === "users" || id === "products" || id === "logs") && !canManageUsers()) id = "dashboard";
   navItems.forEach((item) => item.classList.toggle("is-active", item.dataset.section === id));
   sections.forEach((section) => section.classList.toggle("is-active", section.id === id));
   if (id === "dashboard") {
@@ -314,6 +316,9 @@ function moveSection(id) {
   }
   if (id === "products" && canManageUsers()) {
     loadManagedInstruments();
+  }
+  if (id === "logs" && canManageUsers()) {
+    loadAuditLogs();
   }
   if (id === "markets") {
     refreshMarketsQuotes();
@@ -3670,6 +3675,93 @@ document.querySelectorAll(".product-filter-tabs button").forEach((button) => {
     filterManagedInstruments();
   });
 });
+
+let auditLogs = [];
+
+function formatLogTimestamp(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
+// Turns a raw {action, targetLabel, details} row into the one-line summary
+// shown in the list - the JSON details stay available underneath for
+// anyone who needs the exact numbers, this line is just for scanning.
+function describeAuditLog(log) {
+  const d = log.details || {};
+  const symbol = compactSymbol(log.targetLabel || "");
+  switch (log.action) {
+    case "order.placed":
+      return `Placed ${(d.direction || "").toUpperCase()} ${d.lots ?? "?"} lots of ${symbol} @ ${d.entryPrice ?? "?"}`;
+    case "order.closed":
+      return `Closed ${symbol} position · P&L ${d.pnl >= 0 ? "+" : ""}${formatCurrency(d.pnl)} (${d.reason || "manual"})`;
+    case "simulation.started":
+      return `Started ${(d.direction || "").toUpperCase()} simulation on ${symbol}${d.targetPrice ? ` → target ${d.targetPrice}` : ""}`;
+    case "simulation.stopped":
+      return `Stopped simulation on ${symbol}`;
+    case "simulation.auto_toggled":
+      return `Auto-simulation ${d.enabled ? "enabled" : "disabled"} for ${symbol}`;
+    case "simulation.scheduled":
+      return `Scheduled ${(d.direction || "").toUpperCase()} simulation on ${symbol} (${formatTimeOfDay(d.from)}–${formatTimeOfDay(d.to)})`;
+    case "simulation.schedule_cancelled":
+      return `Cancelled scheduled simulation on ${symbol}`;
+    case "instrument.updated":
+      return `Updated ${symbol} (trade ${d.tradeEnabled ? "enabled" : "disabled"}, ${d.category || ""})`;
+    case "user.created":
+      return `Created user ${log.targetLabel} (role: ${d.role || "user"})`;
+    case "user.updated":
+      return `Updated user ${log.targetLabel}`;
+    case "user.deposit":
+      return `Deposited ${formatCurrency(d.amount)} to ${log.targetLabel}`;
+    case "user.withdraw":
+      return `Withdrew ${formatCurrency(d.amount)} from ${log.targetLabel}`;
+    default:
+      return `${log.action} ${log.targetLabel || ""}`.trim();
+  }
+}
+
+function auditLogRowHtml(log) {
+  return `<div class="audit-log-row" data-log-category="${escapeHtml(log.category)}">
+    <div class="audit-log-row-main">
+      <span class="audit-log-badge cat-${escapeHtml(log.category)}">${escapeHtml(log.category)}</span>
+      <span class="audit-log-desc">${escapeHtml(describeAuditLog(log))}</span>
+    </div>
+    <div class="audit-log-row-meta">
+      <span class="audit-log-actor">${escapeHtml(log.actorLabel || "system")}</span>
+      <span class="audit-log-time">${escapeHtml(formatLogTimestamp(log.createdAt))}</span>
+    </div>
+  </div>`;
+}
+
+function renderAuditLogs() {
+  const list = document.querySelector("#auditLogList");
+  if (!list) return;
+  list.innerHTML = auditLogs.length
+    ? auditLogs.map(auditLogRowHtml).join("")
+    : `<div class="audit-log-row"><span>No activity recorded yet.</span></div>`;
+}
+
+async function loadAuditLogs() {
+  if (!document.querySelector("#auditLogList") || !canManageUsers()) return;
+  const activeFilter = document.querySelector(".log-filter-tabs button.is-active")?.dataset.logFilter || "all";
+  try {
+    const query = activeFilter === "all" ? "" : `?category=${encodeURIComponent(activeFilter)}`;
+    const result = await adminFetch(`/api/admin/logs${query}`);
+    auditLogs = result.logs || [];
+  } catch {
+    auditLogs = [];
+  }
+  renderAuditLogs();
+}
+
+document.querySelectorAll(".log-filter-tabs button").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".log-filter-tabs button").forEach((item) => item.classList.toggle("is-active", item === button));
+    loadAuditLogs();
+  });
+});
+
+document.querySelector("#refreshAuditLogs")?.addEventListener("click", loadAuditLogs);
 
 async function loadManagedUsers() {
   if (!document.querySelector("#managedUserTable")) return;
