@@ -1706,17 +1706,17 @@ function appendProcessChatMessage(message, options = {}) {
   }
 
   const content = document.createElement("p");
-  content.textContent = message;
+  if (message) content.textContent = message;
   if (options.imageSrc) {
     const image = document.createElement("img");
     image.src = options.imageSrc;
-    image.alt = options.imageAlt || "Uploaded image";
+    image.alt = options.imageAlt || "Chat image";
     content.append(image);
   }
   bubble.append(content);
   processChatMessages.append(bubble);
   processChatMessages.scrollTop = processChatMessages.scrollHeight;
-  if (chatHistoryPreview) chatHistoryPreview.textContent = message;
+  if (chatHistoryPreview) chatHistoryPreview.textContent = message || (options.imageSrc ? "📷 Photo" : "");
 }
 
 async function openProcessChat(topicName = "deposit") {
@@ -1920,13 +1920,14 @@ document.querySelector("#processChatForm")?.addEventListener("submit", async (ev
   }
 });
 
-document.querySelector("#processChatImageInput")?.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  event.target.value = "";
+// Shared by the file-picker input below and the paste handler, so Ctrl+V'ing
+// a screenshot straight into the chat goes through the exact same
+// thread-resolution-retry and error-reporting path as picking a file does -
+// no filename shown (just the image), since nobody reading the chat needs
+// to see e.g. "sushma_hs143_1790218236_399...png".
+async function sendChatImage(file) {
   const imageUrl = URL.createObjectURL(file);
-  const caption = `Uploaded image: ${file.name}`;
-  appendProcessChatMessage(caption, { self: true, imageSrc: imageUrl, imageAlt: file.name });
+  appendProcessChatMessage("", { self: true, imageSrc: imageUrl, imageAlt: "Chat image" });
 
   if (!activeServiceRequestId && currentSession?.token && currentProcessChatTopic) {
     const requestType = chatTopicToRequestType[currentProcessChatTopic];
@@ -1944,7 +1945,7 @@ document.querySelector("#processChatImageInput")?.addEventListener("change", asy
     try {
       const formData = new FormData();
       formData.append("attachment", file);
-      formData.append("body", caption);
+      formData.append("body", "");
       await authRequest(`/api/service-requests/${activeServiceRequestId}/messages`, { method: "POST", body: formData });
     } catch (error) {
       reportClientError("chat-image-send", error, { requestId: activeServiceRequestId, fileName: file.name, fileSize: file.size });
@@ -1953,6 +1954,26 @@ document.querySelector("#processChatImageInput")?.addEventListener("change", asy
   } else if (currentSession?.token) {
     reportClientError("chat-image-no-thread", new Error("No service-request thread resolved"), { topic: currentProcessChatTopic });
     appendProcessChatMessage("Image upload failed — please try again.");
+  }
+}
+
+document.querySelector("#processChatImageInput")?.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  event.target.value = "";
+  await sendChatImage(file);
+});
+
+processChatWindow?.addEventListener("paste", async (event) => {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      event.preventDefault();
+      const file = item.getAsFile();
+      if (file) await sendChatImage(file);
+      break;
+    }
   }
 });
 
