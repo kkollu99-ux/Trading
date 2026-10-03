@@ -57,12 +57,30 @@ function formatKycStatus(status) {
   return { text: "Pending", className: "gold-text" };
 }
 
+// A stale/invalid token (expired, or belonging to an account that no longer
+// exists) previously meant every authenticated call just failed forever,
+// with the UI still showing the user as fully logged in off cached
+// localStorage data - no error explained why, no way to recover short of
+// manually realizing to sign out and back in. This is what a chat
+// "Message failed to send" with nothing else working was actually hitting.
+function handleSessionExpired() {
+  if (!currentSession?.token) return; // nothing to expire - guest/demo session, or already handled
+  clearSession();
+  showAuthView(loginView);
+  const error = document.querySelector("#loginError");
+  if (error) error.textContent = "Your session has expired. Please sign in again.";
+}
+
 async function authFetch(path) {
   if (!currentSession?.token) return null;
   try {
     const response = await fetch(`${apiBase}${path}`, {
       headers: { Authorization: `Bearer ${currentSession.token}` },
     });
+    if (response.status === 401) {
+      handleSessionExpired();
+      return null;
+    }
     if (!response.ok) return null;
     return await response.json();
   } catch {
@@ -1411,6 +1429,7 @@ async function authRequest(path, options = {}) {
     ...options,
     headers: { Authorization: `Bearer ${currentSession.token}`, ...(options.headers || {}) },
   });
+  if (response.status === 401) handleSessionExpired();
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     // Carrying the HTTP status (and which path/method failed) onto the
@@ -3428,9 +3447,7 @@ async function adminFetch(path, options = {}) {
     },
   });
 
-  if (response.status === 401) {
-    clearSession();
-  }
+  if (response.status === 401) handleSessionExpired();
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "Request failed");
