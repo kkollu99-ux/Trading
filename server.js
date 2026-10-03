@@ -1589,7 +1589,16 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     timer: null,
   };
   if (clampedDurationMs) {
-    simulation.timer = setTimeout(() => stopPriceSimulation(symbol), clampedDurationMs);
+    simulation.timer = setTimeout(() => {
+      stopPriceSimulation(symbol);
+      logEvent({
+        category: "chart",
+        action: "simulation.expired",
+        actorLabel: "system (duration elapsed)",
+        targetLabel: symbol,
+        details: { direction, price: simulation.price },
+      });
+    }, clampedDurationMs);
   }
   priceSimulations.set(symbol, simulation);
   broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt, targetPrice: simulation.targetPrice });
@@ -1664,7 +1673,16 @@ setInterval(() => {
     // simulation stops - it just keeps reflecting whatever it always would
     // have (real feed or the drifting mock fallback), untouched throughout.
     broadcast({ type: "price-tick", symbol, price: simulation.price, source: "simulation", timestamp: new Date().toISOString() });
-    if (targetReached) stopPriceSimulation(symbol);
+    if (targetReached) {
+      stopPriceSimulation(symbol);
+      logEvent({
+        category: "chart",
+        action: "simulation.target_reached",
+        actorLabel: "system (target reached)",
+        targetLabel: symbol,
+        details: { direction: simulation.direction, price: simulation.price, targetPrice: simulation.targetPrice },
+      });
+    }
   }
 }, priceSimulationTickMs);
 
