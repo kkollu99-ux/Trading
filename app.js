@@ -568,6 +568,7 @@ function enterWorkspace(session = null) {
   updateRoleAccess();
   drawCharts();
   updateDashboardTime();
+  primeMyServiceRequestIds().catch(() => {});
 }
 
 function updateDashboardTime() {
@@ -1298,6 +1299,71 @@ const processChatLauncher = document.querySelector("#processChatLauncher");
 const chatHistoryPreview = document.querySelector(".chat-history-row small");
 let currentProcessChatTopic = "";
 
+// Unread-message notification badges: a service-request thread lands in here
+// the moment a message arrives from the other party while nobody has that
+// exact thread open and visible - whether that's the client's chat window,
+// or (for admin/team) either the shared chat window or the user-detail
+// modal's requests tab. Covers both directions (client -> admin, admin ->
+// client) with the same mechanism, since both sides share the same chat
+// widget and the same "request_id" concept.
+const unreadServiceRequestIds = new Set();
+// A "user" role only ever has a handful of their own request threads, but
+// price-tick-style broadcasts reach every connected socket - so without this
+// allowlist a client would pick up an unread badge for a stranger's thread
+// just because its id showed up in a chat.message payload.
+const myServiceRequestIds = new Set();
+
+function isServiceRequestCurrentlyVisible(requestId) {
+  const chatWindowOpen = processChatWindow && !processChatWindow.classList.contains("is-hidden");
+  if (chatWindowOpen && activeServiceRequestId === requestId) return true;
+  if (canManageUsers()) {
+    const modalOpen = !document.querySelector("#userDetailModal")?.classList.contains("is-hidden");
+    const threadOpen = document.querySelector("#userDetailRequestThread")?.hidden === false;
+    if (modalOpen && threadOpen && activeUserDetailRequestId === requestId) return true;
+  }
+  return false;
+}
+
+function renderServiceNotificationBadges() {
+  const count = unreadServiceRequestIds.size;
+  for (const badge of [document.querySelector("#serviceNavBadge"), document.querySelector("#chatLauncherBadge")]) {
+    if (!badge) continue;
+    badge.textContent = count > 9 ? "9+" : String(count);
+    badge.hidden = count === 0;
+  }
+}
+
+function markServiceRequestRead(requestId) {
+  if (!requestId || !unreadServiceRequestIds.has(requestId)) return;
+  unreadServiceRequestIds.delete(requestId);
+  renderServiceNotificationBadges();
+}
+
+function markServiceRequestUnread(requestId) {
+  if (!requestId) return;
+  unreadServiceRequestIds.add(requestId);
+  renderServiceNotificationBadges();
+}
+
+// Called once per session (after login/register/restore) so a reply that
+// lands before the client has reopened any chat this session still raises a
+// badge, instead of only working once myServiceRequestIds has been primed by
+// actually opening a chat.
+async function primeMyServiceRequestIds() {
+  if (!currentSession?.token || canManageUsers()) return;
+  const data = await authFetch("/api/service-requests");
+  (data?.serviceRequests || []).forEach((item) => myServiceRequestIds.add(item.id));
+}
+
+// admin/team implicitly own every thread (that's the inbox); a plain user
+// only ever owns their own, tracked in myServiceRequestIds above.
+function trackServiceChatNotification(message) {
+  if (!message || message.sender_id === currentSession?.user?.id) return;
+  const ownsThread = canManageUsers() || myServiceRequestIds.has(message.request_id);
+  if (!ownsThread) return;
+  if (!isServiceRequestCurrentlyVisible(message.request_id)) markServiceRequestUnread(message.request_id);
+}
+
 const processChatTopics = {
   support: {
     title: "FXCC Support",
@@ -1354,6 +1420,8 @@ async function loadOrCreateServiceRequestChat(type, introMessage) {
       serviceRequest = created.serviceRequest;
     }
     activeServiceRequestId = serviceRequest.id;
+    myServiceRequestIds.add(serviceRequest.id);
+    markServiceRequestRead(serviceRequest.id);
     appendProcessChatMessage(introMessage);
     const history = await authFetch(`/api/service-requests/${serviceRequest.id}/messages`);
     (history?.messages || []).forEach((message) => {
@@ -1599,6 +1667,7 @@ async function openAdminChatThread(serviceRequest, clientLabel) {
   processChatWindow.classList.remove("is-hidden");
   processChatLauncher?.classList.add("is-hidden");
   activeServiceRequestId = serviceRequest.id;
+  markServiceRequestRead(serviceRequest.id);
   processChatMessages.innerHTML = "";
   try {
     const history = await adminFetch(`/api/service-requests/${serviceRequest.id}/messages`);
@@ -1635,7 +1704,7 @@ function renderServiceInbox() {
       return `<button class="chat-history-row" type="button" data-service-request-id="${escapeHtml(item.id)}">
         <span>${escapeHtml(initial)}</span>
         <div>
-          <strong>${escapeHtml(label)}</strong>
+          <strong>${escapeHtml(label)}${unreadServiceRequestIds.has(item.id) ? '<span class="request-badge" title="New message"></span>' : ""}</strong>
           <small>${escapeHtml(item.type)} · ${escapeHtml(item.status)} · ${escapeHtml(date)}</small>
         </div>
         <i>›</i>
@@ -1682,6 +1751,7 @@ document.querySelector("#minimizeProcessChat")?.addEventListener("click", () => 
 processChatLauncher?.addEventListener("click", () => {
   processChatWindow?.classList.remove("is-hidden");
   processChatLauncher.classList.add("is-hidden");
+  markServiceRequestRead(activeServiceRequestId);
   processChatInput?.focus();
 });
 
@@ -2642,6 +2712,7 @@ function connectPriceStream() {
     if (payload.type === "price-tick") applyLiveTick(payload);
     else if (payload.type === "market-status") applyMarketStatus(payload);
     else if (payload.type === "chat.message") {
+      trackServiceChatNotification(payload.message);
       applyIncomingChatMessage(payload.message);
       applyIncomingRequestMessageForAdmin(payload.message);
     } else if (payload.type === "service-request.status") applyIncomingRequestStatus(payload.serviceRequest);
@@ -3525,6 +3596,7 @@ async function approveOrRejectKyc(item, kycStatus) {
 
 async function openUserDetailRequestThread(id) {
   activeUserDetailRequestId = id;
+  markServiceRequestRead(id);
   renderUserDetailRequestsList();
   const thread = document.querySelector("#userDetailRequestThread");
   const messagesEl = document.querySelector("#userDetailRequestMessages");
