@@ -1790,7 +1790,11 @@ function renderServiceInbox() {
       const client = findManagedUserById(item.user_id);
       const label = client ? client.name || client.email : item.user_id;
       const initial = (client?.name || client?.email || "?").charAt(0).toUpperCase();
-      const date = item.created_at ? new Date(item.created_at).toLocaleString() : "";
+      // Matches the list's own sort order (by last_message_at, not
+      // created_at) - showing created_at here was the exact mismatch that
+      // made a correctly-sorted list look broken: the visible timestamp
+      // didn't match what it was actually sorted by.
+      const date = (item.last_message_at || item.created_at) ? new Date(item.last_message_at || item.created_at).toLocaleString() : "";
       return `<button class="chat-history-row" type="button" data-service-request-id="${escapeHtml(item.id)}">
         <span>${escapeHtml(initial)}</span>
         <div>
@@ -3682,7 +3686,7 @@ function renderUserDetailRequestsList() {
   }
   list.innerHTML = items
     .map((item) => {
-      const date = item.created_at ? new Date(item.created_at).toLocaleString() : "";
+      const date = (item.last_message_at || item.created_at) ? new Date(item.last_message_at || item.created_at).toLocaleString() : "";
       const isSelected = item.id === activeUserDetailRequestId;
       return `<button type="button" class="user-detail-request-row${isSelected ? " is-selected-request" : ""}" data-user-detail-request-id="${item.id}">
         <span>${escapeHtml(item.type)}${item.amount ? ` · ${formatCurrency(item.amount)}` : ""}</span>
