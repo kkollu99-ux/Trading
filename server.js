@@ -1973,6 +1973,31 @@ app.post(
   },
 );
 
+// Browser console logs vanish the moment the tab closes, so the client posts
+// here whenever something it can't recover from happens on its own (right
+// now: a chat message that truly couldn't be sent) - landing in the normal
+// server logs is the only way to see what actually went wrong for a real
+// user after the fact, since this app has no error-tracking service wired
+// up. Deliberately not behind requireAuth: a broken/expired token can BE the
+// failure being reported, and that's exactly the case we most need visible.
+app.post("/api/client-error", (request, response) => {
+  const body = request.body || {};
+  const clip = (value, max) => (typeof value === "string" ? value.slice(0, max) : value);
+  console.error(
+    "[client-error]",
+    JSON.stringify({
+      context: clip(body.context, 100) || "unknown",
+      message: clip(body.message, 500) || "",
+      status: Number.isFinite(body.status) ? body.status : null,
+      path: clip(body.path, 200) || null,
+      method: clip(body.method, 10) || null,
+      email: clip(body.email, 200) || null,
+      detail: clip(JSON.stringify(body.detail || {}), 1000),
+    }),
+  );
+  response.status(204).end();
+});
+
 app.use(express.static(rootDir));
 app.get("*", (_request, response) => {
   response.sendFile(path.join(rootDir, "index.html"));
