@@ -685,7 +685,7 @@
               <div>
                 <span>User Management</span>
                 <h2>Admin Control Center</h2>
-                <p>Create clients, assign team access, update balances, and review KYC state.</p>
+                <p>Create clients, update balances, and review KYC state.</p>
               </div>
               <button id="refreshManagedUsers" class="secondary-action compact-action" type="button">⟳ Refresh</button>
             </header>
@@ -702,7 +702,7 @@
                   <label>Email Address<input name="email" type="email" placeholder="client@example.com" required /></label>
                   <label>Temporary Password<input name="password" type="text" value="Client@12345" minlength="6" required /></label>
                   <div class="managed-form-row">
-                    <label>Role<select name="role"><option value="user">User</option><option value="team">Team</option><option value="admin">Admin</option></select></label>
+                    <label>Role<select name="role"><option value="user">User</option><option value="admin">Admin</option></select></label>
                     <label>KYC<select name="kycStatus"><option value="pending">Pending</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select></label>
                   </div>
                   <p class="managed-user-hint">New accounts start at $0 — use Deposit in the Users table after KYC is verified to fund them.</p>
@@ -714,7 +714,7 @@
                 <div class="managed-table-head">
                   <div>
                     <h3>Users</h3>
-                    <p>Admin and support team can review the client book here.</p>
+                    <p>Admin can review the client book here.</p>
                   </div>
                   <input id="managedUserSearch" type="search" placeholder="Search users..." />
                 </div>
