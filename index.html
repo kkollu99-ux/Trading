@@ -818,6 +818,12 @@
         </form>
       </div>
       <button id="processChatLauncher" class="process-chat-launcher is-hidden" type="button" aria-label="Open online service chat">☏<span class="nav-badge" id="chatLauncherBadge" hidden>0</span></button>
+      <div id="chatImageLightbox" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-label="Image preview">
+        <div class="chat-image-lightbox-inner">
+          <button id="closeChatImageLightbox" type="button" aria-label="Close image preview">×</button>
+          <img id="chatImageLightboxImg" src="" alt="Chat image" />
+        </div>
+      </div>
       <div id="invitedFriendsModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="invitedFriendsTitle">
         <div class="friends-modal">
           <header>

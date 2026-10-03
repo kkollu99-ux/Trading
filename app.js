@@ -703,6 +703,29 @@ document.querySelector("#closeInvitedFriendsModal")?.addEventListener("click", (
 document.querySelector("#invitedFriendsModal")?.addEventListener("click", (event) => {
   if (event.target === event.currentTarget) event.currentTarget.classList.add("is-hidden");
 });
+
+// Delegated on the document (rather than attached per-image) since chat
+// images render into two separate containers - the shared floating chat
+// widget and the admin user-detail modal's requests thread - and both get
+// new bubbles appended dynamically throughout a session.
+document.addEventListener("click", (event) => {
+  const image = event.target.closest(".support-bubble img");
+  if (!image) return;
+  const lightboxImg = document.querySelector("#chatImageLightboxImg");
+  if (!lightboxImg) return;
+  lightboxImg.src = image.src;
+  lightboxImg.alt = image.alt || "Chat image";
+  document.querySelector("#chatImageLightbox")?.classList.remove("is-hidden");
+});
+document.querySelector("#closeChatImageLightbox")?.addEventListener("click", () => {
+  document.querySelector("#chatImageLightbox")?.classList.add("is-hidden");
+});
+document.querySelector("#chatImageLightbox")?.addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) event.currentTarget.classList.add("is-hidden");
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") document.querySelector("#chatImageLightbox")?.classList.add("is-hidden");
+});
 document.querySelector("#prevInvitedFriendsPage")?.addEventListener("click", () => {
   invitedFriendsPage -= 1;
   renderInvitedFriends();
