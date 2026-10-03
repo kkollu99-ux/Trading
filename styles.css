@@ -55,6 +55,35 @@ button {
   display: none !important;
 }
 
+.update-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--blue);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.25);
+}
+
+.update-banner button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.3rem 0.9rem;
+  background: #fff;
+  color: var(--blue);
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
 .inner {
   width: min(76rem, calc(100% - 3rem));
   margin: 0 auto;

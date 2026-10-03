@@ -20,6 +20,10 @@ const port = Number(process.env.PORT || 4173);
 const jwtSecret = process.env.JWT_SECRET || "dev-only-secret-change-me";
 const rootDir = __dirname;
 const uploadDir = path.join(rootDir, "uploads");
+// Changes every deploy (the whole process restarts), so a long-lived
+// browser tab can tell its own already-loaded code apart from whatever the
+// server is serving now - see the client's startVersionCheck().
+const buildId = String(Date.now());
 
 fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -546,6 +550,7 @@ async function createServiceRequest({ userId, type, amount, note, attachmentUrl 
     );
     return rows[0];
   }
+  const now = new Date().toISOString();
   const request = {
     id: crypto.randomUUID(),
     user_id: userId,
@@ -554,7 +559,8 @@ async function createServiceRequest({ userId, type, amount, note, attachmentUrl 
     status: "pending",
     note: note || null,
     attachment_url: attachmentUrl || null,
-    created_at: new Date().toISOString(),
+    created_at: now,
+    last_message_at: now,
   };
   memory.serviceRequests.push(request);
   return request;
@@ -564,8 +570,8 @@ async function listServiceRequests(user) {
   if (pool) {
     const rows =
       user.role === "user"
-        ? await query("SELECT * FROM service_requests WHERE user_id = $1 ORDER BY created_at DESC", [user.id])
-        : await query("SELECT * FROM service_requests ORDER BY created_at DESC");
+        ? await query("SELECT * FROM service_requests WHERE user_id = $1 ORDER BY last_message_at DESC", [user.id])
+        : await query("SELECT * FROM service_requests ORDER BY last_message_at DESC");
     return rows;
   }
   return memory.serviceRequests.filter((request) => user.role !== "user" || request.user_id === user.id);
@@ -598,6 +604,11 @@ async function createChatMessage({ requestId, senderId, body, attachmentUrl }) {
        RETURNING *`,
       [requestId, senderId, body, attachmentUrl || null],
     );
+    // Keeps the admin inbox sorted by whichever conversation actually has
+    // fresh activity, instead of by whenever the thread was first created -
+    // a reply landing in an old thread previously never moved it back to
+    // the top, so a brand-new message could sit buried under hours-old rows.
+    await query(`UPDATE service_requests SET last_message_at = $2 WHERE id = $1`, [requestId, rows[0].created_at]);
     return rows[0];
   }
   const message = {
@@ -609,6 +620,8 @@ async function createChatMessage({ requestId, senderId, body, attachmentUrl }) {
     created_at: new Date().toISOString(),
   };
   memory.chatMessages.push(message);
+  const request = memory.serviceRequests.find((item) => item.id === requestId);
+  if (request) request.last_message_at = message.created_at;
   return message;
 }
 
@@ -734,6 +747,20 @@ async function seedDefaults() {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0`);
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_loss_amount NUMERIC(14, 2)`);
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS take_profit_amount NUMERIC(14, 2)`);
+    // Lets the admin inbox sort by whichever conversation is actually
+    // active, not by whenever the thread happened to be first created.
+    // createChatMessage keeps this current going forward; this recompute is
+    // what backfills it correctly for rows that already existed before this
+    // column did (ADD COLUMN's own DEFAULT NOW() would otherwise leave them
+    // all pinned to today, the migration's run time, not their real history)
+    // - always recomputed from the actual message history rather than a
+    // one-time guess, so it's exactly as correct whether this is the first
+    // boot after the migration or the thousandth.
+    await query(`ALTER TABLE service_requests ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+    await query(`
+      UPDATE service_requests sr
+      SET last_message_at = COALESCE((SELECT MAX(cm.created_at) FROM chat_messages cm WHERE cm.request_id = sr.id), sr.created_at)
+    `);
     // "support" used to have no matching request type, so that chat topic
     // never created a real row - it just looked like a working chat while
     // silently never reaching admin. CREATE TABLE IF NOT EXISTS above won't
@@ -759,7 +786,7 @@ async function seedDefaults() {
 }
 
 app.get("/api/health", (_request, response) => {
-  response.json({ ok: true, database: pool ? "postgres" : "memory" });
+  response.json({ ok: true, database: pool ? "postgres" : "memory", buildId });
 });
 
 // Email OTP verification, gating registration. otpStore is in-memory and
