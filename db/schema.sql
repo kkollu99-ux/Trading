@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'team', 'user')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
   status TEXT NOT NULL DEFAULT 'active',
   referral_code TEXT UNIQUE NOT NULL,
   referred_by TEXT,

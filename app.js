@@ -27,7 +27,7 @@ document.querySelector("#sidebarCollapseToggle")?.addEventListener("click", () =
 applySidebarCollapsed(localStorage.getItem("fxccSidebarCollapsed") === "true");
 
 function canManageUsers() {
-  return ["admin", "team"].includes(currentSession?.user?.role);
+  return currentSession?.user?.role === "admin";
 }
 
 function formatCurrency(value) {
@@ -194,13 +194,6 @@ async function loadTransactionHistory() {
 
 function canEditManagedUsers() {
   return currentSession?.user?.role === "admin";
-}
-
-// Balance and KYC are support-team duties too (per the backend's PATCH
-// /api/admin/users/:id, which allows team to edit those but not role/status),
-// while creating users and changing role/status stay admin-only.
-function canEditUserFinancials() {
-  return ["admin", "team"].includes(currentSession?.user?.role);
 }
 
 function saveSession(session) {
@@ -3282,7 +3275,7 @@ function setManagedMessage(message, type = "") {
 }
 
 async function adminFetch(path, options = {}) {
-  if (!canManageUsers() || !currentSession?.token) throw new Error("Admin or team access required");
+  if (!canManageUsers() || !currentSession?.token) throw new Error("Admin access required");
   const response = await fetch(`${apiBase}${path}`, {
     ...options,
     headers: {
@@ -3324,15 +3317,14 @@ function renderManagedUsers() {
     const statusClass = user.status === "suspended" ? "is-suspended" : user.status === "pending" ? "is-pending" : "";
     const kycClass = user.kycStatus === "rejected" ? "is-rejected" : user.kycStatus === "pending" ? "is-pending" : "";
     const roleDisabled = canEditManagedUsers() ? "" : "disabled";
-    const financeDisabled = canEditUserFinancials() ? "" : "disabled";
-    const actionCell = canEditUserFinancials() ? `<button class="managed-save-button" type="button" data-managed-user="${escapeHtml(user.id)}">Save</button>` : `<span class="status-pill">view only</span>`;
+    const financeDisabled = canEditManagedUsers() ? "" : "disabled";
+    const actionCell = canEditManagedUsers() ? `<button class="managed-save-button" type="button" data-managed-user="${escapeHtml(user.id)}">Save</button>` : `<span class="status-pill">view only</span>`;
     return `
       <tr data-managed-user-row="${escapeHtml(user.id)}">
         <td><strong>${escapeHtml(user.name)}</strong>${pendingRequestUserIds.has(user.id) ? '<span class="request-badge" title="Has an open support request"></span>' : ""}<small>${escapeHtml(user.email)}</small></td>
         <td>
           <select data-user-field="role" ${roleDisabled}>
             <option value="user" ${user.role === "user" ? "selected" : ""}>User</option>
-            <option value="team" ${user.role === "team" ? "selected" : ""}>Team</option>
             <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
           </select>
         </td>
@@ -3354,7 +3346,7 @@ function renderManagedUsers() {
         </td>
         <td class="balance-cell">
           <strong>${formatCurrency(user.balance)}</strong>
-          ${canEditUserFinancials()
+          ${canEditManagedUsers()
             ? user.kycStatus === "verified"
               ? `<div class="wallet-action-row" data-wallet-user="${escapeHtml(user.id)}">
                    <input type="number" min="0.01" step="0.01" placeholder="Amount" class="wallet-amount-input" />
@@ -3709,8 +3701,8 @@ document.querySelector("#managedUserForm")?.addEventListener("submit", async (ev
 document.querySelector("#managedUserTable")?.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-managed-user]");
   if (!button) return;
-  if (!canEditUserFinancials()) {
-    setManagedMessage("Only admin or team can update users.", "error");
+  if (!canEditManagedUsers()) {
+    setManagedMessage("Only admin can update users.", "error");
     return;
   }
   const row = button.closest("[data-managed-user-row]");

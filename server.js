@@ -249,7 +249,7 @@ function normalizeManagedUserPatch(body) {
 
 function validateManagedUserPatch(patch) {
   if (patch.name !== undefined && !patch.name) return "Name is required";
-  if (patch.role !== undefined && !["admin", "team", "user"].includes(patch.role)) return "Invalid role";
+  if (patch.role !== undefined && !["admin", "user"].includes(patch.role)) return "Invalid role";
   if (patch.status !== undefined && !["active", "pending", "suspended"].includes(patch.status)) return "Invalid status";
   if (patch.kycStatus !== undefined && !["pending", "verified", "rejected"].includes(patch.kycStatus)) return "Invalid KYC status";
   return null;
@@ -741,14 +741,20 @@ async function seedDefaults() {
     // own migration here.
     await query(`ALTER TABLE service_requests DROP CONSTRAINT IF EXISTS service_requests_type_check`);
     await query(`ALTER TABLE service_requests ADD CONSTRAINT service_requests_type_check CHECK (type IN ('deposit', 'withdrawal', 'kyc', 'support'))`);
+    // The "team" role is gone - admin now handles everything, including
+    // Online Service chat, so the placeholder support@fxcc.capital account
+    // (never actually used to log in or send a message - confirmed before
+    // removing it) goes too. Deleting it before narrowing the CHECK
+    // constraint below means that constraint is never violated by a row
+    // already sitting in the table.
+    await query(`DELETE FROM users WHERE email = 'support@fxcc.capital' AND role = 'team'`);
+    await query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+    await query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user'))`);
     for (const instrument of defaultInstruments) await seedInstrument(instrument);
   }
 
   if (!(await findUserByEmail("admin@fxcc.capital"))) {
     await createUser({ email: "admin@fxcc.capital", password: "Admin@12345", name: "FXCC Admin", role: "admin" });
-  }
-  if (!(await findUserByEmail("support@fxcc.capital"))) {
-    await createUser({ email: "support@fxcc.capital", password: "Support@12345", name: "Online Service", role: "team" });
   }
 }
 
@@ -932,7 +938,7 @@ app.get("/api/me", requireAuth, attachUser, (request, response) => {
   response.json({ user: publicUser(request.user) });
 });
 
-app.get("/api/admin/users", requireAuth, attachUser, requireRole("admin", "team"), async (_request, response) => {
+app.get("/api/admin/users", requireAuth, attachUser, requireRole("admin"), async (_request, response) => {
   const users = await listUsers();
   response.json({ users: users.map(publicUser) });
 });
@@ -961,14 +967,8 @@ app.post("/api/admin/users", requireAuth, attachUser, requireRole("admin"), asyn
   response.status(201).json({ user: publicUser(user), temporaryPassword: password });
 });
 
-app.patch("/api/admin/users/:id", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+app.patch("/api/admin/users/:id", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const patch = normalizeManagedUserPatch(request.body);
-  // Team can update balance/KYC/name (their day-to-day support duties) but not
-  // promote/demote roles or change account status - those stay admin-only to
-  // avoid a team member escalating their own or another account's privileges.
-  if (request.user.role === "team" && (patch.role !== undefined || patch.status !== undefined)) {
-    return response.status(403).json({ error: "Only admin can change role or account status" });
-  }
   const validationError = validateManagedUserPatch(patch);
   if (validationError) return response.status(400).json({ error: validationError });
 
@@ -988,7 +988,7 @@ app.patch("/api/admin/users/:id", requireAuth, attachUser, requireRole("admin", 
 // their own order activity, and both require the target account to have
 // completed KYC. Every call writes a ledger entry (audit trail) atomically
 // alongside the balance change via withUserLock/recordDeposit/recordWithdrawal.
-app.post("/api/admin/users/:id/deposit", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+app.post("/api/admin/users/:id/deposit", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const amount = Math.round(Number(request.body.amount) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) return response.status(400).json({ error: "Invalid amount" });
 
@@ -999,7 +999,7 @@ app.post("/api/admin/users/:id/deposit", requireAuth, attachUser, requireRole("a
   response.json({ user: publicUser(result.user), ledgerEntry: result.ledgerEntry });
 });
 
-app.post("/api/admin/users/:id/withdraw", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+app.post("/api/admin/users/:id/withdraw", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const amount = Math.round(Number(request.body.amount) * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) return response.status(400).json({ error: "Invalid amount" });
 
@@ -1010,7 +1010,7 @@ app.post("/api/admin/users/:id/withdraw", requireAuth, attachUser, requireRole("
   response.json({ user: publicUser(result.user), ledgerEntry: result.ledgerEntry });
 });
 
-app.get("/api/admin/users/:id/ledger", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+app.get("/api/admin/users/:id/ledger", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const entries = await listLedgerEntries(request.params.id);
   response.json({ entries });
 });
@@ -1039,7 +1039,7 @@ app.get("/api/kyc/me", requireAuth, attachUser, async (request, response) => {
   response.json({ submission });
 });
 
-app.get("/api/admin/users/:id/kyc", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+app.get("/api/admin/users/:id/kyc", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const submission = await findLatestKycSubmission(request.params.id);
   response.json({ submission });
 });
@@ -1061,12 +1061,12 @@ app.get("/api/bank-details/me", requireAuth, attachUser, async (request, respons
   response.json({ account });
 });
 
-app.get("/api/admin/users/:id/bank-details", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+app.get("/api/admin/users/:id/bank-details", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const account = await findBankAccount(request.params.id);
   response.json({ account });
 });
 
-app.get("/api/admin/users/:id/orders", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+app.get("/api/admin/users/:id/orders", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const orders = await listOrders(request.params.id);
   const enriched = orders.map((order) => {
     if (order.status !== "open") return order;
@@ -1106,7 +1106,7 @@ app.get("/api/tradable-instruments", async (_request, response) => {
   response.json({ instruments: await listInstruments({ tradeOnly: true }) });
 });
 
-app.get("/api/admin/instruments", requireAuth, attachUser, requireRole("admin", "team"), async (_request, response) => {
+app.get("/api/admin/instruments", requireAuth, attachUser, requireRole("admin"), async (_request, response) => {
   response.json({ instruments: await listInstruments({ includeDisabled: true }) });
 });
 
@@ -1487,7 +1487,7 @@ setInterval(() => {
   }
 }, priceSimulationTickMs);
 
-app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("admin"), (request, response) => {
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   const direction = String(request.body.direction || "").toLowerCase();
   const stepPercent = Number(request.body.stepPercent);
@@ -1501,14 +1501,14 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
   response.json({ symbol, direction, active: true, expiresAt: simulation?.expiresAt || null });
 });
 
-app.post("/api/admin/price-simulation/stop", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+app.post("/api/admin/price-simulation/stop", requireAuth, attachUser, requireRole("admin"), (request, response) => {
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   stopPriceSimulation(symbol);
   response.json({ symbol, active: false });
 });
 
-app.get("/api/admin/price-simulation", requireAuth, attachUser, requireRole("admin", "team"), (_request, response) => {
+app.get("/api/admin/price-simulation", requireAuth, attachUser, requireRole("admin"), (_request, response) => {
   const simulations = [...priceSimulations.entries()].map(([symbol, simulation]) => ({
     symbol,
     direction: simulation.direction,
@@ -1549,7 +1549,7 @@ function maybeAutoStartSimulation(symbol, orderDirection) {
   startPriceSimulation(symbol, simDirection, config.stepPercent, "auto-order", durationMs);
 }
 
-app.post("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+app.post("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRole("admin"), (request, response) => {
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   const enabled = Boolean(request.body.enabled);
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
@@ -1568,12 +1568,12 @@ app.post("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRol
   response.json({ symbol, enabled });
 });
 
-app.get("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRole("admin", "team"), (_request, response) => {
+app.get("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRole("admin"), (_request, response) => {
   const autoSymbols = [...autoSimulationConfig.keys()];
   response.json({ autoSymbols });
 });
 
-app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requireRole("admin"), (request, response) => {
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   const direction = String(request.body.direction || "").toLowerCase();
   const stepPercent = Number(request.body.stepPercent);
@@ -1600,14 +1600,14 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
   response.json({ symbol, direction, ...result });
 });
 
-app.post("/api/admin/price-simulation/schedule/cancel", requireAuth, attachUser, requireRole("admin", "team"), (request, response) => {
+app.post("/api/admin/price-simulation/schedule/cancel", requireAuth, attachUser, requireRole("admin"), (request, response) => {
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   cancelScheduledSimulation(symbol);
   response.json({ symbol, active: false });
 });
 
-app.get("/api/admin/price-simulation/schedule", requireAuth, attachUser, requireRole("admin", "team"), (_request, response) => {
+app.get("/api/admin/price-simulation/schedule", requireAuth, attachUser, requireRole("admin"), (_request, response) => {
   const scheduled = [...scheduledSimulations.entries()].map(([symbol, s]) => ({
     symbol,
     direction: s.direction,
@@ -1722,7 +1722,7 @@ async function closeOrder(order, { closedBy, reason = null }) {
 app.post("/api/orders/:id/close", requireAuth, attachUser, async (request, response) => {
   const order = await findOrderById(request.params.id);
   if (!order) return response.status(404).json({ error: "Order not found" });
-  if (order.user_id !== request.user.id && !["admin", "team"].includes(request.user.role)) {
+  if (order.user_id !== request.user.id && request.user.role !== "admin") {
     return response.status(403).json({ error: "Forbidden" });
   }
   if (order.status !== "open") return response.status(400).json({ error: "Order already closed" });
@@ -1924,7 +1924,7 @@ app.get("/api/service-requests", requireAuth, attachUser, async (request, respon
   response.json({ serviceRequests: await listServiceRequests(request.user) });
 });
 
-app.patch("/api/service-requests/:id", requireAuth, attachUser, requireRole("admin", "team"), async (request, response) => {
+app.patch("/api/service-requests/:id", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const status = String(request.body.status || "").toLowerCase();
   if (!["pending", "approved", "rejected", "resolved"].includes(status)) {
     return response.status(400).json({ error: "Invalid status" });
