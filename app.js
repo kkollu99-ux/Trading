@@ -3575,7 +3575,7 @@ function renderManagedInstruments() {
   if (!list) return;
 
   if (!managedInstruments.length) {
-    list.innerHTML = `<div class="instrument-control-row"><span>No configured instruments.</span></div>`;
+    list.innerHTML = `<div class="product-card"><span>No configured instruments.</span></div>`;
     return;
   }
 
@@ -3583,6 +3583,7 @@ function renderManagedInstruments() {
     .map((instrument) => {
       const disabled = canEditManagedUsers() ? "" : "disabled";
       const symbol = compactSymbol(instrument.symbol);
+      const categoryKey = categoryFilter(instrument.category);
       const simulation = activeSimulationsBySymbol.get(instrument.symbol);
       const simTargetSuffix = simulation?.targetPrice ? ` → ${formatCurrency(simulation.targetPrice)}` : "";
       const simBadge = simulation
@@ -3595,32 +3596,58 @@ function renderManagedInstruments() {
       const scheduleBadge = scheduled
         ? `<span class="status-pill instrument-schedule-badge">⏰ ${formatTimeOfDay(scheduled.fromISO)}–${formatTimeOfDay(scheduled.toISO)} ${scheduled.direction === "up" ? "↑" : "↓"}${scheduleTargetSuffix}</span>`
         : "";
-      const simRow = canManageUsers()
-        ? `<div class="instrument-sim-row instrument-schedule-row">
-            ${simBadge}
-            ${scheduleBadge}
-            <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" title="Start time (today)" />
-            <span class="sim-time-sep">to</span>
-            <input type="time" class="sim-time-input" data-schedule-to="${escapeHtml(instrument.symbol)}" title="End time (today) - auto-reverts to real-time here" />
-            <input type="number" step="any" min="0" class="sim-target-input" data-schedule-target="${escapeHtml(instrument.symbol)}" placeholder="Target (optional)" title="Stop automatically once the price reaches this target" />
-            <select class="sim-target-unit" data-schedule-target-unit="${escapeHtml(instrument.symbol)}" title="Target unit">
-              <option value="percent">%</option>
-              <option value="price">$</option>
-            </select>
-            <button type="button" class="sim-up-btn" data-schedule="${escapeHtml(instrument.symbol)}" data-schedule-direction="up">↑ Schedule</button>
-            <button type="button" class="sim-down-btn" data-schedule="${escapeHtml(instrument.symbol)}" data-schedule-direction="down">↓ Schedule</button>
-            ${scheduled ? `<button type="button" class="sim-stop-btn" data-schedule-cancel="${escapeHtml(instrument.symbol)}">Cancel</button>` : ""}
-            ${simulation ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
+
+      // Each control gets its own labeled group stacked in a small grid,
+      // instead of every input/button fighting for space on one flex line -
+      // that's what made the row collapse unpredictably once the target
+      // field was added on top of the time pickers and schedule buttons.
+      const simSection = canManageUsers()
+        ? `<div class="product-sim-section">
+            ${simBadge || scheduleBadge ? `<div class="product-sim-badges">${simBadge}${scheduleBadge}</div>` : ""}
+            <div class="product-sim-controls">
+              <div class="sim-control-group">
+                <span class="sim-control-label">Window</span>
+                <div class="sim-time-pair">
+                  <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" title="Start time (today)" />
+                  <span class="sim-time-sep">–</span>
+                  <input type="time" class="sim-time-input" data-schedule-to="${escapeHtml(instrument.symbol)}" title="End time (today) - auto-reverts to real-time here" />
+                </div>
+              </div>
+              <div class="sim-control-group">
+                <span class="sim-control-label">Target (optional)</span>
+                <div class="sim-target-pair">
+                  <input type="number" step="any" min="0" class="sim-target-input" data-schedule-target="${escapeHtml(instrument.symbol)}" placeholder="e.g. 2" title="Stop automatically once the price reaches this target" />
+                  <select class="sim-target-unit" data-schedule-target-unit="${escapeHtml(instrument.symbol)}" title="Target unit">
+                    <option value="percent">%</option>
+                    <option value="price">$</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="product-sim-actions">
+              <button type="button" class="sim-up-btn" data-schedule="${escapeHtml(instrument.symbol)}" data-schedule-direction="up">↑ Up</button>
+              <button type="button" class="sim-down-btn" data-schedule="${escapeHtml(instrument.symbol)}" data-schedule-direction="down">↓ Down</button>
+              ${scheduled ? `<button type="button" class="sim-stop-btn" data-schedule-cancel="${escapeHtml(instrument.symbol)}">Cancel</button>` : ""}
+              ${simulation ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
+            </div>
           </div>`
         : "";
-      return `<div class="instrument-control-row" data-instrument="${escapeHtml(instrument.id)}" data-instrument-category="${escapeHtml(categoryFilter(instrument.category))}">
-        <div>
-          <strong>${escapeHtml(symbol)}</strong>
-          <small>${escapeHtml(instrument.displayName)} · ${escapeHtml(displayCategory(instrument.category))}</small>
-        </div>
-        <label><input type="checkbox" data-instrument-trade="${escapeHtml(instrument.id)}" ${instrument.tradeEnabled ? "checked" : ""} ${disabled} /> Trade</label>
-        ${simRow}
-      </div>`;
+
+      return `<article class="product-card" data-instrument="${escapeHtml(instrument.id)}" data-instrument-category="${escapeHtml(categoryKey)}">
+        <header class="product-card-head">
+          <div class="product-card-identity">
+            <strong class="product-symbol">${escapeHtml(symbol)}</strong>
+            <span class="product-category-pill cat-${escapeHtml(categoryKey)}">${escapeHtml(displayCategory(instrument.category))}</span>
+          </div>
+          <label class="trade-toggle">
+            <input type="checkbox" data-instrument-trade="${escapeHtml(instrument.id)}" ${instrument.tradeEnabled ? "checked" : ""} ${disabled} />
+            <span class="trade-toggle-track"><span class="trade-toggle-thumb"></span></span>
+            <span class="trade-toggle-label">Trade</span>
+          </label>
+        </header>
+        <p class="product-card-name">${escapeHtml(instrument.displayName)}</p>
+        ${simSection}
+      </article>`;
     })
     .join("");
   filterManagedInstruments();
@@ -3685,7 +3712,7 @@ async function loadManagedInstruments() {
     renderManagedInstruments();
   } catch (error) {
     const list = document.querySelector("#managedInstrumentList");
-    if (list) list.innerHTML = `<div class="instrument-control-row"><span>${escapeHtml(error.message)}</span></div>`;
+    if (list) list.innerHTML = `<div class="product-card"><span>${escapeHtml(error.message)}</span></div>`;
   }
 }
 
