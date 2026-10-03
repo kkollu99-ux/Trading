@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS service_requests (
   note TEXT,
   attachment_url TEXT,
   assigned_team_id UUID REFERENCES users(id),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_message_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS chat_messages (

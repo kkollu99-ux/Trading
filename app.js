@@ -3662,7 +3662,7 @@ async function refreshServiceRequestsCache() {
   try {
     const data = await adminFetch("/api/service-requests");
     if (token !== serviceRequestsCacheToken) return;
-    serviceRequests = (data.serviceRequests || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    serviceRequests = (data.serviceRequests || []).sort((a, b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at));
     pendingRequestUserIds = new Set(serviceRequests.filter((item) => item.status === "pending").map((item) => item.user_id));
     renderManagedUsers();
     if (activeUserDetailId) renderUserDetailRequestsList();
@@ -4267,6 +4267,42 @@ function hydrateSession() {
   }
 }
 
+// A deploy restarts the whole Node process, so /api/health's buildId changes
+// every time - but a browser tab left open across that deploy keeps running
+// whatever app.js it already loaded, forever, with no way to know newer code
+// exists. This was the actual explanation behind more than one "I shipped a
+// fix but it's still broken" report today: the fix was live, the tab just
+// never knew to ask for it. Polling this and surfacing a visible "Refresh"
+// prompt the moment the build changes closes that gap, instead of leaving
+// it to luck/chance refreshes.
+let loadedBuildId = null;
+async function checkForUpdate() {
+  try {
+    const response = await fetch(`${apiBase}/api/health`);
+    const data = await response.json();
+    if (!data?.buildId) return;
+    if (loadedBuildId === null) {
+      loadedBuildId = data.buildId;
+      return;
+    }
+    if (data.buildId !== loadedBuildId) {
+      document.querySelector("#updateBanner")?.classList.remove("is-hidden");
+    }
+  } catch {
+    // A failed check just waits for the next interval - never worth
+    // surfacing as an error of its own.
+  }
+}
+
+function startVersionCheck() {
+  checkForUpdate();
+  setInterval(checkForUpdate, 3 * 60 * 1000);
+}
+
+document.querySelector("#updateBannerRefresh")?.addEventListener("click", () => {
+  window.location.reload();
+});
+
 seedMetalData();
 hydrateSession();
 renderTickers();
@@ -4286,3 +4322,4 @@ setInterval(tickMarkets, 1500);
 setInterval(refreshMarketsQuotes, 7000);
 setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);
+startVersionCheck();
