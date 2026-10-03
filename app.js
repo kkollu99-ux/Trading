@@ -1416,24 +1416,43 @@ async function authRequest(path, options = {}) {
   return data;
 }
 
+// Finds the caller's existing pending thread for this type, or creates one.
+// Kept separate from history-loading below so a failure there (a cosmetic,
+// "can't show past messages" problem) can never be confused with a failure
+// here (the "sending won't work at all" problem) - see loadOrCreateServiceRequestChat.
+async function ensureServiceRequestThread(type) {
+  const existing = await authFetch("/api/service-requests");
+  let serviceRequest = (existing?.serviceRequests || []).find((item) => item.type === type && item.status === "pending");
+  if (!serviceRequest) {
+    const created = await authRequest("/api/service-requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type }),
+    });
+    serviceRequest = created.serviceRequest;
+  }
+  myServiceRequestIds.add(serviceRequest.id);
+  myServiceRequestTypes.set(serviceRequest.id, serviceRequest.type);
+  return serviceRequest;
+}
+
 async function loadOrCreateServiceRequestChat(type, introMessage) {
   processChatMessages.innerHTML = "";
+  let serviceRequest;
   try {
-    const existing = await authFetch("/api/service-requests");
-    let serviceRequest = (existing?.serviceRequests || []).find((item) => item.type === type && item.status === "pending");
-    if (!serviceRequest) {
-      const created = await authRequest("/api/service-requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type }),
-      });
-      serviceRequest = created.serviceRequest;
-    }
-    activeServiceRequestId = serviceRequest.id;
-    myServiceRequestIds.add(serviceRequest.id);
-    myServiceRequestTypes.set(serviceRequest.id, serviceRequest.type);
-    markServiceRequestRead(serviceRequest.id);
+    serviceRequest = await ensureServiceRequestThread(type);
+  } catch {
+    // The thread itself couldn't be resolved - leave activeServiceRequestId
+    // null so the submit handler's retry-on-send logic gets another shot at
+    // it, rather than quietly looking "connected" with nowhere to send to.
+    activeServiceRequestId = null;
     appendProcessChatMessage(introMessage);
+    return;
+  }
+  activeServiceRequestId = serviceRequest.id;
+  markServiceRequestRead(serviceRequest.id);
+  appendProcessChatMessage(introMessage);
+  try {
     const history = await authFetch(`/api/service-requests/${serviceRequest.id}/messages`);
     (history?.messages || []).forEach((message) => {
       appendProcessChatMessage(message.body, {
@@ -1442,8 +1461,11 @@ async function loadOrCreateServiceRequestChat(type, introMessage) {
       });
     });
   } catch {
-    activeServiceRequestId = null;
-    appendProcessChatMessage(introMessage);
+    // The thread is real and already resolved above - a failure loading its
+    // past history shouldn't throw that away. Previously it did, via a
+    // shared catch block that reset activeServiceRequestId to null here too,
+    // so every message typed afterward silently never reached the server,
+    // with the chat window still looking perfectly "connected."
   }
 }
 
@@ -1800,6 +1822,25 @@ document.querySelector("#processChatForm")?.addEventListener("submit", async (ev
   if (!message) return;
   processChatInput.value = "";
   appendProcessChatMessage(message, { self: true });
+
+  // activeServiceRequestId can still be null here if the chat-open call
+  // (ensureServiceRequestThread, above) hit a transient failure - previously
+  // that meant this branch was just skipped entirely: the message sat in the
+  // user's own chat window looking sent, with no error and no thread to
+  // deliver it to, so it silently never reached the other side at all. Retry
+  // resolving the thread now rather than giving up on the whole chat session
+  // over one earlier hiccup.
+  if (!activeServiceRequestId && currentSession?.token && currentProcessChatTopic) {
+    const requestType = chatTopicToRequestType[currentProcessChatTopic];
+    if (requestType) {
+      try {
+        activeServiceRequestId = (await ensureServiceRequestThread(requestType)).id;
+      } catch {
+        // still null - falls through to the visible error below
+      }
+    }
+  }
+
   if (activeServiceRequestId && currentSession?.token) {
     try {
       await authRequest(`/api/service-requests/${activeServiceRequestId}/messages`, {
@@ -1810,6 +1851,8 @@ document.querySelector("#processChatForm")?.addEventListener("submit", async (ev
     } catch {
       appendProcessChatMessage("Message failed to send — please try again.");
     }
+  } else if (currentSession?.token) {
+    appendProcessChatMessage("Message failed to send — please try again.");
   }
 });
 
@@ -1820,6 +1863,18 @@ document.querySelector("#processChatImageInput")?.addEventListener("change", asy
   const imageUrl = URL.createObjectURL(file);
   const caption = `Uploaded image: ${file.name}`;
   appendProcessChatMessage(caption, { self: true, imageSrc: imageUrl, imageAlt: file.name });
+
+  if (!activeServiceRequestId && currentSession?.token && currentProcessChatTopic) {
+    const requestType = chatTopicToRequestType[currentProcessChatTopic];
+    if (requestType) {
+      try {
+        activeServiceRequestId = (await ensureServiceRequestThread(requestType)).id;
+      } catch {
+        // still null - falls through to the visible error below
+      }
+    }
+  }
+
   if (activeServiceRequestId && currentSession?.token) {
     try {
       const formData = new FormData();
@@ -1829,6 +1884,8 @@ document.querySelector("#processChatImageInput")?.addEventListener("change", asy
     } catch {
       appendProcessChatMessage("Image upload failed — please try again.");
     }
+  } else if (currentSession?.token) {
+    appendProcessChatMessage("Image upload failed — please try again.");
   }
 });
 
