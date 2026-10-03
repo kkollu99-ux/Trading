@@ -1305,6 +1305,11 @@ const unreadServiceRequestIds = new Set();
 // allowlist a client would pick up an unread badge for a stranger's thread
 // just because its id showed up in a chat.message payload.
 const myServiceRequestIds = new Set();
+// id -> service-request type ("support"/"deposit"/"withdrawal"/"kyc"), so a
+// reply that lands before the client has opened any chat this session can
+// still be opened correctly from the launcher bubble below, instead of
+// needing activeServiceRequestId to already be set from an earlier open.
+const myServiceRequestTypes = new Map();
 
 function isServiceRequestCurrentlyVisible(requestId) {
   const chatWindowOpen = processChatWindow && !processChatWindow.classList.contains("is-hidden");
@@ -1324,6 +1329,14 @@ function renderServiceNotificationBadges() {
     badge.textContent = count > 9 ? "9+" : String(count);
     badge.hidden = count === 0;
   }
+  // The sidebar nav badge above is invisible on phone/tablet widths (the
+  // whole sidebar is hidden there in favor of the bottom nav, which has no
+  // Online Service entry), and the launcher bubble otherwise only appears
+  // once the client has manually minimized an already-open chat. Surfacing
+  // it here too means an unread reply is visible on every screen size, even
+  // before the chat has been opened at all this session.
+  const chatWindowOpen = processChatWindow && !processChatWindow.classList.contains("is-hidden");
+  if (count > 0 && !chatWindowOpen) processChatLauncher?.classList.remove("is-hidden");
 }
 
 function markServiceRequestRead(requestId) {
@@ -1345,7 +1358,10 @@ function markServiceRequestUnread(requestId) {
 async function primeMyServiceRequestIds() {
   if (!currentSession?.token || canManageUsers()) return;
   const data = await authFetch("/api/service-requests");
-  (data?.serviceRequests || []).forEach((item) => myServiceRequestIds.add(item.id));
+  (data?.serviceRequests || []).forEach((item) => {
+    myServiceRequestIds.add(item.id);
+    myServiceRequestTypes.set(item.id, item.type);
+  });
 }
 
 // admin/team implicitly own every thread (that's the inbox); a plain user
@@ -1386,6 +1402,7 @@ const processChatTopics = {
 // schema/CHECK-constraint fix). A session-less visitor (no token) still
 // falls back to a purely local chat in openProcessChat below.
 const chatTopicToRequestType = { support: "support", deposit: "deposit", withdrawal: "withdrawal", verification: "kyc" };
+const requestTypeToChatTopic = Object.fromEntries(Object.entries(chatTopicToRequestType).map(([topic, type]) => [type, topic]));
 let activeServiceRequestId = null;
 
 async function authRequest(path, options = {}) {
@@ -1414,6 +1431,7 @@ async function loadOrCreateServiceRequestChat(type, introMessage) {
     }
     activeServiceRequestId = serviceRequest.id;
     myServiceRequestIds.add(serviceRequest.id);
+    myServiceRequestTypes.set(serviceRequest.id, serviceRequest.type);
     markServiceRequestRead(serviceRequest.id);
     appendProcessChatMessage(introMessage);
     const history = await authFetch(`/api/service-requests/${serviceRequest.id}/messages`);
@@ -1742,6 +1760,30 @@ document.querySelector("#minimizeProcessChat")?.addEventListener("click", () => 
 });
 
 processChatLauncher?.addEventListener("click", () => {
+  // The bubble can now appear purely because of an unread notification,
+  // before anything has been opened this session (see
+  // renderServiceNotificationBadges) - in that case there's no thread
+  // loaded into the window yet, so resolve and open the actual unread
+  // thread instead of just unhiding an empty/stale one.
+  if (!activeServiceRequestId && unreadServiceRequestIds.size > 0) {
+    const nextId = unreadServiceRequestIds.values().next().value;
+    if (canManageUsers()) {
+      const item = serviceRequests.find((request) => request.id === nextId);
+      if (item) {
+        const client = findManagedUserById(item.user_id);
+        openAdminChatThread(item, client ? client.name || client.email : item.user_id);
+        processChatLauncher.classList.add("is-hidden");
+        return;
+      }
+    } else {
+      const topic = requestTypeToChatTopic[myServiceRequestTypes.get(nextId)];
+      if (topic) {
+        openProcessChat(topic);
+        processChatLauncher.classList.add("is-hidden");
+        return;
+      }
+    }
+  }
   processChatWindow?.classList.remove("is-hidden");
   processChatLauncher.classList.add("is-hidden");
   markServiceRequestRead(activeServiceRequestId);
