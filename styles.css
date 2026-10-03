@@ -3265,6 +3265,29 @@ canvas {
   color: var(--muted);
 }
 
+.sim-target-input {
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.25rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  width: 6rem;
+}
+
+.sim-target-unit {
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.25rem 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  color-scheme: dark;
+}
+
 .instrument-schedule-badge {
   background: rgba(255, 191, 0, 0.14);
   color: var(--gold, #ffbf00);

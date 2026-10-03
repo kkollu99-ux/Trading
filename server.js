@@ -1427,7 +1427,37 @@ const priceSimulationMaxDurationMs = 60 * 60 * 1000; // 1h safety cap - this is 
 // whatever getCurrentPrice would normally return (real feed or mock drift)
 // with no gap - the same clean handoff stopPriceSimulation always did, just
 // on a timer instead of a manual click.
-function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs) {
+// Resolves whatever target the request gave (an absolute price, or a
+// percent move computed off the symbol's current price) down to one
+// absolute targetPrice, or null if neither was given - so the rest of the
+// simulation code only ever deals with one shape regardless of which the
+// admin picked.
+function resolveSimulationTarget(symbol, direction, body) {
+  const targetPriceRaw = Number(body.targetPrice);
+  if (Number.isFinite(targetPriceRaw) && targetPriceRaw > 0) return targetPriceRaw;
+
+  const targetPercentRaw = Number(body.targetPercent);
+  if (Number.isFinite(targetPercentRaw) && targetPercentRaw > 0) {
+    const basePrice = getCurrentPrice(symbol);
+    const multiplier = direction === "up" ? 1 + targetPercentRaw / 100 : 1 - targetPercentRaw / 100;
+    return Number((basePrice * multiplier).toFixed(6));
+  }
+  return null;
+}
+
+// A target only makes sense on the correct side of the current price - an
+// "up to $X" that's already below the current price, or a "down to $X"
+// already above it, would either never fire or fire instantly, neither of
+// which is what the admin meant.
+function validateSimulationTarget(symbol, direction, targetPrice) {
+  if (targetPrice == null) return null;
+  const basePrice = getCurrentPrice(symbol);
+  if (direction === "up" && targetPrice <= basePrice) return "Target must be above the current price for an upward simulation";
+  if (direction === "down" && targetPrice >= basePrice) return "Target must be below the current price for a downward simulation";
+  return null;
+}
+
+function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs, targetPrice = null) {
   const existing = priceSimulations.get(symbol);
   if (existing?.timer) clearTimeout(existing.timer);
   cancelScheduledSimulation(symbol); // a manual/auto trigger supersedes any pending scheduled window
@@ -1440,6 +1470,7 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     direction,
     stepPercent: Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent,
     price: basePrice,
+    targetPrice: Number.isFinite(targetPrice) && targetPrice > 0 ? targetPrice : null,
     startedBy,
     startedAt: new Date().toISOString(),
     expiresAt,
@@ -1449,7 +1480,7 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     simulation.timer = setTimeout(() => stopPriceSimulation(symbol), clampedDurationMs);
   }
   priceSimulations.set(symbol, simulation);
-  broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt });
+  broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt, targetPrice: simulation.targetPrice });
 }
 
 function stopPriceSimulation(symbol) {
@@ -1478,7 +1509,7 @@ function cancelScheduledSimulation(symbol) {
   return existed;
 }
 
-function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO, startedBy) {
+function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO, startedBy, targetPrice = null) {
   cancelScheduledSimulation(symbol);
   const fromMs = new Date(fromISO).getTime();
   const toMs = new Date(toISO).getTime();
@@ -1487,17 +1518,17 @@ function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO,
   if (fromMs <= now) {
     // The window's start has already arrived (e.g. admin picked "from" a
     // minute in the past) - just start right away for whatever's left of it.
-    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - now);
+    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - now, targetPrice);
     return { scheduled: false, active: true };
   }
 
   const startTimer = setTimeout(() => {
     scheduledSimulations.delete(symbol);
-    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - Date.now());
+    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - Date.now(), targetPrice);
   }, fromMs - now);
 
-  scheduledSimulations.set(symbol, { direction, stepPercent, fromISO, toISO, startedBy, startTimer });
-  broadcast({ type: "simulation-scheduled", symbol, active: true, direction, fromISO, toISO });
+  scheduledSimulations.set(symbol, { direction, stepPercent, fromISO, toISO, startedBy, startTimer, targetPrice });
+  broadcast({ type: "simulation-scheduled", symbol, active: true, direction, fromISO, toISO, targetPrice });
   return { scheduled: true, active: false };
 }
 
@@ -1505,12 +1536,23 @@ setInterval(() => {
   for (const [symbol, simulation] of priceSimulations) {
     const delta = simulation.price * (simulation.stepPercent / 100) * (simulation.direction === "up" ? 1 : -1);
     simulation.price = Math.max(0.00001, Number((simulation.price + delta).toFixed(6)));
+
+    // A target clamps the final tick to land exactly on it (rather than
+    // overshoot by a fraction of a step) and ends the simulation there,
+    // same clean handoff back to the real/mock feed that a duration expiry
+    // or a manual Stop already gives.
+    const targetReached =
+      simulation.targetPrice != null &&
+      (simulation.direction === "up" ? simulation.price >= simulation.targetPrice : simulation.price <= simulation.targetPrice);
+    if (targetReached) simulation.price = simulation.targetPrice;
+
     // Deliberately NOT written into quoteStore: getCurrentPrice already checks
     // priceSimulations first (above), so quoteStore never needs to know about
     // this and never ends up holding a stale simulated price once the
     // simulation stops - it just keeps reflecting whatever it always would
     // have (real feed or the drifting mock fallback), untouched throughout.
     broadcast({ type: "price-tick", symbol, price: simulation.price, source: "simulation", timestamp: new Date().toISOString() });
+    if (targetReached) stopPriceSimulation(symbol);
   }
 }, priceSimulationTickMs);
 
@@ -1522,10 +1564,14 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
 
+  const targetPrice = resolveSimulationTarget(symbol, direction, request.body);
+  const targetError = validateSimulationTarget(symbol, direction, targetPrice);
+  if (targetError) return response.status(400).json({ error: targetError });
+
   const durationMs = Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds * 1000 : null;
-  startPriceSimulation(symbol, direction, stepPercent, request.user.id, durationMs);
+  startPriceSimulation(symbol, direction, stepPercent, request.user.id, durationMs, targetPrice);
   const simulation = priceSimulations.get(symbol);
-  response.json({ symbol, direction, active: true, expiresAt: simulation?.expiresAt || null });
+  response.json({ symbol, direction, active: true, expiresAt: simulation?.expiresAt || null, targetPrice: simulation?.targetPrice || null });
 });
 
 app.post("/api/admin/price-simulation/stop", requireAuth, attachUser, requireRole("admin"), (request, response) => {
@@ -1542,6 +1588,7 @@ app.get("/api/admin/price-simulation", requireAuth, attachUser, requireRole("adm
     price: simulation.price,
     startedAt: simulation.startedAt,
     expiresAt: simulation.expiresAt,
+    targetPrice: simulation.targetPrice,
   }));
   response.json({ simulations });
 });
@@ -1557,7 +1604,7 @@ app.get("/api/price-simulation-status", requireAuth, attachUser, (request, respo
   const symbol = String(request.query.symbol || "").trim().toUpperCase();
   const simulation = priceSimulations.get(symbol);
   if (!simulation) return response.json({ active: false });
-  response.json({ active: true, direction: simulation.direction, expiresAt: simulation.expiresAt });
+  response.json({ active: true, direction: simulation.direction, expiresAt: simulation.expiresAt, targetPrice: simulation.targetPrice });
 });
 
 // A per-symbol opt-in: once enabled, placing a buy order on that symbol
@@ -1616,15 +1663,20 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
   if (toMs <= Date.now()) return response.status(400).json({ error: "To time must be in the future" });
   if (toMs - fromMs > priceSimulationMaxDurationMs) return response.status(400).json({ error: "Window can be at most 1 hour" });
 
+  const targetPrice = resolveSimulationTarget(symbol, direction, request.body);
+  const targetError = validateSimulationTarget(symbol, direction, targetPrice);
+  if (targetError) return response.status(400).json({ error: targetError });
+
   const result = schedulePriceSimulation(
     symbol,
     direction,
     Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent,
     from,
     to,
-    request.user.id
+    request.user.id,
+    targetPrice
   );
-  response.json({ symbol, direction, ...result });
+  response.json({ symbol, direction, targetPrice, ...result });
 });
 
 app.post("/api/admin/price-simulation/schedule/cancel", requireAuth, attachUser, requireRole("admin"), (request, response) => {
@@ -1640,6 +1692,7 @@ app.get("/api/admin/price-simulation/schedule", requireAuth, attachUser, require
     direction: s.direction,
     fromISO: s.fromISO,
     toISO: s.toISO,
+    targetPrice: s.targetPrice,
   }));
   response.json({ scheduled });
 });
