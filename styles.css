@@ -2055,7 +2055,7 @@ select:focus {
   display: none;
 }
 
-.instrument-control-row.is-filtered-out {
+.product-card.is-filtered-out {
   display: none;
 }
 
@@ -3307,9 +3307,9 @@ canvas {
 }
 
 .product-sim-controls {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .sim-control-group {
@@ -3335,18 +3335,18 @@ canvas {
 }
 
 .sim-time-pair .sim-time-input {
-  min-width: 0;
   flex: 1 1 0;
+  width: auto;
 }
 
 .sim-target-pair .sim-target-input {
-  min-width: 0;
   flex: 1 1 auto;
   width: auto;
 }
 
 .sim-target-pair .sim-target-unit {
   flex: 0 0 auto;
+  width: auto;
 }
 
 .product-sim-actions {
