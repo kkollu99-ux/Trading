@@ -109,8 +109,26 @@ CREATE TABLE IF NOT EXISTS bank_accounts (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Append-only admin-facing activity trail, separate from the wallet-only
+-- ledger above: covers order placement/closure, chart/price-simulation
+-- control, and admin settings changes (users, instruments) in one place so
+-- a reported issue can be explained from what actually happened rather than
+-- guessed at after the fact.
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  category TEXT NOT NULL CHECK (category IN ('order', 'chart', 'admin')),
+  action TEXT NOT NULL,
+  actor_id UUID REFERENCES users(id),
+  actor_label TEXT,
+  target_label TEXT,
+  details JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_service_requests_user_id ON service_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_request_id ON chat_messages(request_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_user_id ON ledger(user_id);
 CREATE INDEX IF NOT EXISTS idx_kyc_submissions_user_id ON kyc_submissions(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category);

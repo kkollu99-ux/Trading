@@ -3033,7 +3033,8 @@ canvas {
 }
 
 .users-management-grid,
-.products-grid {
+.products-grid,
+.logs-grid {
   grid-template-columns: 1fr;
 }
 
@@ -3441,6 +3442,81 @@ canvas {
 .instrument-schedule-badge {
   background: rgba(255, 191, 0, 0.14);
   color: var(--gold, #ffbf00);
+}
+
+.audit-log-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 34rem;
+  overflow-y: auto;
+}
+
+.audit-log-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.audit-log-row:last-child {
+  border-bottom: none;
+}
+
+.audit-log-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.audit-log-desc {
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.audit-log-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(141, 163, 191, 0.14);
+  color: var(--muted);
+}
+
+.audit-log-badge.cat-order {
+  background: rgba(0, 115, 255, 0.14);
+  color: var(--blue);
+}
+
+.audit-log-badge.cat-chart {
+  background: rgba(255, 176, 0, 0.14);
+  color: var(--gold);
+}
+
+.audit-log-badge.cat-admin {
+  background: rgba(232, 61, 48, 0.14);
+  color: var(--red);
+}
+
+.audit-log-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.audit-log-actor {
+  font-weight: 800;
 }
 
 .managed-save-button {
