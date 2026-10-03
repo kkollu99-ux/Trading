@@ -3705,6 +3705,10 @@ function describeAuditLog(log) {
       return `Scheduled ${(d.direction || "").toUpperCase()} simulation on ${symbol} (${formatTimeOfDay(d.from)}–${formatTimeOfDay(d.to)})`;
     case "simulation.schedule_cancelled":
       return `Cancelled scheduled simulation on ${symbol}`;
+    case "simulation.target_reached":
+      return `Simulation on ${symbol} auto-stopped - reached target ${d.targetPrice ?? "?"}`;
+    case "simulation.expired":
+      return `Simulation on ${symbol} auto-stopped - duration window elapsed`;
     case "instrument.updated":
       return `Updated ${symbol} (trade ${d.tradeEnabled ? "enabled" : "disabled"}, ${d.category || ""})`;
     case "user.created":
