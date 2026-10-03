@@ -1412,8 +1412,45 @@ async function authRequest(path, options = {}) {
     headers: { Authorization: `Bearer ${currentSession.token}`, ...(options.headers || {}) },
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "Request failed");
+  if (!response.ok) {
+    // Carrying the HTTP status (and which path/method failed) onto the
+    // thrown error is what makes reportClientError's log below actually
+    // useful for diagnosing a "failed to send" after the fact, instead of
+    // just a bare "Request failed" with no way to tell a 401 from a 500.
+    const error = new Error(data.error || "Request failed");
+    error.status = response.status;
+    error.path = path;
+    error.method = options.method || "GET";
+    throw error;
+  }
   return data;
+}
+
+// Browser console logging alone is useless once the tab is closed, so a
+// chat-send failure also gets POSTed to the server (best-effort, never
+// throws) where it lands in the normal server logs - the only way to see
+// what actually went wrong for a real user after the fact, since this app
+// has no error-tracking service wired up.
+function reportClientError(context, error, detail = {}) {
+  console.error(`[${context}]`, error, detail);
+  try {
+    fetch(`${apiBase}/api/client-error`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        context,
+        message: error?.message || String(error),
+        status: error?.status ?? null,
+        path: error?.path ?? null,
+        method: error?.method ?? null,
+        email: currentSession?.user?.email ?? null,
+        detail,
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // Never let logging itself break the chat flow.
+  }
 }
 
 // Finds the caller's existing pending thread for this type, or creates one.
@@ -1441,10 +1478,11 @@ async function loadOrCreateServiceRequestChat(type, introMessage) {
   let serviceRequest;
   try {
     serviceRequest = await ensureServiceRequestThread(type);
-  } catch {
+  } catch (error) {
     // The thread itself couldn't be resolved - leave activeServiceRequestId
     // null so the submit handler's retry-on-send logic gets another shot at
     // it, rather than quietly looking "connected" with nowhere to send to.
+    reportClientError("chat-open", error, { type });
     activeServiceRequestId = null;
     appendProcessChatMessage(introMessage);
     return;
@@ -1835,7 +1873,8 @@ document.querySelector("#processChatForm")?.addEventListener("submit", async (ev
     if (requestType) {
       try {
         activeServiceRequestId = (await ensureServiceRequestThread(requestType)).id;
-      } catch {
+      } catch (error) {
+        reportClientError("chat-send-retry", error, { topic: currentProcessChatTopic });
         // still null - falls through to the visible error below
       }
     }
@@ -1848,10 +1887,12 @@ document.querySelector("#processChatForm")?.addEventListener("submit", async (ev
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: message }),
       });
-    } catch {
+    } catch (error) {
+      reportClientError("chat-send", error, { requestId: activeServiceRequestId });
       appendProcessChatMessage("Message failed to send — please try again.");
     }
   } else if (currentSession?.token) {
+    reportClientError("chat-send-no-thread", new Error("No service-request thread resolved"), { topic: currentProcessChatTopic });
     appendProcessChatMessage("Message failed to send — please try again.");
   }
 });
@@ -1869,7 +1910,8 @@ document.querySelector("#processChatImageInput")?.addEventListener("change", asy
     if (requestType) {
       try {
         activeServiceRequestId = (await ensureServiceRequestThread(requestType)).id;
-      } catch {
+      } catch (error) {
+        reportClientError("chat-image-retry", error, { topic: currentProcessChatTopic });
         // still null - falls through to the visible error below
       }
     }
@@ -1881,10 +1923,12 @@ document.querySelector("#processChatImageInput")?.addEventListener("change", asy
       formData.append("attachment", file);
       formData.append("body", caption);
       await authRequest(`/api/service-requests/${activeServiceRequestId}/messages`, { method: "POST", body: formData });
-    } catch {
+    } catch (error) {
+      reportClientError("chat-image-send", error, { requestId: activeServiceRequestId, fileName: file.name, fileSize: file.size });
       appendProcessChatMessage("Image upload failed — please try again.");
     }
   } else if (currentSession?.token) {
+    reportClientError("chat-image-no-thread", new Error("No service-request thread resolved"), { topic: currentProcessChatTopic });
     appendProcessChatMessage("Image upload failed — please try again.");
   }
 });
