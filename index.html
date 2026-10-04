@@ -594,7 +594,10 @@
                   </div>
                 </div>
               </div>
-              <div class="candlestick-chart" aria-label="Candlestick chart">
+              <div id="tvWidgetContainer" class="tv-widget-container is-hidden">
+                <div id="tvWidgetInner" class="tv-widget-inner"></div>
+              </div>
+              <div class="candlestick-chart is-hidden" aria-label="Candlestick chart">
                 <canvas id="tradeCandleCanvas" class="trade-candle-canvas" width="900" height="520" aria-label="Live candlestick chart"></canvas>
                 <div id="tradePriceScale" class="chart-price-scale" title="Drag to zoom price range · Scroll to pan by $5 · Double-click to reset"></div>
                 <div id="tradePriceMarker" class="price-marker">63971.14</div>
