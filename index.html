@@ -573,17 +573,19 @@
                   <div><span>Spread</span><strong id="tradeSpreadValue">0.02</strong></div>
                 </div>
                 <div class="timeframes">
-                  <button type="button" data-timeframe="1M">1M</button>
-                  <button type="button" data-timeframe="5M">5M</button>
-                  <button type="button" data-timeframe="15M">15M</button>
-                  <button type="button" data-timeframe="30M">30M</button>
-                  <button class="is-active" type="button" data-timeframe="1H">1H</button>
-                  <button type="button" data-timeframe="1D">1D</button>
-                  <button type="button" data-timeframe="5D">5D</button>
-                  <button type="button" data-timeframe="1MO">1Mo</button>
-                  <button type="button" data-timeframe="5MO">5Mo</button>
-                  <button type="button" data-timeframe="1Y">1Y</button>
-                  <button type="button" data-timeframe="ALL">All</button>
+                  <select id="tradeTimeframeSelect" aria-label="Chart timeframe">
+                    <option value="1M">1M</option>
+                    <option value="5M">5M</option>
+                    <option value="15M">15M</option>
+                    <option value="30M">30M</option>
+                    <option value="1H" selected>1H</option>
+                    <option value="1D">1D</option>
+                    <option value="5D">5D</option>
+                    <option value="1MO">1Mo</option>
+                    <option value="5MO">5Mo</option>
+                    <option value="1Y">1Y</option>
+                    <option value="ALL">All</option>
+                  </select>
                   <button id="tradeCalendarToggle" type="button" class="calendar-toggle" aria-label="Choose a custom date range" aria-expanded="false" aria-haspopup="dialog">📅</button>
                 </div>
                 <div id="tradeCalendarPopover" class="calendar-popover is-hidden" role="dialog" aria-label="Custom date range" aria-modal="false">

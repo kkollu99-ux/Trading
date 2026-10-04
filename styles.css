@@ -2148,6 +2148,7 @@ select:focus {
 }
 
 .chart-symbol-head h2 em {
+  margin-left: auto;
   color: var(--red);
   font-style: normal;
 }
@@ -2242,13 +2243,14 @@ select:focus {
   text-transform: none !important;
 }
 
-.timeframes button {
-  border: 0;
+#tradeTimeframeSelect {
+  border: 1px solid var(--trade-border);
   border-radius: var(--radius);
   background: transparent;
-  color: var(--trade-muted);
+  color: var(--text);
   padding: 0.35rem 0.5rem;
   font-weight: 900;
+  font-size: 0.8rem;
 }
 
 .calendar-toggle {
@@ -2324,11 +2326,6 @@ select:focus {
 .calendar-popover-actions button.calendar-apply {
   background: var(--gold);
   color: #0c1424;
-}
-
-.timeframes button.is-active {
-  background: rgba(255, 176, 0, 0.18);
-  color: var(--gold);
 }
 
 .candlestick-chart {
