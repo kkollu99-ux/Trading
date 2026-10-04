@@ -2270,6 +2270,14 @@ select:focus {
   text-transform: none !important;
 }
 
+/* .timeframes's own display:flex!important would otherwise beat the
+   generic .is-hidden rule on source order (both !important, equal
+   specificity) - hidden whenever TradingView (with its own native
+   interval switcher) is showing instead of our custom one. */
+.timeframes.is-hidden {
+  display: none !important;
+}
+
 .timeframes button {
   border: 0;
   border-radius: var(--radius);
