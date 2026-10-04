@@ -2223,11 +2223,16 @@ async function showTradingViewWidget(apiSymbol) {
   document.querySelector("#tvWidgetContainer")?.classList.remove("is-hidden");
   if (tradingViewWidgetSymbol === apiSymbol) return;
   tradingViewWidgetSymbol = apiSymbol;
+  const spinner = document.querySelector("#tvWidgetSpinner");
+  spinner?.classList.remove("is-hidden");
   try {
     await ensureTradingViewScript();
   } catch {
-    const inner = document.querySelector("#tvWidgetInner");
-    if (inner) inner.innerHTML = `<div class="tv-widget-error">Chart unavailable — could not reach TradingView.</div>`;
+    if (tradingViewWidgetSymbol === apiSymbol) {
+      spinner?.classList.add("is-hidden");
+      const inner = document.querySelector("#tvWidgetInner");
+      if (inner) inner.innerHTML = `<div class="tv-widget-error">Chart unavailable — could not reach TradingView.</div>`;
+    }
     return;
   }
   // Re-asserted after the await in case the user switched symbols again
@@ -2238,7 +2243,7 @@ async function showTradingViewWidget(apiSymbol) {
   inner.innerHTML = "";
   const tvSymbol = tradingViewSymbolMap[apiSymbol] || tradingViewSymbolMap["XAU/USD"];
   // eslint-disable-next-line no-undef
-  new TradingView.widget({
+  const widget = new TradingView.widget({
     container_id: "tvWidgetInner",
     autosize: true,
     symbol: tvSymbol,
@@ -2251,6 +2256,18 @@ async function showTradingViewWidget(apiSymbol) {
     enable_publishing: false,
     allow_symbol_change: false,
     withdateranges: true,
+    // The floating legend TradingView overlays on the chart itself (compare/
+    // add-symbol, Indicators, chart style, camera) - not asked for, and not
+    // the toolbar the timeframe controls live on, so hiding it doesn't lose
+    // any functionality.
+    hide_legend: true,
+  });
+  // onChartReady is the widget's own "fully loaded" signal - only hide the
+  // spinner once the chart itself has something to show, and only if this
+  // is still the symbol the user is looking at (they may have already
+  // switched again while this one was still loading).
+  widget.onChartReady(() => {
+    if (tradingViewWidgetSymbol === apiSymbol) spinner?.classList.add("is-hidden");
   });
 }
 

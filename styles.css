@@ -2359,6 +2359,30 @@ select:focus {
   font-weight: 700;
 }
 
+.tv-widget-spinner {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--trade-chart, #0b1120);
+  z-index: 2;
+}
+
+.tv-spinner-ring {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  border: 3px solid rgba(141, 163, 191, 0.2);
+  border-top-color: var(--blue);
+  animation: tv-spinner-spin 0.8s linear infinite;
+}
+
+@keyframes tv-spinner-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .trade-candle-canvas {
   position: absolute;
   inset: 0;
