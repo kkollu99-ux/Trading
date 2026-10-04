@@ -2243,13 +2243,14 @@ select:focus {
   text-transform: none !important;
 }
 
-.timeframes button {
-  border: 0;
+#tradeTimeframeSelect {
+  border: 1px solid var(--trade-border);
   border-radius: var(--radius);
   background: transparent;
-  color: var(--trade-muted);
+  color: var(--text);
   padding: 0.35rem 0.5rem;
   font-weight: 900;
+  font-size: 0.8rem;
 }
 
 .timeframes button.is-active {
