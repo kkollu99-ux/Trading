@@ -2195,13 +2195,26 @@ select:focus {
 .trade-stats {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) 1.2fr;
+  grid-template-columns: minmax(0, 1fr) 1.2fr;
   border-top: 1px solid var(--trade-border);
   border-bottom: 1px solid var(--trade-border);
   background: var(--trade-chart);
 }
 
-.trade-stats > div {
+/* Bid/Ask/Spread only make sense for the simulated chart - the timeframes
+   row is its own sibling grid column so it can stay visible (and usable)
+   even when that readout is hidden for the real TradingView chart. */
+.trade-price-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.trade-price-stats.is-hidden {
+  display: none;
+}
+
+.trade-stats > .timeframes,
+.trade-price-stats > div {
   display: grid;
   min-height: 2.8rem;
   place-items: center;
@@ -2211,7 +2224,8 @@ select:focus {
   text-transform: uppercase;
 }
 
-.trade-stats strong {
+.trade-stats strong,
+.trade-price-stats strong {
   font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
 }
@@ -6190,12 +6204,14 @@ input[type="checkbox"] {
   }
 
   .trade-stats,
+  .trade-price-stats,
   .watch-head,
   .watch-row {
     grid-template-columns: 1fr;
   }
 
-  .trade-stats > div {
+  .trade-stats > div,
+  .trade-price-stats > div {
     border-right: 0;
     border-bottom: 1px solid var(--trade-border);
   }
