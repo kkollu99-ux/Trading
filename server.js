@@ -1262,17 +1262,28 @@ app.get("/api/admin/logs", requireAuth, attachUser, requireRole("admin"), async 
   response.json({ logs });
 });
 
-// Twelve Data's free/basic tier caps at ~8 credits/minute (1 credit per symbol per
-// call), but the app needs quotes for 40+ symbols. A single big batched call would
-// blow the whole minute's budget in one request no matter how rarely it's made, and
-// per-request caching doesn't help either, because every browser tab would still
-// need its own eventual upstream fetch. So instead of fetching on request, a single
-// background poller owns the upstream budget: it rotates through the tradable
-// instrument list in small batches, staying under the credit cap, and writes results
-// into a shared in-memory store. Every client request just reads that store — free,
-// instant, and its cost is fixed regardless of how many tabs or users are watching.
+// Twelve Data's free/basic tier caps at ~8 credits/minute AND a hard 800
+// credits/DAY (1 credit per symbol per call) - the app needs quotes for 40+
+// symbols. A single big batched call would blow the whole minute's budget in
+// one request no matter how rarely it's made, and per-request caching
+// doesn't help either, because every browser tab would still need its own
+// eventual upstream fetch. So instead of fetching on request, a single
+// background poller owns the upstream budget: it rotates through the
+// tradable instrument list in small batches and writes results into a
+// shared in-memory store. Every client request just reads that store —
+// free, instant, and its cost is fixed regardless of how many tabs or users
+// are watching.
+//
+// The interval is sized against the DAILY cap, not just the per-minute one -
+// at 7 credits/batch, one batch every 30 minutes is ~336 credits/day,
+// leaving headroom for the other pollers below (market status, FX rates)
+// and for on-demand candle fetches, all sharing the same 800/day budget.
+// Learned the hard way: an earlier version of this poller ran every 60s
+// once widened to the full catalog, which blew the entire day's credit
+// budget in under 10 minutes and took the previously-reliable XAU/USD live
+// feed down with it for the rest of the day.
 const quotePollBatchSize = Number(process.env.MARKET_DATA_POLL_BATCH_SIZE || 7);
-const quotePollIntervalMs = Number(process.env.MARKET_DATA_POLL_INTERVAL_MS || 60000);
+const quotePollIntervalMs = Number(process.env.MARKET_DATA_POLL_INTERVAL_MS || 1800000);
 const quoteStore = new Map();
 let quotePollCursor = 0;
 
@@ -1376,9 +1387,10 @@ async function pollLiveQuotesOnce() {
 // open — a closed market just goes quiet, indistinguishable from a stalled feed.
 // Twelve Data's REST /quote response carries an explicit is_market_open flag, so
 // a slow, always-on poller (independent of stream state) tracks it separately and
-// broadcasts only on change. It's cheap enough to never skip: one call every few
-// minutes for a handful of symbols is a rounding error against the credit cap.
-const marketStatusPollIntervalMs = Math.max(60000, Number(process.env.MARKET_DATA_STATUS_POLL_INTERVAL_MS) || 300000);
+// broadcasts only on change. Kept in the same 800-credit/day budget as
+// pollQuotesOnce above - narrowly scoped (quoteLiveSymbols, a handful of
+// symbols at most) so it stays cheap even at this interval.
+const marketStatusPollIntervalMs = Math.max(60000, Number(process.env.MARKET_DATA_STATUS_POLL_INTERVAL_MS) || 1800000);
 const marketStatusBySymbol = new Map();
 
 async function pollMarketStatusOnce() {
@@ -1415,9 +1427,11 @@ async function pollMarketStatusOnce() {
 // Lets the client show account balances, P&L, and instrument prices in a
 // currency other than USD - purely a display conversion (everything stays
 // stored and computed in USD; see /api/markets/fx-rate for how the client
-// gets this rate). Polled on a slow interval since exchange rates don't need
-// sub-minute freshness here, unlike instrument quotes.
-const fxRatePollIntervalMs = Math.max(60000, Number(process.env.MARKET_DATA_FX_POLL_INTERVAL_MS) || 300000);
+// gets this rate). One credit per currency per cycle, so this list (27
+// currencies) costs 27 credits every cycle - at a 3-hour interval that's
+// ~216/day, sharing the same 800/day budget as the pollers above. Exchange
+// rates don't move fast enough in a demo app to need anything tighter.
+const fxRatePollIntervalMs = Math.max(60000, Number(process.env.MARKET_DATA_FX_POLL_INTERVAL_MS) || 10800000);
 // USD is the base currency - always rate 1, never polled or stored.
 const supportedDisplayCurrencies = [
   "INR", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY", "SGD", "HKD",
