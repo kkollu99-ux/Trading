@@ -2276,20 +2276,20 @@ async function showTradingViewWidget(apiSymbol) {
     toolbar_bg: "#0e1626",
     enable_publishing: false,
     allow_symbol_change: false,
-    withdateranges: true,
     // The floating legend TradingView overlays on the chart itself (the
     // symbol name/OHLC readout box) - separate from the icon toolbar below.
     hide_legend: true,
     // The left-hand drawing toolbar (trendline, shapes, text, etc.) - not
     // needed for a read-only price chart.
     hide_side_toolbar: true,
-    // hide_top_toolbar: true was tried to also remove the small chart-style/
-    // compare/Indicators/camera icon row, but that row turns out to be part
-    // of the legend's hover controls, not the top toolbar - hiding the top
-    // toolbar only took out the date-range strip (the "Time Filter") that's
-    // anchored to it, without touching those icons at all. Left at the
-    // default (false) so the date-range strip stays usable; the icon row is
-    // not something this free embed widget exposes a toggle for.
+    // Hides TradingView's own top toolbar (intervals, chart-style dropdown,
+    // compare/add-symbol, Indicators, camera, etc). Our own timeframe row
+    // (wired to TradingView's interval via tradingViewIntervalMap, see
+    // loadChartForCurrentSymbol) replaces the interval-switching part of
+    // this; the rest of that bar's icons aren't something this free embed
+    // widget exposes a way to keep hidden from while still independently
+    // showing an interval control, so they go together.
+    hide_top_toolbar: true,
   });
   // Only hide the spinner if this is still the symbol the user is looking
   // at (they may have already switched again while this one was loading).
