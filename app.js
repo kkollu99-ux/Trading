@@ -4008,11 +4008,11 @@ function renderManagedInstruments() {
             ${simBadge || scheduleBadge ? `<div class="product-sim-badges">${simBadge}${scheduleBadge}</div>` : ""}
             <div class="product-sim-controls">
               <div class="sim-control-group">
-                <span class="sim-control-label">Window</span>
+                <span class="sim-control-label">Window (optional)</span>
                 <div class="sim-time-pair">
-                  <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" title="Start time (today)" />
+                  <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" title="Start time (today) - leave blank with End to start immediately" />
                   <span class="sim-time-sep">–</span>
-                  <input type="time" class="sim-time-input" data-schedule-to="${escapeHtml(instrument.symbol)}" title="End time (today) - auto-reverts to real-time here" />
+                  <input type="time" class="sim-time-input" data-schedule-to="${escapeHtml(instrument.symbol)}" title="End time (today) - auto-reverts to real-time here. Leave blank with Start to start immediately for 5 minutes" />
                 </div>
               </div>
               <div class="sim-control-group">
@@ -4750,24 +4750,41 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
       const targetUnitSelect = document.querySelector(`[data-schedule-target-unit="${CSS.escape(symbol)}"]`);
       const from = timeInputToTodayISO(fromInput?.value);
       const to = timeInputToTodayISO(toInput?.value);
-      if (!from || !to) {
-        setManagedMessage("Pick both a From and To time first.", "error");
-        return;
-      }
       const targetValue = Number(targetInput?.value);
       const hasTarget = Number.isFinite(targetValue) && targetValue > 0;
       const targetUnit = targetUnitSelect?.value || "percent";
-      await adminFetch("/api/admin/price-simulation/schedule", {
-        method: "POST",
-        body: JSON.stringify({
-          symbol,
-          direction: scheduleButton.dataset.scheduleDirection,
-          from,
-          to,
-          ...(hasTarget && targetUnit === "price" ? { targetPrice: targetValue } : {}),
-          ...(hasTarget && targetUnit === "percent" ? { targetPercent: targetValue } : {}),
-        }),
-      });
+      const targetFields = {
+        ...(hasTarget && targetUnit === "price" ? { targetPrice: targetValue } : {}),
+        ...(hasTarget && targetUnit === "percent" ? { targetPercent: targetValue } : {}),
+      };
+      if (!from && !to) {
+        // No window picked - the admin just wants the move to start right now,
+        // which is what the "Up"/"Down" labels actually promise. Only filling
+        // in the Window fields opts into scheduling a future start instead.
+        await adminFetch("/api/admin/price-simulation", {
+          method: "POST",
+          body: JSON.stringify({
+            symbol,
+            direction: scheduleButton.dataset.scheduleDirection,
+            durationSeconds: 300,
+            ...targetFields,
+          }),
+        });
+      } else if (!from || !to) {
+        setManagedMessage("Pick both a From and To time, or leave both blank to start now.", "error");
+        return;
+      } else {
+        await adminFetch("/api/admin/price-simulation/schedule", {
+          method: "POST",
+          body: JSON.stringify({
+            symbol,
+            direction: scheduleButton.dataset.scheduleDirection,
+            from,
+            to,
+            ...targetFields,
+          }),
+        });
+      }
     } else if (scheduleCancelButton) {
       await adminFetch("/api/admin/price-simulation/schedule/cancel", {
         method: "POST",
