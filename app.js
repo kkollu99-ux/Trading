@@ -1622,6 +1622,7 @@ function applySimulationStatus(payload) {
   if (payload.symbol === tradeChartState.apiSymbol) {
     if (payload.active) {
       tradeChartState.isSimulated = true;
+      tradeChartState.simulationBaselineSynced = false;
       // A coarse timeframe (the default is 1H) absorbs a whole short test
       // window into a single candle's wick - a real trend is invisible next
       // to hours of unrelated history. Switching to 1M is what actually
@@ -2179,6 +2180,12 @@ const tradeChartState = {
   tick: 0,
   isLiveChart: false,
   isSimulated: false,
+  // True once the candle history has been re-anchored to the current
+  // simulation's own price stream (see applyLiveTick) - reset to false
+  // whenever a simulation is detected starting, from whichever of the three
+  // places notices that first (the WS "simulation-status" broadcast, a page/
+  // symbol load that finds one already running, or the tick itself).
+  simulationBaselineSynced: true,
   viewCount: defaultTradeViewCount,
   viewOffset: 0,
   liveBid: null,
@@ -2593,6 +2600,7 @@ async function loadChartForCurrentSymbol() {
   tradeChartState.slideAnim = null;
   tradeChartState.hover = null;
   tradeChartState.isSimulated = activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
+  tradeChartState.simulationBaselineSynced = !tradeChartState.isSimulated;
   updateTradeSimulationBadge();
   const isLive = liveCandleSymbols.has(tradeChartState.apiSymbol);
   if (!isLive) setStreamStatus(null);
@@ -2858,6 +2866,31 @@ function applyLiveTick(tick) {
 
   const candles = tradeChartState.candles;
   const last = candles.at(-1);
+
+  // A simulation's price is authoritative and can be arbitrarily far from
+  // whatever the chart's existing candle history happens to show (that
+  // history is independently-seeded mock/stale data whenever no real market
+  // data provider is configured, since the resync fetch this would otherwise
+  // trigger has nothing to resync from either). Without this, the handoff
+  // candle's wick stretches to span both the old, unrelated price range and
+  // the new one - rendering as one giant bar across the whole gap and
+  // blowing out the chart's auto-scaled range instead of a gradual move.
+  // Collapsing it flat (not just extending its high/low to reach price,
+  // which just moves the same giant wick onto this candle instead) at the
+  // simulation's starting price makes the handoff clean; only candles
+  // formed after this one carry any real shape. Gated on a dedicated flag
+  // rather than tradeChartState.isSimulated itself - that flag is also set
+  // by the "simulation-status" broadcast, which reliably arrives before the
+  // first price tick ever does, so checking it here would always read true
+  // and this would never run.
+  if (isSimulationTick && !tradeChartState.simulationBaselineSynced) {
+    last.open = price;
+    last.high = price;
+    last.low = price;
+    last.close = price;
+    tradeChartState.simulationBaselineSynced = true;
+  }
+
   const tickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
   const bucketMs = isSimulationTick
     ? Math.floor(tickMs / simulationCandleBucketMs) * simulationCandleBucketMs
