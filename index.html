@@ -341,6 +341,10 @@
         </div>
         <div class="topbar-actions client-actions">
           <input id="globalSearch" class="visually-hidden" type="search" aria-label="Search" />
+          <select id="displayCurrencySelect" class="currency-select" aria-label="Display currency">
+            <option value="USD">USD</option>
+            <option value="INR">INR</option>
+          </select>
           <button class="wallet-button" id="walletBalance" type="button">▣ $0.00</button>
           <button class="icon-button sun-button" type="button" aria-label="Light mode">☼</button>
           <button id="signOut" class="icon-button" type="button" aria-label="Sign out">⇱</button>
@@ -622,7 +626,7 @@
               <div id="ticketKindNote" class="ticket-context">Spot order · BTCUSD settlement</div>
               <div class="ticket-funds-banner">
                 <span>Available funds</span>
-                <strong>$<span id="ticketBalanceValue">389201.37</span></strong>
+                <strong><span id="ticketBalanceValue">$389201.37</span></strong>
               </div>
               <div class="ticket-symbol-row">
                 <strong id="ticketSymbolName">BTCUSD</strong>

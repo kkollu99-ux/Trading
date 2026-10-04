@@ -1411,6 +1411,43 @@ async function pollMarketStatusOnce() {
   }
 }
 
+// Lets the client show account balances, P&L, and instrument prices in a
+// currency other than USD - purely a display conversion (everything stays
+// stored and computed in USD; see /api/markets/fx-rate for how the client
+// gets this rate). Polled on a slow interval since exchange rates don't need
+// sub-minute freshness here, unlike instrument quotes.
+const fxRatePollIntervalMs = Math.max(60000, Number(process.env.MARKET_DATA_FX_POLL_INTERVAL_MS) || 300000);
+const supportedDisplayCurrencies = ["INR"]; // USD is the base currency - always rate 1, never polled or stored
+const fxRateStore = new Map(); // currency -> { rate, at }
+// Used until the first successful poll succeeds, or whenever the Twelve Data
+// provider isn't configured (local/demo mode) - clearly an approximation,
+// never treated as live (see the isLive flag in the endpoint below).
+const fxRateFallbacks = { INR: 83.5 };
+
+async function pollFxRatesOnce() {
+  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
+  const key = marketDataApiKey;
+  if (provider !== "twelvedata" || !key) return;
+
+  for (const currency of supportedDisplayCurrencies) {
+    try {
+      const url = new URL("https://api.twelvedata.com/exchange_rate");
+      url.searchParams.set("symbol", `USD/${currency}`);
+      url.searchParams.set("apikey", key);
+      const upstream = await fetch(url);
+      const data = await upstream.json();
+      const rate = Number(data?.rate);
+      if (data?.status === "error" || !Number.isFinite(rate)) {
+        console.warn(`FX rate poll error (USD/${currency}):`, data?.message);
+        continue;
+      }
+      fxRateStore.set(currency, { rate, at: Date.now() });
+    } catch (error) {
+      console.warn(`FX rate poll failed (USD/${currency}):`, error.message);
+    }
+  }
+}
+
 // True push-based streaming: Twelve Data's WebSocket relays ticks the instant they
 // happen, at no REST credit cost, so this is the preferred path whenever the plan
 // supports it. It's proxied here (rather than opened directly from the browser) so
@@ -2061,6 +2098,24 @@ app.get("/api/markets/quotes", async (request, response) => {
   response.json({ provider: "mock", symbols, data });
 });
 
+// Backs the display-currency picker - a pure USD-to-<currency> conversion
+// rate for the client to multiply its (always USD-denominated internally)
+// balances, P&L, and prices by. isLive tells the client whether this is a
+// real polled rate or the fallback approximation, in case it wants to show
+// that distinction somewhere.
+app.get("/api/markets/fx-rate", (request, response) => {
+  const currency = String(request.query.currency || "").toUpperCase();
+  if (currency === "USD") {
+    return response.json({ currency: "USD", rate: 1, isLive: true, at: new Date().toISOString() });
+  }
+  if (!supportedDisplayCurrencies.includes(currency)) {
+    return response.status(400).json({ error: "Unsupported currency" });
+  }
+  const entry = fxRateStore.get(currency);
+  if (entry) return response.json({ currency, rate: entry.rate, isLive: true, at: new Date(entry.at).toISOString() });
+  response.json({ currency, rate: fxRateFallbacks[currency], isLive: false, at: new Date().toISOString() });
+});
+
 // Historical OHLC candles for the chart. Twelve Data's time_series endpoint is
 // ~1 credit per call regardless of outputsize, so unlike /quote this is cheap enough
 // to fetch on demand (timeframe switch) rather than needing a background poller — but
@@ -2298,6 +2353,8 @@ seedDefaults()
     setInterval(pollLiveQuotesOnce, quoteLivePollIntervalMs);
     pollMarketStatusOnce();
     setInterval(pollMarketStatusOnce, marketStatusPollIntervalMs);
+    pollFxRatesOnce();
+    setInterval(pollFxRatesOnce, fxRatePollIntervalMs);
   })
   .catch((error) => {
     console.error("Failed to start FXCC platform", error);

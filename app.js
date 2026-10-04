@@ -8,6 +8,57 @@ const sections = [...document.querySelectorAll(".view-section")];
 const apiBase = "";
 let currentSession = null;
 
+// Display currency (USD/INR toggle, see #displayCurrencySelect below): a
+// pure display-layer conversion. Everything is still stored and computed in
+// USD throughout the app (balances, margin, P&L, instrument prices) - only
+// formatCurrency()/formatTradeNumber() multiply by this rate and swap the
+// symbol when rendering. A converted value is never written back into state
+// or re-derived from displayed text (see readTradeRow's data-price-usd use).
+const currencySymbols = { USD: "$", INR: "₹" };
+let displayCurrency = localStorage.getItem("fxccDisplayCurrency") || "USD";
+let displayCurrencyRate = 1;
+
+async function refreshDisplayCurrencyRate() {
+  if (displayCurrency === "USD") {
+    displayCurrencyRate = 1;
+    return;
+  }
+  try {
+    const response = await fetch(`${apiBase}/api/markets/fx-rate?currency=${displayCurrency}`);
+    const data = await response.json().catch(() => ({}));
+    displayCurrencyRate = Number(data?.rate) || 1;
+  } catch {
+    displayCurrencyRate = 1;
+  }
+}
+
+// Re-renders everything that shows a money or instrument-price figure, so a
+// currency switch is reflected immediately everywhere instead of only on
+// the next natural re-render. Market Watch/Quotes re-fetch (cheap, and the
+// simplest way to get a fresh set of formatTradeNumber-formatted rows);
+// everything else just re-renders from state already in memory.
+function refreshCurrencyDependentUI() {
+  renderAccountSummary();
+  renderOrdersPanels();
+  renderTradeTicket();
+  loadTradeInstruments();
+  loadMarketsInstruments();
+}
+
+function initDisplayCurrency() {
+  const select = document.querySelector("#displayCurrencySelect");
+  if (select) select.value = displayCurrency;
+  if (displayCurrency === "USD") return;
+  refreshDisplayCurrencyRate().then(refreshCurrencyDependentUI);
+}
+
+document.querySelector("#displayCurrencySelect")?.addEventListener("change", async (event) => {
+  displayCurrency = event.target.value;
+  localStorage.setItem("fxccDisplayCurrency", displayCurrency);
+  await refreshDisplayCurrencyRate();
+  refreshCurrencyDependentUI();
+});
+
 // Icon-only sidebar toggle: a single button hides the nav-item text labels
 // and narrows the sidebar column, independent of the responsive breakpoints
 // that already auto-collapse it on tablet widths. Persisted so it survives
@@ -31,7 +82,9 @@ function canManageUsers() {
 }
 
 function formatCurrency(value) {
-  return `$${Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const amount = Number(value || 0) * displayCurrencyRate;
+  const symbol = currencySymbols[displayCurrency] || "$";
+  return `${symbol}${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function getGreeting() {
@@ -588,6 +641,7 @@ function enterWorkspace(session = null) {
   drawCharts();
   updateDashboardTime();
   primeMyServiceRequestIds().catch(() => {});
+  initDisplayCurrency();
 }
 
 function updateDashboardTime() {
@@ -2106,7 +2160,7 @@ function renderTradeWatchlist(instruments, quotes = {}) {
       const trendClass = changePercent >= 0 ? "up" : "down";
       const symbol = compactSymbol(instrument.symbol);
       const selected = symbol === tradeChartState.symbol || (!tradeChartState.symbol && index === 0);
-      return `<button class="watch-row ${selected ? "is-selected" : ""}" type="button" data-watch-category="${categoryFilter(instrument.category)}" data-watch-symbol="${symbol} ${displayCategory(instrument.category)}" data-api-symbol="${instrument.symbol}">
+      return `<button class="watch-row ${selected ? "is-selected" : ""}" type="button" data-watch-category="${categoryFilter(instrument.category)}" data-watch-symbol="${symbol} ${displayCategory(instrument.category)}" data-api-symbol="${instrument.symbol}" data-price-usd="${price}">
         <span><strong>${symbol}</strong><small>${displayCategory(instrument.category)}</small></span>
         <em>${formatTradeNumber(price)}</em>
         <b class="${trendClass}">${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%</b>
@@ -2357,10 +2411,12 @@ function resetTradeChartView() {
 }
 
 function formatTradeNumber(value) {
-  const number = Number(value) || 0;
-  if (number >= 1000) return number.toFixed(2);
-  if (number >= 10) return number.toFixed(3);
-  return number.toFixed(5);
+  const number = (Number(value) || 0) * displayCurrencyRate;
+  const formatted = number >= 1000 ? number.toFixed(2) : number >= 10 ? number.toFixed(3) : number.toFixed(5);
+  // USD keeps the existing bare-number look (no symbol) to match the rest of
+  // the chart/ticket UI; any other currency gets prefixed so a converted
+  // price isn't mistaken for a USD one.
+  return displayCurrency === "USD" ? formatted : `${currencySymbols[displayCurrency] || ""}${formatted}`;
 }
 
 function hashSymbol(symbol) {
@@ -2370,7 +2426,12 @@ function hashSymbol(symbol) {
 function readTradeRow(row) {
   const symbol = row.querySelector("strong")?.textContent.trim() || "BTCUSD";
   const category = row.querySelector("small")?.textContent.trim() || "Crypto";
-  const price = Number(row.querySelector("em")?.textContent.replace(/,/g, "")) || tradeChartState.price;
+  // Read from data-price-usd, not the row's displayed <em> text - that text
+  // is already currency-converted (and symbol-prefixed) by formatTradeNumber
+  // once a non-USD display currency is picked, and re-parsing it here would
+  // feed an INR-sized number back into tradeChartState.price as if it were
+  // the real USD price, compounding the conversion further on every reselect.
+  const price = Number(row.dataset.priceUsd) || tradeChartState.price;
   const changePercent = Number(row.querySelector("b")?.textContent.replace("%", "")) || 0;
   const apiSymbol = row.dataset.apiSymbol || symbol;
   return { symbol, category, price, changePercent, apiSymbol };
@@ -3437,11 +3498,15 @@ function renderTradeTicket() {
   const margin = multiplier > 0 ? notional / multiplier : 0;
   const fee = margin * orderFeeRate;
 
+  // Keeps these fields' own (higher) decimal precision rather than routing
+  // through formatCurrency's 2-decimal/thousands-separator style - only the
+  // rate conversion and currency symbol are shared with it.
+  const currencyPrefix = displayCurrency === "USD" ? "" : currencySymbols[displayCurrency] || "";
   document.querySelector("#ticketKindNote").textContent = `Spot order · ${symbol} settlement`;
   document.querySelector("#ticketLotValue").textContent = `1 Lots = ${orderUnitsPerLot} ${symbol}`;
-  document.querySelector("#ticketFeeValue").textContent = fee.toFixed(6);
-  document.querySelector("#ticketMarginValue").textContent = margin.toFixed(6);
-  document.querySelector("#ticketBalanceValue").textContent = Number(currentSession?.user?.balance || 0).toFixed(2);
+  document.querySelector("#ticketFeeValue").textContent = `${currencyPrefix}${(fee * displayCurrencyRate).toFixed(6)}`;
+  document.querySelector("#ticketMarginValue").textContent = `${currencyPrefix}${(margin * displayCurrencyRate).toFixed(6)}`;
+  document.querySelector("#ticketBalanceValue").textContent = `${currencyPrefix}${(Number(currentSession?.user?.balance || 0) * displayCurrencyRate).toFixed(2)}`;
 }
 
 document.querySelector("#ticketMultiplierSelect")?.addEventListener("change", renderTradeTicket);
