@@ -2100,29 +2100,22 @@ app.get("/api/markets/quotes", async (request, response) => {
   if (!symbols.length) return response.status(400).json({ error: "No allowed symbols requested" });
 
   const provider = process.env.MARKET_DATA_PROVIDER || "mock";
-  const key = marketDataApiKey;
-  if (provider === "twelvedata" && key) {
-    const data = {};
-    for (const symbol of symbols) {
-      const entry = quoteStore.get(symbol);
-      if (entry) data[symbol] = entry.data;
-    }
-    return response.json({ provider, symbols, data });
+  // Falling back to getCurrentPrice() - the same choke point an admin
+  // simulation's starting price and every order/margin calc already go
+  // through - instead of each symbol's own unrelated random/index-based mock
+  // price keeps whatever this client ends up displaying in sync with the
+  // price a simulation will actually start from. Without this, a symbol
+  // quoteStore hasn't been polled for yet (always true right after a
+  // restart, with no real provider configured, or any time the day's API
+  // credit cap is hit) showed a price with no relation to getCurrentPrice()'s
+  // fallback, so starting a simulation on it jumped straight from that
+  // mismatched price to the real one.
+  const data = {};
+  for (const symbol of symbols) {
+    const entry = quoteStore.get(symbol);
+    data[symbol] = entry ? entry.data : { symbol, price: getCurrentPrice(symbol), simulated: true, timestamp: new Date().toISOString() };
   }
-
-  const data = Object.fromEntries(
-    symbols.map((symbol, index) => [
-      symbol,
-      {
-        symbol,
-        price: Number((100 + index * 17 + Math.random() * 4).toFixed(2)),
-        changePercent: Number(((Math.random() - 0.5) * 2).toFixed(2)),
-        timestamp: new Date().toISOString(),
-        simulated: true,
-      },
-    ]),
-  );
-  response.json({ provider: "mock", symbols, data });
+  response.json({ provider, symbols, data });
 });
 
 // Backs the display-currency picker - a pure USD-to-<currency> conversion
