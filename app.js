@@ -2372,19 +2372,18 @@ async function showTradingViewWidget(apiSymbol) {
     enable_publishing: false,
     allow_symbol_change: false,
     // The floating legend TradingView overlays on the chart itself (the
-    // symbol name/OHLC readout box) - separate from the icon toolbar below.
+    // symbol name/OHLC readout box) - this is what was actually hiding the
+    // small chart-style/compare/Indicators/camera icon row (that row is
+    // part of the legend's hover controls, not the top toolbar), so leaving
+    // the top toolbar visible below doesn't bring those icons back.
     hide_legend: true,
     // The left-hand drawing toolbar (trendline, shapes, text, etc.) - not
     // needed for a read-only price chart.
     hide_side_toolbar: true,
-    // Hides TradingView's own top toolbar (intervals, chart-style dropdown,
-    // compare/add-symbol, Indicators, camera, etc). Our own timeframe row
-    // (wired to TradingView's interval via tradingViewIntervalMap, see
-    // loadChartForCurrentSymbol) replaces the interval-switching part of
-    // this; the rest of that bar's icons aren't something this free embed
-    // widget exposes a way to keep hidden from while still independently
-    // showing an interval control, so they go together.
-    hide_top_toolbar: true,
+    // Top toolbar (intervals, date-range strip, fullscreen, settings) stays
+    // visible - it's TradingView's own interval switcher, so our own
+    // timeframe row is hidden whenever this widget is showing (see
+    // loadChartForCurrentSymbol) instead of duplicating it.
   });
   // Only hide the spinner if this is still the symbol the user is looking
   // at (they may have already switched again while this one was loading).
@@ -2876,13 +2875,12 @@ async function loadChartForCurrentSymbol() {
   if (!tradeChartState.isSimulated) {
     tradeChartState.isLiveChart = false;
     setStreamStatus(null);
-    // Our own Bid/Ask/Spread readout is only meaningful against the
-    // simulated chart - against TradingView's real data it would just sit
-    // there showing stale mock numbers. The timeframe buttons stay visible
-    // though: they're now wired to pick TradingView's own bar size too (see
-    // tradingViewIntervalMap), since TradingView's own toolbar for that is
-    // intentionally hidden.
+    // Our own Bid/Ask/Spread readout and timeframe row are only meaningful
+    // against the simulated chart - against TradingView's real data, use
+    // the widget's own native top toolbar (intervals, date-range strip)
+    // instead of duplicating it with ours.
     document.querySelector("#tradePriceStatsRow")?.classList.add("is-hidden");
+    document.querySelector(".timeframes")?.classList.add("is-hidden");
     showTradingViewWidget(tradeChartState.apiSymbol);
     // TradingView owns the chart pixels now, but the order ticket and the
     // trade header text still read from tradeChartState.candles - rebuild
@@ -2895,6 +2893,7 @@ async function loadChartForCurrentSymbol() {
     return;
   }
   document.querySelector("#tradePriceStatsRow")?.classList.remove("is-hidden");
+  document.querySelector(".timeframes")?.classList.remove("is-hidden");
   showSimulationChart();
 
   // A coarse timeframe (the default is 1H) absorbs a whole short test window
