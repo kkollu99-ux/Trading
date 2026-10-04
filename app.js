@@ -1314,7 +1314,7 @@ function orderRowHtml(order, { closable }) {
   if (order.stop_loss_amount != null) riskParts.push(`SL -${formatCurrency(order.stop_loss_amount)}`);
   if (order.take_profit_amount != null) riskParts.push(`TP +${formatCurrency(order.take_profit_amount)}`);
   const riskLine = riskParts.length ? `<small>${riskParts.join(" · ")}</small>` : "";
-  const info = `<div><strong>${escapeHtml(compactSymbol(order.symbol))}</strong><small><b>${order.direction.toUpperCase()}</b> market · ${Number(order.lots).toFixed(2)} lots</small><small>@ ${Number(order.entry_price).toFixed(4)} · ${escapeHtml(opened)}</small>${riskLine}</div>`;
+  const info = `<div><strong>${escapeHtml(compactSymbol(order.symbol))}</strong><small><b>${order.direction.toUpperCase()}</b> market · ${Number(order.lots).toFixed(2)} lots</small><small>@ ${formatTradeNumber(order.entry_price)} · ${escapeHtml(opened)}</small>${riskLine}</div>`;
   if (closable) {
     const pnl = Number(order.floating_pnl || 0);
     const pnlClass = pnl >= 0 ? "positive" : "danger-text";
@@ -3674,7 +3674,7 @@ async function placeOrder(direction) {
     });
     applyLiveBalance(result.balance);
     setTicketOrderMessage(
-      `${direction === "buy" ? "Bought" : "Sold"} ${lots.toFixed(2)} lots of ${compactSymbol(symbol)} @ ${Number(result.order.entry_price).toFixed(4)}.`,
+      `${direction === "buy" ? "Bought" : "Sold"} ${lots.toFixed(2)} lots of ${compactSymbol(symbol)} @ ${formatTradeNumber(result.order.entry_price)}.`,
       "success",
     );
     resetRiskControls();
@@ -3722,16 +3722,20 @@ function openOrderConfirmModal(direction) {
   const stopLoss = readRiskThreshold("loss");
   const takeProfit = readRiskThreshold("profit");
 
+  const currencyPrefix = displayCurrency === "USD" ? "" : currencySymbols[displayCurrency] || "";
   document.querySelector("#orderConfirmTitle").textContent = `Confirm ${direction === "buy" ? "Buy" : "Sell"}`;
   document.querySelector("#orderConfirmSymbol").textContent = compactSymbol(symbol);
   const priceEl = document.querySelector("#orderConfirmPrice");
-  priceEl.textContent = price.toFixed(4);
+  priceEl.textContent = formatTradeNumber(price);
+  // Stays in raw USD regardless of display currency - compared directly
+  // against the next raw price updateOrderConfirmLivePrice() is called with,
+  // for the tick-up/tick-down flash.
   priceEl.dataset.rawPrice = String(price);
   priceEl.classList.remove("tick-up", "tick-down");
   document.querySelector("#orderConfirmLots").textContent = lots.toFixed(2);
   document.querySelector("#orderConfirmMultiplier").textContent = String(multiplier);
-  document.querySelector("#orderConfirmMargin").textContent = margin.toFixed(6);
-  document.querySelector("#orderConfirmFee").textContent = fee.toFixed(6);
+  document.querySelector("#orderConfirmMargin").textContent = `${currencyPrefix}${(margin * displayCurrencyRate).toFixed(6)}`;
+  document.querySelector("#orderConfirmFee").textContent = `${currencyPrefix}${(fee * displayCurrencyRate).toFixed(6)}`;
   const riskRow = document.querySelector("#orderConfirmRiskRow");
   const riskParts = [];
   if (stopLoss) riskParts.push(`SL -${formatCurrency(stopLoss)}`);
@@ -3762,7 +3766,7 @@ function updateOrderConfirmLivePrice(symbol, price) {
   const priceEl = document.querySelector("#orderConfirmPrice");
   if (!priceEl) return;
   const previous = Number(priceEl.dataset.rawPrice) || price;
-  priceEl.textContent = Number(price).toFixed(4);
+  priceEl.textContent = formatTradeNumber(price);
   priceEl.dataset.rawPrice = String(price);
   priceEl.classList.toggle("tick-up", price > previous);
   priceEl.classList.toggle("tick-down", price < previous);
