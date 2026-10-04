@@ -2256,11 +2256,15 @@ async function showTradingViewWidget(apiSymbol) {
     enable_publishing: false,
     allow_symbol_change: false,
     withdateranges: true,
-    // The floating legend TradingView overlays on the chart itself (compare/
-    // add-symbol, Indicators, chart style, camera) - not asked for, and not
-    // the toolbar the timeframe controls live on, so hiding it doesn't lose
-    // any functionality.
+    // The floating legend TradingView overlays on the chart itself (the
+    // symbol name/OHLC readout box) - separate from the icon toolbar below.
     hide_legend: true,
+    // The icon toolbar (chart-style dropdown, Indicators, compare/add-symbol
+    // "+", camera/screenshot, alignment, etc.) and the left-hand drawing
+    // toolbar - this is meant to be a plain read-only price chart, not an
+    // editor, so neither toolbar is wanted here.
+    hide_top_toolbar: true,
+    hide_side_toolbar: true,
   });
   // Only hide the spinner if this is still the symbol the user is looking
   // at (they may have already switched again while this one was loading).
@@ -2457,7 +2461,17 @@ function renderTradeCandles() {
   const canvas = document.querySelector("#tradeCandleCanvas");
   if (!canvas || !tradeChartState.candles.length) return;
   const rect = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
+  if (!rect.width || !rect.height) {
+    // The canvas is hidden (TradingView is showing instead) - it has no
+    // size to draw into, but the ticket/header text (symbol, price, bid/
+    // ask) still needs to track the current symbol regardless of which
+    // chart view owns the pixels. Without this, switching products while
+    // TradingView is showing left the order ticket frozen on whatever it
+    // last displayed - the very first page load's default, if a
+    // simulation never made the canvas visible this session.
+    syncTradeTerminal();
+    return;
+  }
 
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.floor(rect.width * dpr);
@@ -2741,6 +2755,14 @@ async function loadChartForCurrentSymbol() {
     // since TradingView has its own toolbar for exactly this.
     document.querySelector(".trade-stats")?.classList.add("is-hidden");
     showTradingViewWidget(tradeChartState.apiSymbol);
+    // TradingView owns the chart pixels now, but the order ticket and the
+    // trade header text still read from tradeChartState.candles - rebuild
+    // them for the newly selected symbol so that text doesn't keep showing
+    // whatever symbol was viewed previously (its price is still mock data
+    // seeded from the current price/symbol, since the real candles only
+    // exist inside the TradingView iframe we can't read from).
+    tradeChartState.candles = buildTradeCandles(tradeChartState);
+    syncTradeTerminal();
     return;
   }
   document.querySelector(".trade-stats")?.classList.remove("is-hidden");
