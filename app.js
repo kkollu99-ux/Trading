@@ -3139,6 +3139,7 @@ function applyLiveTick(tick) {
   // can watch calculations respond to a controlled price move regardless of
   // whether a real market feed is configured.
   if (isSimulationTick) {
+    const wasSimulated = tradeChartState.isSimulated;
     tradeChartState.isSimulated = true;
     // Covers a client that connected after the simulation-status broadcast
     // already went out (e.g. opened the Trade page mid-simulation) - without
@@ -3156,6 +3157,19 @@ function applyLiveTick(tick) {
           if (tick.symbol === tradeChartState.apiSymbol) updateTradeSimulationBadge();
         })
         .catch(() => simulationStatusFetchInFlight.delete(tick.symbol));
+    }
+    // The chart view itself (TradingView vs. our own candle chart) only
+    // gets re-decided inside loadChartForCurrentSymbol() - without this,
+    // a client that missed the original simulation-status broadcast (opened
+    // the Trade page mid-simulation, or reconnected its WS mid-simulation)
+    // would have correct ticket/margin math (nothing below here gates on
+    // isSimulated) while still showing TradingView's real, unrelated chart.
+    // activeSimulationsBySymbol is guaranteed set for this symbol by the
+    // block above (synchronously, even before its status-fetch resolves),
+    // so loadChartForCurrentSymbol()'s own isSimulated re-derivation reads
+    // true here rather than reverting what was just set two lines up.
+    if (!wasSimulated) {
+      loadChartForCurrentSymbol();
     }
     updateTradeSimulationBadge();
   }
