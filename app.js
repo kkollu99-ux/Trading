@@ -2477,6 +2477,26 @@ function readTradeRow(row) {
   return { symbol, category, price, changePercent, apiSymbol };
 }
 
+// Shifts every candle in a series by the same offset so it ends exactly at
+// `price`, preserving the series' shape. Used both for the synthetic mock
+// history (whose sine-wave walk otherwise drifts away from the live price
+// with no guarantee of landing back on it) and for real historical candles
+// swapped in after the fact (see loadChartForCurrentSymbol) - either way, a
+// simulation's first tick is then a true continuation of whatever's already
+// on screen instead of a jump to an unrelated value.
+function anchorCandlesEndToPrice(candles, price) {
+  const lastClose = candles.at(-1)?.close;
+  if (!Number.isFinite(lastClose) || !Number.isFinite(price)) return;
+  const drift = price - lastClose;
+  if (!drift) return;
+  for (const candle of candles) {
+    candle.open += drift;
+    candle.high += drift;
+    candle.low = Math.max(0.00001, candle.low + drift);
+    candle.close += drift;
+  }
+}
+
 function buildTradeCandles({ symbol, price, timeframe }) {
   const seed = hashSymbol(symbol) + timeframeMinutes[timeframe] * 13;
   const spread = Math.max(price * (0.00055 + timeframeMinutes[timeframe] / 900000), 0.006);
@@ -2496,26 +2516,7 @@ function buildTradeCandles({ symbol, price, timeframe }) {
     return { time, open, high, low: Math.max(0.00001, low), close, volume };
   });
 
-  // The sine-wave walk above drifts away from `price` over 74 candles with no
-  // guarantee of landing back on it - left alone, the series ends wherever the
-  // accumulated wave/pressure terms happen to put it, often tens or hundreds
-  // of points off. That's invisible for a normal mock chart, but the moment a
-  // simulation's first real tick snaps just the last candle to the true price
-  // (see applyLiveTick's baseline-sync), it shows up as a sudden unexplained
-  // jump between this history and the live move. Shifting every candle by the
-  // same offset preserves the generated shape while guaranteeing the series
-  // actually ends at `price`, so a simulation starting right after this call
-  // continues smoothly instead of jumping.
-  const drift = price - close;
-  if (drift) {
-    for (const candle of candles) {
-      candle.open += drift;
-      candle.high += drift;
-      candle.low = Math.max(0.00001, candle.low + drift);
-      candle.close += drift;
-    }
-  }
-
+  anchorCandlesEndToPrice(candles, price);
   return candles;
 }
 
@@ -2707,28 +2708,31 @@ function renderTradeCandles() {
   candles.forEach((candle, index) => {
     const x = chart.left + index * candleStep + candleStep / 2;
     const isUp = candle.close >= candle.open;
-    // TradingView's own default dark-theme candle colors (teal/coral) - matching
-    // them means the handoff between the TradingView widget and this canvas
-    // (whenever a simulation starts) doesn't also change the chart's color
-    // scheme on top of everything else already changing.
-    const color = isUp ? "#26a69a" : "#ef5350";
+    // TradingView's own exact dark-theme palette - a bright body/border color
+    // plus a darker, muted shade for the wick, matching them means the
+    // handoff between the TradingView widget and this canvas (whenever a
+    // simulation starts) doesn't also change the chart's color scheme on
+    // top of everything else already changing.
+    const bodyColor = isUp ? "#089981" : "#f23645";
+    const wickColor = isUp ? "#1a5a54" : "#7f312f";
     const wickTop = yFor(candle.high);
     const wickBottom = yFor(candle.low);
     const bodyTop = yFor(Math.max(candle.open, candle.close));
     const bodyBottom = yFor(Math.min(candle.open, candle.close));
     const bodyHeight = Math.max(2, bodyBottom - bodyTop);
 
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = wickColor;
     ctx.beginPath();
     ctx.moveTo(x, wickTop);
     ctx.lineTo(x, wickBottom);
     ctx.stroke();
 
-    ctx.fillStyle = color;
+    ctx.fillStyle = bodyColor;
     ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
 
     const volumeHeight = (candle.volume / volumeMax) * 38;
     ctx.globalAlpha = 0.42;
+    ctx.fillStyle = bodyColor;
     ctx.fillRect(x - candleWidth / 2, rect.height - 30 - volumeHeight, candleWidth, volumeHeight);
     ctx.globalAlpha = 1;
   });
@@ -2937,6 +2941,27 @@ async function loadChartForCurrentSymbol() {
   tradeChartState.candles = buildTradeCandles(tradeChartState);
   resetTradeChartView();
   renderTradeCandles();
+
+  // Upgrade from the synthetic placeholder above to the same real candle
+  // history TradingView itself was just showing, so a simulation visibly
+  // continues from the actual market move instead of a made-up shape. Only
+  // XAU/USD has real historical data wired up server-side right now (see
+  // quoteLiveSymbols in server.js) - loadRealCandles resolves false for
+  // every other symbol and the synthetic fallback above simply stands.
+  const symbolForRealCandles = tradeChartState.apiSymbol;
+  const priceAtRequestTime = tradeChartState.candles.at(-1)?.close;
+  loadRealCandles(symbolForRealCandles, "1M").then((ok) => {
+    if (!ok || tradeChartState.apiSymbol !== symbolForRealCandles || !tradeChartState.isSimulated) return;
+    // Anchored the same way the synthetic history above is - real data's
+    // last close is already close to live, but anchoring guarantees this
+    // swap itself never introduces a jump. Preferring lastKnownPrice (set by
+    // every tick this chart has actually shown) over the priceAtRequestTime
+    // snapshot above means a tick or two landing while this fetch was in
+    // flight doesn't make the swap itself rewind the price back a step.
+    anchorCandlesEndToPrice(tradeChartState.candles, tradeChartState.lastKnownPrice ?? priceAtRequestTime);
+    resetTradeChartView();
+    renderTradeCandles();
+  });
 }
 
 function selectTradeSymbol(row) {
@@ -3214,6 +3239,11 @@ function applyLiveTick(tick) {
 
   const price = Number(tick.price);
   if (!Number.isFinite(price)) return;
+  // The freshest price this chart has actually shown, independent of
+  // whichever candles array currently holds it - loadChartForCurrentSymbol's
+  // real-candle upgrade reads this to anchor onto whatever's live *when it
+  // resolves*, not whatever was live when it was kicked off a moment earlier.
+  tradeChartState.lastKnownPrice = price;
 
   updateOrderConfirmLivePrice(tick.symbol, price);
 
