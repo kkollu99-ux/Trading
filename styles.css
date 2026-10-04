@@ -2065,6 +2065,23 @@ select:focus {
   display: none;
 }
 
+.watch-row.is-market-closed {
+  opacity: 0.55;
+}
+
+.watch-closed-tag {
+  display: inline-block !important;
+  margin-left: 0.3rem;
+  border-radius: 0.2rem;
+  background: rgba(232, 61, 48, 0.18);
+  color: var(--red);
+  padding: 0 0.3rem;
+  font-size: 0.6rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 .product-card.is-filtered-out {
   display: none;
 }
@@ -2870,6 +2887,12 @@ select:focus {
 
 .sell-button {
   background: var(--trade-sell);
+}
+
+.buy-button:disabled,
+.sell-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .trade-terminal button:focus-visible,

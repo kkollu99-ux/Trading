@@ -1276,11 +1276,11 @@ const quotePollIntervalMs = Number(process.env.MARKET_DATA_POLL_INTERVAL_MS || 6
 const quoteStore = new Map();
 let quotePollCursor = 0;
 
-// The full instrument catalog (ALLOWED_SYMBOLS) covers 40+ markets, but until the
-// Twelve Data plan is upgraded past its ~8-credit/minute cap, only this smaller set
-// is actually kept live so the limited credits aren't spread thin across everything.
-// Widen this (or drop it to fall back to the full tradable list) once the plan has
-// more headroom — no other code change needed, the poller already rotates/batches.
+// Scopes the two things below that need snappier-than-the-60s-rotation
+// updates: pollLiveQuotesOnce's own short-interval poll, and the Twelve Data
+// WebSocket subscription. pollQuotesOnce (above) is NOT scoped to this list -
+// it always rotates the full tradable catalog at a fixed, budget-safe pace;
+// this just gives a handful of symbols a faster top-up on top of that.
 const quoteLiveSymbols = (process.env.MARKET_DATA_LIVE_SYMBOLS || "XAU/USD")
   .split(",")
   .map((symbol) => symbol.trim().toUpperCase())
@@ -1291,10 +1291,11 @@ async function pollQuotesOnce() {
   const key = marketDataApiKey;
   if (provider !== "twelvedata" || !key) return;
 
-  const tradableSymbols = (await listInstruments({ tradeOnly: true })).map((instrument) => instrument.symbol);
-  const symbols = quoteLiveSymbols.length
-    ? tradableSymbols.filter((symbol) => quoteLiveSymbols.includes(symbol))
-    : tradableSymbols;
+  // Rotates the FULL tradable catalog (not just quoteLiveSymbols, which
+  // scopes the separate faster poller below) - batched at quotePollBatchSize
+  // per cycle so this stays within budget however large the catalog is,
+  // just taking longer to fully rotate through everyone.
+  const symbols = (await listInstruments({ tradeOnly: true })).map((instrument) => instrument.symbol);
   if (!symbols.length) return;
 
   const batch = [];
@@ -1417,12 +1418,24 @@ async function pollMarketStatusOnce() {
 // gets this rate). Polled on a slow interval since exchange rates don't need
 // sub-minute freshness here, unlike instrument quotes.
 const fxRatePollIntervalMs = Math.max(60000, Number(process.env.MARKET_DATA_FX_POLL_INTERVAL_MS) || 300000);
-const supportedDisplayCurrencies = ["INR"]; // USD is the base currency - always rate 1, never polled or stored
+// USD is the base currency - always rate 1, never polled or stored.
+const supportedDisplayCurrencies = [
+  "INR", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY", "SGD", "HKD",
+  "NZD", "AED", "SAR", "ZAR", "SEK", "NOK", "DKK", "MXN", "BRL", "RUB",
+  "KRW", "THB", "IDR", "MYR", "PHP", "TRY", "PLN",
+];
 const fxRateStore = new Map(); // currency -> { rate, at }
 // Used until the first successful poll succeeds, or whenever the Twelve Data
-// provider isn't configured (local/demo mode) - clearly an approximation,
-// never treated as live (see the isLive flag in the endpoint below).
-const fxRateFallbacks = { INR: 83.5 };
+// provider isn't configured (local/demo mode) - clearly an approximation
+// (rounded, roughly early-2026 rates), never treated as live (see the
+// isLive flag in the endpoint below).
+const fxRateFallbacks = {
+  INR: 83.5, EUR: 0.92, GBP: 0.79, JPY: 149, AUD: 1.52, CAD: 1.36,
+  CHF: 0.88, CNY: 7.24, SGD: 1.34, HKD: 7.82, NZD: 1.64, AED: 3.67,
+  SAR: 3.75, ZAR: 18.7, SEK: 10.4, NOK: 10.6, DKK: 6.86, MXN: 17.1,
+  BRL: 4.97, RUB: 92, KRW: 1330, THB: 35.8, IDR: 15600, MYR: 4.68,
+  PHP: 56.4, TRY: 32.1, PLN: 4.0,
+};
 
 async function pollFxRatesOnce() {
   const provider = process.env.MARKET_DATA_PROVIDER || "mock";
