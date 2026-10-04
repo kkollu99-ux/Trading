@@ -2707,7 +2707,11 @@ function renderTradeCandles() {
   candles.forEach((candle, index) => {
     const x = chart.left + index * candleStep + candleStep / 2;
     const isUp = candle.close >= candle.open;
-    const color = isUp ? "#25b15f" : "#e83d30";
+    // TradingView's own default dark-theme candle colors (teal/coral) - matching
+    // them means the handoff between the TradingView widget and this canvas
+    // (whenever a simulation starts) doesn't also change the chart's color
+    // scheme on top of everything else already changing.
+    const color = isUp ? "#26a69a" : "#ef5350";
     const wickTop = yFor(candle.high);
     const wickBottom = yFor(candle.low);
     const bodyTop = yFor(Math.max(candle.open, candle.close));
@@ -3191,6 +3195,15 @@ function applyLiveTick(tick) {
     // so loadChartForCurrentSymbol()'s own isSimulated re-derivation reads
     // true here rather than reverting what was just set two lines up.
     if (!wasSimulated) {
+      // tradeChartState.price is only ever set once, when the symbol was
+      // selected - it's never refreshed while TradingView's own (unrelated)
+      // feed is what the user has actually been watching since. Refreshing
+      // it from this tick right before rebuilding the candle history below
+      // means that history gets anchored to the exact price the simulation
+      // is actually starting from, not a snapshot that may be stale by
+      // however long the chart had been open before the simulation started.
+      const tickPrice = Number(tick.price);
+      if (Number.isFinite(tickPrice)) tradeChartState.price = tickPrice;
       loadChartForCurrentSymbol();
     }
     updateTradeSimulationBadge();
