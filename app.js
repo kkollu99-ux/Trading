@@ -4327,8 +4327,18 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
   const stopButton = event.target.closest("[data-simulate-stop]");
   const scheduleButton = event.target.closest("[data-schedule]");
   const scheduleCancelButton = event.target.closest("[data-schedule-cancel]");
-  if (!stopButton && !scheduleButton && !scheduleCancelButton) return;
+  const actionButton = stopButton || scheduleButton || scheduleCancelButton;
+  if (!actionButton) return;
   if (!canManageUsers()) return;
+  // Disabling synchronously (before the first await) stops a second click on
+  // the same button from firing a second request while the first is still in
+  // flight - without this, a couple of impatient clicks on e.g. Cancel could
+  // each issue their own (harmless but redundant) API call and audit-log
+  // entry before the response re-renders the card. The eventual re-render
+  // (via the WS broadcast once the request lands) replaces this button
+  // outright, so re-enabling here only matters for the error path.
+  if (actionButton.disabled) return;
+  actionButton.disabled = true;
   try {
     if (stopButton) {
       await adminFetch("/api/admin/price-simulation/stop", {
@@ -4369,6 +4379,8 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
     }
   } catch (error) {
     setManagedMessage(error.message, "error");
+  } finally {
+    actionButton.disabled = false;
   }
 });
 
