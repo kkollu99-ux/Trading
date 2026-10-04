@@ -1210,6 +1210,16 @@ select:focus {
   white-space: nowrap;
 }
 
+.currency-select {
+  min-height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0.35rem 0.6rem;
+  font-weight: 900;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px !important;
