@@ -2243,6 +2243,20 @@ select:focus {
   text-transform: none !important;
 }
 
+.timeframes button {
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--trade-muted);
+  padding: 0.35rem 0.5rem;
+  font-weight: 900;
+}
+
+.timeframes button.is-active {
+  background: rgba(255, 176, 0, 0.18);
+  color: var(--gold);
+}
+
 #tradeTimeframeSelect {
   border: 1px solid var(--trade-border);
   border-radius: var(--radius);

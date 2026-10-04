@@ -573,12 +573,11 @@
                   <div><span>Spread</span><strong id="tradeSpreadValue">0.02</strong></div>
                 </div>
                 <div class="timeframes">
-                  <select id="tradeTimeframeSelect" aria-label="Chart timeframe">
-                    <option value="1M">1M</option>
-                    <option value="5M">5M</option>
-                    <option value="15M">15M</option>
-                    <option value="30M">30M</option>
-                    <option value="1H" selected>1H</option>
+                  <button type="button" data-timeframe="1M">1M</button>
+                  <button type="button" data-timeframe="5M">5M</button>
+                  <button class="is-active" type="button" data-timeframe="1H">1H</button>
+                  <select id="tradeTimeframeSelect" aria-label="More timeframes">
+                    <option value="" selected disabled>More…</option>
                     <option value="1D">1D</option>
                     <option value="5D">5D</option>
                     <option value="1MO">1Mo</option>

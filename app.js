@@ -2800,8 +2800,7 @@ async function loadChartForCurrentSymbol() {
   // unrelated history. Switching to 1M is what actually makes the point of
   // simulating a move (watching it happen) visible.
   if (tradeChartState.timeframe !== "1M") {
-    const select = document.querySelector("#tradeTimeframeSelect");
-    if (select) select.value = "1M";
+    setActiveTimeframeControl("1M");
     tradeChartState.timeframe = "1M";
     tradeChartState.customRange = null;
   }
@@ -2899,7 +2898,30 @@ function initPanelResizer(handleSelector, { varName, side, min, max, storageKey 
 initPanelResizer("#watchResizeHandle", { varName: "--watch-width", side: "left", min: 200, max: 420, storageKey: "fxccWatchPanelWidth" });
 initPanelResizer("#ticketResizeHandle", { varName: "--ticket-width", side: "right", min: 260, max: 460, storageKey: "fxccTicketPanelWidth" });
 
+// Keeps the three quick buttons (1M/5M/1H) and the "More…" dropdown (the
+// rest of the timeframes) showing one consistent active selection between
+// them - whichever of the two just changed wins, the other resets to its
+// neutral state (no button highlighted / dropdown back to its placeholder).
+function setActiveTimeframeControl(value) {
+  const select = document.querySelector("#tradeTimeframeSelect");
+  const isSelectOption = select && Array.from(select.options).some((option) => option.value === value);
+  document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.timeframe === value);
+  });
+  if (select) select.value = isSelectOption ? value : "";
+}
+
+document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button) => {
+  button.addEventListener("click", () => {
+    setActiveTimeframeControl(button.dataset.timeframe);
+    tradeChartState.timeframe = button.dataset.timeframe;
+    tradeChartState.customRange = null;
+    loadChartForCurrentSymbol();
+  });
+});
+
 document.querySelector("#tradeTimeframeSelect")?.addEventListener("change", (event) => {
+  setActiveTimeframeControl(event.target.value);
   tradeChartState.timeframe = event.target.value;
   tradeChartState.customRange = null;
   loadChartForCurrentSymbol();
@@ -2951,6 +2973,7 @@ document.querySelector("#tradeTimeframeSelect")?.addEventListener("change", (eve
       return showError("Start date must be before the end date.");
     }
     showError(null);
+    setActiveTimeframeControl("CUSTOM");
     tradeChartState.timeframe = "CUSTOM";
     tradeChartState.customRange = { start, end };
     loadChartForCurrentSymbol();
