@@ -2484,7 +2484,7 @@ function buildTradeCandles({ symbol, price, timeframe }) {
   const now = Date.now();
   let close = price - Math.sin(seed) * spread * 7;
 
-  return Array.from({ length: 74 }, (_, index) => {
+  const candles = Array.from({ length: 74 }, (_, index) => {
     const wave = Math.sin((index + seed) / 5.7) * spread * 2.4;
     const pressure = Math.cos((index + seed) / 9.1) * spread * 1.8;
     const open = close;
@@ -2495,6 +2495,28 @@ function buildTradeCandles({ symbol, price, timeframe }) {
     const time = new Date(now - (73 - index) * stepMs).toISOString();
     return { time, open, high, low: Math.max(0.00001, low), close, volume };
   });
+
+  // The sine-wave walk above drifts away from `price` over 74 candles with no
+  // guarantee of landing back on it - left alone, the series ends wherever the
+  // accumulated wave/pressure terms happen to put it, often tens or hundreds
+  // of points off. That's invisible for a normal mock chart, but the moment a
+  // simulation's first real tick snaps just the last candle to the true price
+  // (see applyLiveTick's baseline-sync), it shows up as a sudden unexplained
+  // jump between this history and the live move. Shifting every candle by the
+  // same offset preserves the generated shape while guaranteeing the series
+  // actually ends at `price`, so a simulation starting right after this call
+  // continues smoothly instead of jumping.
+  const drift = price - close;
+  if (drift) {
+    for (const candle of candles) {
+      candle.open += drift;
+      candle.high += drift;
+      candle.low = Math.max(0.00001, candle.low + drift);
+      candle.close += drift;
+    }
+  }
+
+  return candles;
 }
 
 function formatChartTime(timeStr, timeframe) {
