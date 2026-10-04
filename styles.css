@@ -2285,6 +2285,12 @@ select:focus {
 }
 
 #tradeTimeframeSelect {
+  /* Overrides the global input/select { width: 100% } rule, which was
+     stretching this to fill the whole .timeframes row and pushing the
+     calendar toggle onto its own line below instead of sitting inline. */
+  width: auto;
+  min-width: 5.5rem;
+  max-width: 8rem;
   border: 1px solid var(--trade-border);
   border-radius: var(--radius);
   background: transparent;
