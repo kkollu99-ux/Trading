@@ -2217,12 +2217,33 @@ function ensureTradingViewScript() {
   return tradingViewScriptPromise;
 }
 
+// Our own timeframe buttons drive this map down to TradingView's own interval
+// codes - there's no exact TradingView equivalent for a couple of our ranges
+// ("5D"/"5MO" are windows, not bar sizes), so those pick the closest bar size.
+const tradingViewIntervalMap = {
+  "1M": "1",
+  "5M": "5",
+  "15M": "15",
+  "30M": "30",
+  "1H": "60",
+  "1D": "D",
+  "5D": "60",
+  "1MO": "D",
+  "5MO": "D",
+  "1Y": "W",
+  ALL: "M",
+  CUSTOM: "D",
+};
+
 let tradingViewWidgetSymbol = null;
+let tradingViewWidgetInterval = null;
 async function showTradingViewWidget(apiSymbol) {
   document.querySelector(".candlestick-chart")?.classList.add("is-hidden");
   document.querySelector("#tvWidgetContainer")?.classList.remove("is-hidden");
-  if (tradingViewWidgetSymbol === apiSymbol) return;
+  const interval = tradingViewIntervalMap[tradeChartState.timeframe] || "60";
+  if (tradingViewWidgetSymbol === apiSymbol && tradingViewWidgetInterval === interval) return;
   tradingViewWidgetSymbol = apiSymbol;
+  tradingViewWidgetInterval = interval;
   const spinner = document.querySelector("#tvWidgetSpinner");
   spinner?.classList.remove("is-hidden");
   try {
@@ -2235,9 +2256,9 @@ async function showTradingViewWidget(apiSymbol) {
     }
     return;
   }
-  // Re-asserted after the await in case the user switched symbols again
-  // while the script was still loading - only the latest request should win.
-  if (tradingViewWidgetSymbol !== apiSymbol) return;
+  // Re-asserted after the await in case the user switched symbols/timeframe
+  // again while the script was still loading - only the latest request wins.
+  if (tradingViewWidgetSymbol !== apiSymbol || tradingViewWidgetInterval !== interval) return;
   const inner = document.querySelector("#tvWidgetInner");
   if (!inner) return;
   inner.innerHTML = "";
@@ -2247,7 +2268,7 @@ async function showTradingViewWidget(apiSymbol) {
     container_id: "tvWidgetInner",
     autosize: true,
     symbol: tvSymbol,
-    interval: "60",
+    interval,
     timezone: "Etc/UTC",
     theme: "dark",
     style: "1",
@@ -2255,21 +2276,25 @@ async function showTradingViewWidget(apiSymbol) {
     toolbar_bg: "#0e1626",
     enable_publishing: false,
     allow_symbol_change: false,
-    withdateranges: true,
     // The floating legend TradingView overlays on the chart itself (the
     // symbol name/OHLC readout box) - separate from the icon toolbar below.
     hide_legend: true,
-    // The icon toolbar (chart-style dropdown, Indicators, compare/add-symbol
-    // "+", camera/screenshot, alignment, etc.) and the left-hand drawing
-    // toolbar - this is meant to be a plain read-only price chart, not an
-    // editor, so neither toolbar is wanted here.
-    hide_top_toolbar: true,
+    // The left-hand drawing toolbar (trendline, shapes, text, etc.) - not
+    // needed for a read-only price chart.
     hide_side_toolbar: true,
+    // Hides TradingView's own top toolbar (intervals, chart-style dropdown,
+    // compare/add-symbol, Indicators, camera, etc). Our own timeframe row
+    // (wired to TradingView's interval via tradingViewIntervalMap, see
+    // loadChartForCurrentSymbol) replaces the interval-switching part of
+    // this; the rest of that bar's icons aren't something this free embed
+    // widget exposes a way to keep hidden from while still independently
+    // showing an interval control, so they go together.
+    hide_top_toolbar: true,
   });
   // Only hide the spinner if this is still the symbol the user is looking
   // at (they may have already switched again while this one was loading).
   const hideSpinnerForThisLoad = () => {
-    if (tradingViewWidgetSymbol === apiSymbol) spinner?.classList.add("is-hidden");
+    if (tradingViewWidgetSymbol === apiSymbol && tradingViewWidgetInterval === interval) spinner?.classList.add("is-hidden");
   };
   // onChartReady is documented for TradingView's licensed Charting Library,
   // but the object this public tv.js embed script's constructor returns
@@ -2749,11 +2774,13 @@ async function loadChartForCurrentSymbol() {
   if (!tradeChartState.isSimulated) {
     tradeChartState.isLiveChart = false;
     setStreamStatus(null);
-    // Our own Bid/Ask/Spread readout and timeframe/calendar controls only
-    // drive the simulated chart - against TradingView's real data they'd
-    // just sit there showing stale numbers and doing nothing when clicked,
-    // since TradingView has its own toolbar for exactly this.
-    document.querySelector(".trade-stats")?.classList.add("is-hidden");
+    // Our own Bid/Ask/Spread readout is only meaningful against the
+    // simulated chart - against TradingView's real data it would just sit
+    // there showing stale mock numbers. The timeframe buttons stay visible
+    // though: they're now wired to pick TradingView's own bar size too (see
+    // tradingViewIntervalMap), since TradingView's own toolbar for that is
+    // intentionally hidden.
+    document.querySelector("#tradePriceStatsRow")?.classList.add("is-hidden");
     showTradingViewWidget(tradeChartState.apiSymbol);
     // TradingView owns the chart pixels now, but the order ticket and the
     // trade header text still read from tradeChartState.candles - rebuild
@@ -2765,7 +2792,7 @@ async function loadChartForCurrentSymbol() {
     syncTradeTerminal();
     return;
   }
-  document.querySelector(".trade-stats")?.classList.remove("is-hidden");
+  document.querySelector("#tradePriceStatsRow")?.classList.remove("is-hidden");
   showSimulationChart();
 
   // A coarse timeframe (the default is 1H) absorbs a whole short test window
