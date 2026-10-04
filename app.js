@@ -2262,13 +2262,25 @@ async function showTradingViewWidget(apiSymbol) {
     // any functionality.
     hide_legend: true,
   });
-  // onChartReady is the widget's own "fully loaded" signal - only hide the
-  // spinner once the chart itself has something to show, and only if this
-  // is still the symbol the user is looking at (they may have already
-  // switched again while this one was still loading).
-  widget.onChartReady(() => {
+  // Only hide the spinner if this is still the symbol the user is looking
+  // at (they may have already switched again while this one was loading).
+  const hideSpinnerForThisLoad = () => {
     if (tradingViewWidgetSymbol === apiSymbol) spinner?.classList.add("is-hidden");
-  });
+  };
+  // onChartReady is documented for TradingView's licensed Charting Library,
+  // but the object this public tv.js embed script's constructor returns
+  // doesn't expose it - calling it unconditionally threw (confirmed live:
+  // "widget.onChartReady is not a function"), which skipped registering any
+  // hide-spinner callback at all and left the spinner stuck forever in
+  // front of the chart underneath it, which was otherwise rendering fine.
+  // Fall back to a short fixed delay instead - the constructor already
+  // creates the iframe synchronously, so by the time this fires the chart
+  // has had a real chance to paint.
+  if (typeof widget?.onChartReady === "function") {
+    widget.onChartReady(hideSpinnerForThisLoad);
+  } else {
+    setTimeout(hideSpinnerForThisLoad, 1200);
+  }
 }
 
 function showSimulationChart() {
