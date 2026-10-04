@@ -2280,12 +2280,16 @@ async function showTradingViewWidget(apiSymbol) {
     // The floating legend TradingView overlays on the chart itself (the
     // symbol name/OHLC readout box) - separate from the icon toolbar below.
     hide_legend: true,
-    // The icon toolbar (chart-style dropdown, Indicators, compare/add-symbol
-    // "+", camera/screenshot, alignment, etc.) and the left-hand drawing
-    // toolbar - this is meant to be a plain read-only price chart, not an
-    // editor, so neither toolbar is wanted here.
-    hide_top_toolbar: true,
+    // The left-hand drawing toolbar (trendline, shapes, text, etc.) - not
+    // needed for a read-only price chart.
     hide_side_toolbar: true,
+    // hide_top_toolbar: true was tried to also remove the small chart-style/
+    // compare/Indicators/camera icon row, but that row turns out to be part
+    // of the legend's hover controls, not the top toolbar - hiding the top
+    // toolbar only took out the date-range strip (the "Time Filter") that's
+    // anchored to it, without touching those icons at all. Left at the
+    // default (false) so the date-range strip stays usable; the icon row is
+    // not something this free embed widget exposes a toggle for.
   });
   // Only hide the spinner if this is still the symbol the user is looking
   // at (they may have already switched again while this one was loading).
