@@ -1475,6 +1475,34 @@ async function pollFxRatesOnce() {
   }
 }
 
+// A rolling, real 1-minute candle history built entirely from the live
+// stream ticks below - at no REST credit cost, unlike /api/markets/candles'
+// own Twelve Data time_series call. That call shares the same daily credit
+// cap as every other REST poll in this file, so it fails right along with
+// them once the cap is hit (see pollQuotesOnce), and the chart would
+// otherwise have nothing real to fall back on even though gold's price
+// stream itself keeps working fine throughout. Capped to a couple hours of
+// 1-minute bars per symbol - plenty for the "1M" simulation chart, which
+// only ever wants the most recent ~70.
+const streamCandleBucketMs = 60000;
+const streamCandleMaxBars = 180;
+const streamCandleHistory = new Map();
+
+function recordStreamCandleTick(symbol, price, atMs) {
+  const bucketStart = Math.floor(atMs / streamCandleBucketMs) * streamCandleBucketMs;
+  const history = streamCandleHistory.get(symbol) || [];
+  const last = history[history.length - 1];
+  if (last && last.bucketStart === bucketStart) {
+    last.high = Math.max(last.high, price);
+    last.low = Math.min(last.low, price);
+    last.close = price;
+  } else {
+    history.push({ bucketStart, time: new Date(bucketStart).toISOString(), open: price, high: price, low: price, close: price, volume: 0 });
+    if (history.length > streamCandleMaxBars) history.shift();
+  }
+  streamCandleHistory.set(symbol, history);
+}
+
 // True push-based streaming: Twelve Data's WebSocket relays ticks the instant they
 // happen, at no REST credit cost, so this is the preferred path whenever the plan
 // supports it. It's proxied here (rather than opened directly from the browser) so
@@ -1528,6 +1556,7 @@ function connectTwelveDataStream() {
       data: { ...(existing?.data || {}), symbol, close: price, price, timestamp: payload.timestamp },
       at: Date.now(),
     });
+    recordStreamCandleTick(symbol, price, payload.timestamp ? payload.timestamp * 1000 : Date.now());
     broadcast({
       type: "price-tick",
       symbol,
@@ -2213,6 +2242,21 @@ app.get("/api/markets/candles", async (request, response) => {
     return response.json({ symbol, range, candles: cached.candles });
   }
 
+  // Real candles built from the free price-stream buffer (see
+  // recordStreamCandleTick above) - only meaningful for the "1M" range,
+  // since the buffer is always 1-minute bars. Used below whenever the
+  // time_series call itself fails, which happens together with every other
+  // REST poll in this file once the day's Twelve Data credit cap is hit -
+  // the stream (a separate, uncapped connection) keeps working regardless,
+  // so this keeps "1M" charts (what the simulation feature uses) on real
+  // data instead of falling all the way back to a synthetic mock shape.
+  const streamFallback = () => {
+    if (range !== "1M") return null;
+    const history = streamCandleHistory.get(symbol);
+    if (!history || history.length < 3) return null;
+    return history.map(({ time, open, high, low, close, volume }) => ({ time, open, high, low, close, volume }));
+  };
+
   try {
     const url = new URL("https://api.twelvedata.com/time_series");
     url.searchParams.set("symbol", symbol);
@@ -2230,6 +2274,8 @@ app.get("/api/markets/candles", async (request, response) => {
 
     if (payload?.status === "error" || !Array.isArray(payload?.values)) {
       if (cached) return response.json({ symbol, range, candles: cached.candles, stale: true });
+      const fromStream = streamFallback();
+      if (fromStream) return response.json({ symbol, range, candles: fromStream, source: "stream" });
       return response.status(502).json({ error: payload?.message || "Market data provider error" });
     }
 
@@ -2248,6 +2294,8 @@ app.get("/api/markets/candles", async (request, response) => {
     return response.json({ symbol, range, candles });
   } catch (error) {
     if (cached) return response.json({ symbol, range, candles: cached.candles, stale: true });
+    const fromStream = streamFallback();
+    if (fromStream) return response.json({ symbol, range, candles: fromStream, source: "stream" });
     return response.status(502).json({ error: error.message || "Market data provider error" });
   }
 });
