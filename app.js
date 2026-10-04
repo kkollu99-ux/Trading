@@ -14,7 +14,13 @@ let currentSession = null;
 // formatCurrency()/formatTradeNumber() multiply by this rate and swap the
 // symbol when rendering. A converted value is never written back into state
 // or re-derived from displayed text (see readTradeRow's data-price-usd use).
-const currencySymbols = { USD: "$", INR: "₹" };
+const currencySymbols = {
+  USD: "$", INR: "₹", EUR: "€", GBP: "£", JPY: "¥", AUD: "A$", CAD: "C$",
+  CHF: "Fr", CNY: "¥", SGD: "S$", HKD: "HK$", NZD: "NZ$", AED: "د.إ",
+  SAR: "﷼", ZAR: "R", SEK: "kr", NOK: "kr", DKK: "kr", MXN: "MX$",
+  BRL: "R$", RUB: "₽", KRW: "₩", THB: "฿", IDR: "Rp", MYR: "RM",
+  PHP: "₱", TRY: "₺", PLN: "zł",
+};
 let displayCurrency = localStorage.getItem("fxccDisplayCurrency") || "USD";
 let displayCurrencyRate = 1;
 
@@ -2077,6 +2083,36 @@ const instrumentFallbacks = {
 
 let tradeInstruments = [];
 let managedInstruments = [];
+// Populated from renderTradeWatchlist() whenever a REAL (non-fallback) quote
+// comes back from the server - i.e. whenever quoteStore actually has that
+// symbol (see pollQuotesOnce in server.js, which now rotates the full
+// catalog). The Spot Order ticket and order-confirm modal prefer this real
+// price over the chart's seeded candle close, and the symbol's is_market_open
+// flag gates whether it can be traded at all right now.
+const lastRealQuoteBySymbol = new Map(); // apiSymbol -> { price, isMarketOpen }
+
+function getRealQuote(apiSymbol) {
+  return lastRealQuoteBySymbol.get(apiSymbol) || null;
+}
+
+// Only ever says a market is closed when we have affirmative evidence of
+// that (a real quote explicitly reporting is_market_open === false) -
+// anything else (no quote yet, mock mode, a field Twelve Data didn't send)
+// defaults to tradable rather than wrongly blocking the user.
+function isMarketClosedFor(apiSymbol) {
+  return getRealQuote(apiSymbol)?.isMarketOpen === false;
+}
+
+// The price margin/fee/notional math should use: a simulation's own live
+// price while one is running, otherwise the real fetched quote if we have
+// one yet, falling back to the chart's seeded candle close only when
+// neither applies (e.g. right after startup, before the first quote poll
+// cycle has reached this symbol).
+function getTradePrice() {
+  if (tradeChartState.isSimulated) return tradeChartState.candles.at(-1)?.close || 0;
+  const real = getRealQuote(tradeChartState.apiSymbol);
+  return real?.price ?? (tradeChartState.candles.at(-1)?.close || 0);
+}
 // Tracks which symbols admin/team have put into demo price simulation, and in
 // which direction, so the Products page can show a live badge and the Trade
 // page chart can tell a simulated symbol apart from a real/mock one.
@@ -2157,11 +2193,16 @@ function renderTradeWatchlist(instruments, quotes = {}) {
       const quote = getQuotePayload(quotes, instrument.symbol);
       const price = quotePrice(quote, fallback.price);
       const changePercent = quoteChange(quote, fallback.changePercent);
+      // Only a real quote (quoteStore actually has this symbol) can say
+      // whether the market is open - a missing/mock quote leaves the symbol
+      // tradable by default (see isMarketClosedFor) rather than guessing.
+      if (quote) lastRealQuoteBySymbol.set(instrument.symbol, { price, isMarketOpen: quote.is_market_open });
+      const isClosed = quote?.is_market_open === false;
       const trendClass = changePercent >= 0 ? "up" : "down";
       const symbol = compactSymbol(instrument.symbol);
       const selected = symbol === tradeChartState.symbol || (!tradeChartState.symbol && index === 0);
-      return `<button class="watch-row ${selected ? "is-selected" : ""}" type="button" data-watch-category="${categoryFilter(instrument.category)}" data-watch-symbol="${symbol} ${displayCategory(instrument.category)}" data-api-symbol="${instrument.symbol}" data-price-usd="${price}">
-        <span><strong>${symbol}</strong><small>${displayCategory(instrument.category)}</small></span>
+      return `<button class="watch-row ${selected ? "is-selected" : ""} ${isClosed ? "is-market-closed" : ""}" type="button" data-watch-category="${categoryFilter(instrument.category)}" data-watch-symbol="${symbol} ${displayCategory(instrument.category)}" data-api-symbol="${instrument.symbol}" data-price-usd="${price}">
+        <span><strong>${symbol}</strong><small>${displayCategory(instrument.category)}</small>${isClosed ? '<small class="watch-closed-tag">Closed</small>' : ""}</span>
         <em>${formatTradeNumber(price)}</em>
         <b class="${trendClass}">${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%</b>
       </button>`;
@@ -3493,7 +3534,7 @@ function renderTradeTicket() {
   const symbol = tradeChartState.symbol;
   const multiplier = getSelectedMultiplier();
   const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
-  const price = tradeChartState.candles.at(-1)?.close || 0;
+  const price = getTradePrice();
   const notional = lots * orderUnitsPerLot * price;
   const margin = multiplier > 0 ? notional / multiplier : 0;
   const fee = margin * orderFeeRate;
@@ -3507,6 +3548,14 @@ function renderTradeTicket() {
   document.querySelector("#ticketFeeValue").textContent = `${currencyPrefix}${(fee * displayCurrencyRate).toFixed(6)}`;
   document.querySelector("#ticketMarginValue").textContent = `${currencyPrefix}${(margin * displayCurrencyRate).toFixed(6)}`;
   document.querySelector("#ticketBalanceValue").textContent = `${currencyPrefix}${(Number(currentSession?.user?.balance || 0) * displayCurrencyRate).toFixed(2)}`;
+
+  // Blocks placing a NEW order on a symbol whose real quote just told us its
+  // market is shut (weekends for forex/stocks, exchange holidays, etc.) -
+  // doesn't affect viewing the chart or managing existing positions.
+  const closed = !tradeChartState.isSimulated && isMarketClosedFor(tradeChartState.apiSymbol);
+  document.querySelector("#buyOrderButton")?.toggleAttribute("disabled", closed);
+  document.querySelector("#sellOrderButton")?.toggleAttribute("disabled", closed);
+  updateClosedMarketWarning(closed, `${symbol}'s market is closed right now - trading reopens when it's back open.`);
 }
 
 document.querySelector("#ticketMultiplierSelect")?.addEventListener("change", renderTradeTicket);
@@ -3560,9 +3609,28 @@ document.querySelector("#ticketLotsValue")?.addEventListener("keydown", (event) 
 function setTicketOrderMessage(message, type = "") {
   const element = document.querySelector("#ticketOrderMessage");
   if (!element) return;
+  delete element.dataset.closedMarketWarning;
   element.textContent = message;
   element.classList.toggle("is-success", type === "success");
   element.classList.toggle("is-error", type === "error");
+}
+
+// renderTradeTicket() re-runs on practically every ticket interaction,
+// including right after a successful order (via the balance update it
+// triggers) - so it can't just unconditionally clear/set the order message
+// without risking wiping a "Bought X lots..." success message a moment
+// after it appears. This only ever touches the message if IT was the one
+// that last set it (tracked via the dataset marker, which any other
+// setTicketOrderMessage call resets).
+function updateClosedMarketWarning(closed, message) {
+  const element = document.querySelector("#ticketOrderMessage");
+  if (!element) return;
+  if (closed) {
+    setTicketOrderMessage(message, "error");
+    element.dataset.closedMarketWarning = "true";
+  } else if (element.dataset.closedMarketWarning === "true") {
+    setTicketOrderMessage("", "");
+  }
 }
 
 // Reads a risk field (Set Loss/Take Profit) only if its toggle is on - an
@@ -3639,11 +3707,15 @@ function setOrderConfirmMessage(message, type = "") {
 function openOrderConfirmModal(direction) {
   const modal = document.querySelector("#orderConfirmModal");
   if (!modal) return;
+  if (!tradeChartState.isSimulated && isMarketClosedFor(tradeChartState.apiSymbol)) {
+    updateClosedMarketWarning(true, `${tradeChartState.symbol}'s market is closed right now - trading reopens when it's back open.`);
+    return;
+  }
   pendingOrderDirection = direction;
   const symbol = tradeChartState.symbol;
   const multiplier = getSelectedMultiplier();
   const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
-  const price = tradeChartState.candles.at(-1)?.close || 0;
+  const price = getTradePrice();
   const notional = lots * orderUnitsPerLot * price;
   const margin = multiplier > 0 ? notional / multiplier : 0;
   const fee = margin * orderFeeRate;
