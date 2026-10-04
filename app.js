@@ -2800,8 +2800,8 @@ async function loadChartForCurrentSymbol() {
   // unrelated history. Switching to 1M is what actually makes the point of
   // simulating a move (watching it happen) visible.
   if (tradeChartState.timeframe !== "1M") {
-    const button = document.querySelector('.timeframes button[data-timeframe="1M"]');
-    if (button) document.querySelectorAll(".timeframes button[data-timeframe]").forEach((item) => item.classList.toggle("is-active", item === button));
+    const select = document.querySelector("#tradeTimeframeSelect");
+    if (select) select.value = "1M";
     tradeChartState.timeframe = "1M";
     tradeChartState.customRange = null;
   }
@@ -2899,13 +2899,10 @@ function initPanelResizer(handleSelector, { varName, side, min, max, storageKey 
 initPanelResizer("#watchResizeHandle", { varName: "--watch-width", side: "left", min: 200, max: 420, storageKey: "fxccWatchPanelWidth" });
 initPanelResizer("#ticketResizeHandle", { varName: "--ticket-width", side: "right", min: 260, max: 460, storageKey: "fxccTicketPanelWidth" });
 
-document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button) => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll(".timeframes button[data-timeframe]").forEach((item) => item.classList.toggle("is-active", item === button));
-    tradeChartState.timeframe = button.dataset.timeframe;
-    tradeChartState.customRange = null;
-    loadChartForCurrentSymbol();
-  });
+document.querySelector("#tradeTimeframeSelect")?.addEventListener("change", (event) => {
+  tradeChartState.timeframe = event.target.value;
+  tradeChartState.customRange = null;
+  loadChartForCurrentSymbol();
 });
 
 // Calendar date-range picker: lets the user view candles for an arbitrary
@@ -2954,7 +2951,6 @@ document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button)
       return showError("Start date must be before the end date.");
     }
     showError(null);
-    document.querySelectorAll(".timeframes button[data-timeframe]").forEach((item) => item.classList.remove("is-active"));
     tradeChartState.timeframe = "CUSTOM";
     tradeChartState.customRange = { start, end };
     loadChartForCurrentSymbol();
