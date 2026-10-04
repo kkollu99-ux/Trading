@@ -2333,6 +2333,32 @@ select:focus {
   background-size: 100% 3.65rem, 5.6rem 100%;
 }
 
+.tv-widget-container {
+  flex: 1;
+  position: relative;
+  height: auto;
+  min-height: 24rem;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid var(--trade-border);
+}
+
+.tv-widget-inner {
+  width: 100%;
+  height: 100%;
+}
+
+.tv-widget-error {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 .trade-candle-canvas {
   position: absolute;
   inset: 0;

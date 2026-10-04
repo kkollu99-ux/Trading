@@ -329,6 +329,9 @@ function moveSection(id) {
   if (id === "service" && canManageUsers()) {
     loadServiceInbox();
   }
+  if (id === "trade") {
+    loadChartForCurrentSymbol();
+  }
   drawCharts();
   renderTradeCandles();
   localStorage.setItem("fxccActiveSection", id);
@@ -1620,34 +1623,16 @@ function applySimulationStatus(payload) {
   else activeSimulationsBySymbol.delete(payload.symbol);
 
   if (payload.symbol === tradeChartState.apiSymbol) {
-    if (payload.active) {
-      tradeChartState.isSimulated = true;
-      tradeChartState.simulationBaselineSynced = false;
-      // A coarse timeframe (the default is 1H) absorbs a whole short test
-      // window into a single candle's wick - a real trend is invisible next
-      // to hours of unrelated history. Switching to 1M is what actually
-      // makes the point of simulating a move (watching it happen) visible,
-      // on every viewer's chart, not just admin's.
-      ensureFineTimeframeForSimulation();
-    } else if (tradeChartState.isSimulated) {
-      // Reload fresh rather than just flipping the flag, so the chart cleanly
-      // resumes real/mock generation instead of picking up mid-sequence.
-      loadChartForCurrentSymbol();
-    }
+    // Reload fresh rather than just flipping the flag - loadChartForCurrentSymbol
+    // re-derives isSimulated from activeSimulationsBySymbol (just updated above)
+    // and is the one place that decides TradingView-widget vs. the simulated
+    // candle chart, so routing both the start and stop transition through it
+    // keeps that decision in one spot instead of duplicating it here.
+    loadChartForCurrentSymbol();
     updateTradeSimulationBadge();
   }
 
   if (document.querySelector("#managedInstrumentList")) renderManagedInstruments();
-}
-
-function ensureFineTimeframeForSimulation() {
-  if (tradeChartState.timeframe === "1M") return;
-  const button = document.querySelector('.timeframes button[data-timeframe="1M"]');
-  if (!button) return;
-  document.querySelectorAll(".timeframes button[data-timeframe]").forEach((item) => item.classList.toggle("is-active", item === button));
-  tradeChartState.timeframe = "1M";
-  tradeChartState.customRange = null;
-  loadChartForCurrentSymbol();
 }
 
 // Small header badge on the Trade page itself, so it's obvious while testing
@@ -2165,6 +2150,116 @@ const timeframeMinutes = {
 
 const liveCandleSymbols = new Set(["XAU/USD"]);
 
+// TradingView's free "Advanced Real-Time Chart" embed widget shows only its
+// own real market data for whatever symbol it's given - there's no way to
+// feed it our own (simulated) price. So it's used for every product's normal
+// view, and the custom canvas-based chart (tradeChartState/renderTradeCandles,
+// unchanged) only takes over for the one symbol admin currently has a price
+// simulation running on - see loadChartForCurrentSymbol.
+const tradingViewSymbolMap = {
+  "XAU/USD": "OANDA:XAUUSD",
+  "XAG/USD": "OANDA:XAGUSD",
+  "BTC/USD": "BINANCE:BTCUSDT",
+  "EUR/USD": "FX:EURUSD",
+  "GBP/USD": "FX:GBPUSD",
+  USOIL: "TVC:USOIL",
+  "AUD/JPY": "FX:AUDJPY",
+  "AUD/CAD": "FX:AUDCAD",
+  "EUR/JPY": "FX:EURJPY",
+  "AUD/NZD": "FX:AUDNZD",
+  "AUD/CHF": "FX:AUDCHF",
+  "USD/JPY": "FX:USDJPY",
+  "AUD/USD": "FX:AUDUSD",
+  "GBP/JPY": "FX:GBPJPY",
+  "EUR/AUD": "FX:EURAUD",
+  "CAD/JPY": "FX:CADJPY",
+  "EUR/CAD": "FX:EURCAD",
+  "GBP/AUD": "FX:GBPAUD",
+  "CHF/JPY": "FX:CHFJPY",
+  "EUR/CHF": "FX:EURCHF",
+  "GBP/CAD": "FX:GBPCAD",
+  "NZD/USD": "FX:NZDUSD",
+  "NZD/CHF": "FX:NZDCHF",
+  "GBP/NZD": "FX:GBPNZD",
+  "USD/CHF": "FX:USDCHF",
+  "USD/CAD": "FX:USDCAD",
+  "EUR/GBP": "FX:EURGBP",
+  "NZD/JPY": "FX:NZDJPY",
+  "GBP/CHF": "FX:GBPCHF",
+  "CAD/CHF": "FX:CADCHF",
+  "EUR/NZD": "FX:EURNZD",
+  "XRP/USD": "BINANCE:XRPUSDT",
+  "ETH/USD": "BINANCE:ETHUSDT",
+  "SOL/USDC": "BINANCE:SOLUSDT",
+  "BNB/USD": "BINANCE:BNBUSDT",
+  AAPL: "NASDAQ:AAPL",
+  TSLA: "NASDAQ:TSLA",
+  GOOGL: "NASDAQ:GOOGL",
+  MSFT: "NASDAQ:MSFT",
+  UKOIL: "TVC:UKOIL",
+  NATGAS: "TVC:NATURALGAS",
+};
+
+let tradingViewScriptPromise = null;
+function ensureTradingViewScript() {
+  if (window.TradingView?.widget) return Promise.resolve();
+  if (tradingViewScriptPromise) return tradingViewScriptPromise;
+  tradingViewScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.onload = () => resolve();
+    script.onerror = () => {
+      tradingViewScriptPromise = null;
+      reject(new Error("Failed to load TradingView widget script"));
+    };
+    document.head.appendChild(script);
+  });
+  return tradingViewScriptPromise;
+}
+
+let tradingViewWidgetSymbol = null;
+async function showTradingViewWidget(apiSymbol) {
+  document.querySelector(".candlestick-chart")?.classList.add("is-hidden");
+  document.querySelector("#tvWidgetContainer")?.classList.remove("is-hidden");
+  if (tradingViewWidgetSymbol === apiSymbol) return;
+  tradingViewWidgetSymbol = apiSymbol;
+  try {
+    await ensureTradingViewScript();
+  } catch {
+    const inner = document.querySelector("#tvWidgetInner");
+    if (inner) inner.innerHTML = `<div class="tv-widget-error">Chart unavailable — could not reach TradingView.</div>`;
+    return;
+  }
+  // Re-asserted after the await in case the user switched symbols again
+  // while the script was still loading - only the latest request should win.
+  if (tradingViewWidgetSymbol !== apiSymbol) return;
+  const inner = document.querySelector("#tvWidgetInner");
+  if (!inner) return;
+  inner.innerHTML = "";
+  const tvSymbol = tradingViewSymbolMap[apiSymbol] || tradingViewSymbolMap["XAU/USD"];
+  // eslint-disable-next-line no-undef
+  new TradingView.widget({
+    container_id: "tvWidgetInner",
+    autosize: true,
+    symbol: tvSymbol,
+    interval: "60",
+    timezone: "Etc/UTC",
+    theme: "dark",
+    style: "1",
+    locale: "en",
+    toolbar_bg: "#0e1626",
+    enable_publishing: false,
+    allow_symbol_change: false,
+    withdateranges: true,
+  });
+}
+
+function showSimulationChart() {
+  tradingViewWidgetSymbol = null;
+  document.querySelector("#tvWidgetContainer")?.classList.add("is-hidden");
+  document.querySelector(".candlestick-chart")?.classList.remove("is-hidden");
+}
+
 const defaultTradeViewCount = 62;
 const minTradeViewCount = 12;
 const tradeChartMargins = { left: 12, top: 18, right: 64, bottom: 66 };
@@ -2602,20 +2697,38 @@ async function loadChartForCurrentSymbol() {
   tradeChartState.isSimulated = activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
   tradeChartState.simulationBaselineSynced = !tradeChartState.isSimulated;
   updateTradeSimulationBadge();
-  const isLive = liveCandleSymbols.has(tradeChartState.apiSymbol);
-  if (!isLive) setStreamStatus(null);
-  if (isLive) {
-    const loadingToken = ++candleRequestToken;
-    const ok = await loadRealCandles(tradeChartState.apiSymbol, tradeChartState.timeframe, tradeChartState.customRange, loadingToken);
-    if (ok) {
-      tradeChartState.isLiveChart = true;
-      resetTradeChartView();
-      renderTradeCandles();
-      if (marketOpenBySymbol.get(tradeChartState.apiSymbol) === false) setStreamStatus("closed");
-      return;
-    }
-    if (loadingToken !== candleRequestToken) return;
+
+  // A real market move (TradingView's own feed) and an admin's test
+  // simulation are mutually exclusive on one chart - TradingView only ever
+  // shows its own real data, with no way to feed it a simulated price - so
+  // whichever applies gets the whole chart area to itself instead of the two
+  // fighting over the same canvas.
+  if (!tradeChartState.isSimulated) {
+    tradeChartState.isLiveChart = false;
+    setStreamStatus(null);
+    // Our own Bid/Ask/Spread readout and timeframe/calendar controls only
+    // drive the simulated chart - against TradingView's real data they'd
+    // just sit there showing stale numbers and doing nothing when clicked,
+    // since TradingView has its own toolbar for exactly this.
+    document.querySelector(".trade-stats")?.classList.add("is-hidden");
+    showTradingViewWidget(tradeChartState.apiSymbol);
+    return;
   }
+  document.querySelector(".trade-stats")?.classList.remove("is-hidden");
+  showSimulationChart();
+
+  // A coarse timeframe (the default is 1H) absorbs a whole short test window
+  // into a single candle's wick - a real trend is invisible next to hours of
+  // unrelated history. Switching to 1M is what actually makes the point of
+  // simulating a move (watching it happen) visible.
+  if (tradeChartState.timeframe !== "1M") {
+    const button = document.querySelector('.timeframes button[data-timeframe="1M"]');
+    if (button) document.querySelectorAll(".timeframes button[data-timeframe]").forEach((item) => item.classList.toggle("is-active", item === button));
+    tradeChartState.timeframe = "1M";
+    tradeChartState.customRange = null;
+  }
+
+  setStreamStatus(null);
   tradeChartState.isLiveChart = false;
   tradeChartState.candles = buildTradeCandles(tradeChartState);
   resetTradeChartView();
