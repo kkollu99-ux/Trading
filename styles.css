@@ -6137,6 +6137,16 @@ input[type="checkbox"] {
     row-gap: 0.3rem;
   }
 
+  /* Same unwrapped-flex-row pattern as .client-ticker/.client-update above:
+     the O/H/L/C readout is one nowrap row with ~1rem gaps between each of
+     its 8 items (the "O"/"H"/"L"/"C" labels are bare text nodes, each an
+     anonymous flex item in their own right) - comfortably wider than a
+     phone screen, so the C value was clipped off-screen. */
+  .chart-symbol-head p {
+    flex-wrap: wrap;
+    row-gap: 0.3rem;
+  }
+
   .brand-panel {
     min-height: 44rem;
   }
