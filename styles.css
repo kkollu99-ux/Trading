@@ -2429,8 +2429,8 @@ select:focus {
   position: absolute;
   left: 0;
   bottom: 0;
-  width: 9.5rem;
-  height: 1.6rem;
+  width: 7.5rem;
+  height: 4.5rem;
   background: #0e1626;
   z-index: 3;
 }
