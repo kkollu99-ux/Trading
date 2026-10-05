@@ -6030,15 +6030,28 @@ input[type="checkbox"] {
     bottom: 0;
     left: 0;
     z-index: 40;
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
+    /* A grid sized for a fixed item count (5 columns) squeezed every item
+       unreadably thin once the admin-only and previously-unreachable items
+       (Home, Users, Products, Logs, Online Service - see mobile-app-nav's
+       HTML) were added, taking it to 6-9 items depending on role. Scrolling
+       keeps every item a consistent, tappable size regardless of how many
+       are visible, the same pattern .watch-tabs already uses for its own
+       variable-length row. */
+    overflow-x: auto;
     min-height: 4rem;
     border-top: 1px solid var(--line);
     background: var(--panel);
     padding: 0.35rem;
+    scrollbar-width: none;
+  }
+
+  .mobile-app-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .mobile-app-nav .nav-item {
+    flex: 0 0 4.1rem;
     min-height: 3.2rem;
     justify-content: center;
     gap: 0.25rem;
@@ -6055,7 +6068,9 @@ input[type="checkbox"] {
   }
 
   .mobile-app-nav .nav-label {
-    font-size: 0.66rem;
+    white-space: normal;
+    line-height: 1.15;
+    font-size: 0.62rem;
   }
 
   .metric-grid,
@@ -6100,6 +6115,26 @@ input[type="checkbox"] {
 @media (max-width: 680px) {
   .inner {
     width: min(100% - 2rem, 76rem);
+  }
+
+  /* .client-ticker and .client-update are each a single nowrap flex row
+     (see their base rules) - fine on desktop, but their combined width
+     easily exceeds a phone screen. .app-shell's overflow: hidden then
+     clips the excess silently instead of causing a visible page scrollbar,
+     so this went unnoticed rather than erroring - visually the "Updated"
+     timestamp and the Refresh button were pushed off-screen and
+     untappable. Letting every level wrap turns the one unbreakable row
+     into as many short lines as needed. */
+  .app-market-bar {
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
+  }
+
+  .client-ticker,
+  .client-update {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 0.3rem;
   }
 
   .brand-panel {
@@ -6194,6 +6229,52 @@ input[type="checkbox"] {
   .nav-stack,
   .room-list {
     grid-template-columns: 1fr;
+  }
+
+  /* .profile-modal has no mobile handling at all otherwise - its fixed
+     15rem side menu plus the content pane next to it (both just flex
+     children, see base rules above) add up to far more than a phone
+     screen's width, so the content pane was squeezed down to a sliver and
+     every field/heading inside it was clipped. Stacking the side menu
+     above the content, and turning its own button list into a horizontal
+     scrollable strip (same pattern as .watch-tabs/.mobile-app-nav), keeps
+     every menu item reachable without the whole panel needing a huge
+     fixed height. */
+  .profile-modal {
+    flex-direction: column;
+    width: calc(100% - 1.5rem);
+    height: min(92vh, 46rem);
+  }
+
+  .profile-modal-side {
+    width: 100%;
+    flex-shrink: 0;
+    max-height: 13rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 1.1rem 0.85rem 0.6rem;
+  }
+
+  .profile-modal-menu {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    flex: 0 0 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .profile-modal-menu button {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .profile-modal-logout {
+    margin-top: 0;
+    border-top: 0;
+  }
+
+  .profile-modal-content {
+    padding: 1.1rem 1.1rem 1.5rem;
   }
 
   .process-chat-window {
