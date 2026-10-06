@@ -2829,17 +2829,6 @@ function renderTradeCandles() {
       ctx.lineTo(markerX, chart.top + height);
       ctx.stroke();
       ctx.setLineDash([]);
-
-      ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-      const label = "Simulation started";
-      const labelWidth = ctx.measureText(label).width + 12;
-      const labelX = Math.min(Math.max(markerX - labelWidth / 2, chart.left), rect.width - chart.right - labelWidth);
-      ctx.fillStyle = "rgba(14, 22, 38, 0.92)";
-      ctx.fillRect(labelX, chart.top + 4, labelWidth, 16);
-      ctx.fillStyle = "#ffb000";
-      ctx.textBaseline = "middle";
-      ctx.fillText(label, labelX + 6, chart.top + 12);
-      ctx.textBaseline = "alphabetic";
     }
   }
 
@@ -3387,6 +3376,15 @@ function applyLiveTick(tick) {
     last.close = price;
     tradeChartState.simulationBaselineSynced = true;
     tradeChartState.simulationStartTime = last.time;
+    // Defaults to a tight window right as the simulation takes over, so by
+    // the time it's produced enough candles of its own the view is showing
+    // mostly/only those - not however much real history happened to be in
+    // view before, whose own range (quiet or dramatic, there's no way to
+    // know in advance) would otherwise share one scale with the simulated
+    // move and force one of the two to be unreadably small. The user can
+    // still zoom/pan back out manually to see more of the real history.
+    tradeChartState.viewCount = minTradeViewCount;
+    tradeChartState.viewOffset = 0;
   }
 
   const tickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
