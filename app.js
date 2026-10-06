@@ -2574,14 +2574,28 @@ function buildTradeCandles({ symbol, price, timeframe }) {
   return candles;
 }
 
-function formatChartTime(timeStr, timeframe) {
-  if (!timeStr) return "";
+// A real candle's .time (from the market data provider, via /api/markets/candles)
+// has no timezone marker - "2026-10-06 06:54:00", say - which a bare `new
+// Date(...)` parses as the *browser's local* time (per spec, a zone-less
+// date-time string is local, not UTC), not the UTC moment the provider
+// actually meant. Forcing a "Z" here is what makes that string mean the same
+// UTC instant everywhere it's parsed - every other place in this file that
+// needs a candle's real time as a UTC epoch (not just for display) should
+// parse it through this, not a bare `new Date(candle.time)`.
+function parseChartTimeMs(timeStr) {
+  if (!timeStr) return NaN;
   const hasTimeOfDay = timeStr.includes(":");
   const isoLike = hasTimeOfDay ? timeStr.replace(" ", "T") : `${timeStr}T00:00:00`;
   const withZone = /[zZ]|[+-]\d\d:\d\d$/.test(isoLike) ? isoLike : `${isoLike}Z`;
-  const date = new Date(withZone);
-  if (Number.isNaN(date.getTime())) return timeStr;
-  if (!hasTimeOfDay || timeframe === "1D") {
+  return new Date(withZone).getTime();
+}
+
+function formatChartTime(timeStr, timeframe) {
+  if (!timeStr) return "";
+  const ms = parseChartTimeMs(timeStr);
+  if (Number.isNaN(ms)) return timeStr;
+  const date = new Date(ms);
+  if (!timeStr.includes(":") || timeframe === "1D") {
     return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -3486,8 +3500,15 @@ function applyLiveTick(tick) {
     // tick (below), so the simulated portion's clock runs at the same rate
     // as real time - ticks still arrive on their normal cadence - just
     // shifted to start right where the real history leaves off.
+    // previousCandle.time can be a real candle's raw, zone-less timestamp
+    // (see parseChartTimeMs) - a bare `new Date(...)` on it would read as
+    // the browser's local time instead of the UTC instant it's displayed
+    // as, silently shifting every simulated candle after it by the
+    // browser's UTC offset (seen as the x-axis jumping from the real
+    // history's last displayed time straight to a wildly different one).
     const previousCandle = candles.length > 1 ? candles[candles.length - 2] : null;
-    const continuedStartMs = previousCandle ? new Date(previousCandle.time).getTime() + simulationCandleBucketMs : rawTickMs;
+    const previousCandleMs = previousCandle ? parseChartTimeMs(previousCandle.time) : NaN;
+    const continuedStartMs = Number.isFinite(previousCandleMs) ? previousCandleMs + simulationCandleBucketMs : rawTickMs;
     tradeChartState.simulationTimeOffsetMs = continuedStartMs - rawTickMs;
   }
   const tickMs = isSimulationTick ? rawTickMs + (tradeChartState.simulationTimeOffsetMs || 0) : rawTickMs;
