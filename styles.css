@@ -1892,16 +1892,34 @@ select:focus {
     left: calc(var(--watch-width) - 1.3rem);
   }
 
-  .trade-terminal.is-watch-collapsed .panel-toggle-left {
-    left: 0rem;
-  }
-
   .panel-toggle-right {
     right: calc(var(--ticket-width) - 1.3rem);
   }
 
+  /* Collapsing a panel takes its column to 0 width, so the toggle (still
+     positioned at the old panel edge) ends up sitting in open chart space
+     with nothing to visually anchor it to - it reads as a stray box
+     floating over the candles rather than a control for a hidden panel.
+     Stretching it to the terminal's full height and flattening its inner
+     corner turns it into an edge-docked tab instead. */
+  .trade-terminal.is-watch-collapsed .panel-toggle-left,
+  .trade-terminal.is-ticket-collapsed .panel-toggle-right {
+    top: 0;
+    height: 100%;
+    transform: none;
+    background: var(--trade-panel);
+  }
+
+  .trade-terminal.is-watch-collapsed .panel-toggle-left {
+    left: 0rem;
+    border-width: 0 1px 0 0;
+    border-radius: 0;
+  }
+
   .trade-terminal.is-ticket-collapsed .panel-toggle-right {
     right: 0rem;
+    border-width: 0 0 0 1px;
+    border-radius: 0;
   }
 
   .panel-resize-handle {
