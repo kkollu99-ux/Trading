@@ -2693,18 +2693,25 @@ function renderTradeCandles() {
   const chart = tradeChartMargins;
   const width = rect.width - chart.left - chart.right;
   const height = rect.height - chart.top - chart.bottom;
-  // Scaling to just a running simulation's own candles (tried earlier) turned
-  // out to backfire: a real pre-simulation candle genuinely can move by more
-  // than a deliberately modest simulated range (an overnight gap on a stock,
-  // for instance), and clamping that candle into a scale far narrower than
-  // its own real move rendered it as a jarring full-height spike - worse
-  // than the small-candle problem it was meant to fix. Sharing one scale
-  // across everything visible, as before, means nothing ever has to be
-  // squeezed or clamped to fit: a real move that's genuinely smaller than
-  // the simulated one reads as smaller, honestly, and a real move that
-  // isn't never gets distorted into looking like one.
-  const highs = candles.map((candle) => candle.high);
-  const lows = candles.map((candle) => candle.low);
+  let highs = candles.map((candle) => candle.high);
+  let lows = candles.map((candle) => candle.low);
+  // While a simulation is running, scale to just its OWN candles once it has
+  // produced enough of them (see simulationStartTime) - a simulated move
+  // deliberately sized for a short demo would otherwise read as nearly flat
+  // next to real history that moved far more before the simulation even
+  // started (or the other way around - a modest real history squeezed
+  // alongside a dramatic simulated move). Falls back to the full visible
+  // range until there are enough simulated candles to scale to sensibly,
+  // and for ordinary (non-simulated) history as always. A real candle that
+  // falls outside this narrower range still renders (see the per-candle
+  // pin-to-edge logic below) instead of being cropped out of the picture.
+  if (tradeChartState.isSimulated && tradeChartState.simulationStartTime) {
+    const markerIndex = candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
+    if (markerIndex >= 0 && candles.length - markerIndex >= 5) {
+      highs = highs.slice(markerIndex);
+      lows = lows.slice(markerIndex);
+    }
+  }
   // Auto-scale by default (fits the visible candles' high/low), but a manual
   // drag/scroll on the price axis (see setupPriceAxisInteractions) overrides
   // this with a fixed range until the user double-clicks it or the view resets.
@@ -2780,27 +2787,63 @@ function renderTradeCandles() {
     const wickColor = isUp ? "#1a5a54" : "#7f312f";
     const bodyTopRaw = yFor(Math.max(candle.open, candle.close));
     const bodyBottomRaw = yFor(Math.min(candle.open, candle.close));
-    // Floored the same way as the clamp below: a real candle whose actual
-    // high/low barely clears its open/close (common for quiet pre-simulation
-    // history sitting on the same scale as a much bigger simulated move)
-    // would otherwise draw a wick shorter than a pixel - at a glance
-    // indistinguishable from no wick at all. This keeps a sliver visible
-    // without changing which candles have one or how big a real wick reads.
+    // Floored the same way as below: a real candle whose actual high/low
+    // barely clears its open/close (common for quiet history sharing a
+    // scale with a much bigger move) would otherwise draw a wick shorter
+    // than a pixel - at a glance indistinguishable from no wick at all.
+    // This keeps a sliver visible without changing which candles have one
+    // or how big a real wick reads.
     const wickTopRaw = Math.min(yFor(candle.high), bodyTopRaw - 1);
     const wickBottomRaw = Math.max(yFor(candle.low), bodyBottomRaw + 1);
-    // Only bites when manualPriceRange (a user-dragged/zoomed price axis -
-    // see setupPriceAxisInteractions) is narrower than the full auto-fit
-    // range above: a candle outside it would otherwise land outside the
-    // plot area entirely, overlapping the volume bars or axis labels
-    // instead of just being off the currently chosen scale. A no-op the
-    // rest of the time, since autoMax/autoMin above already span every
-    // visible candle.
-    const clampY = (y) => Math.max(chart.top, Math.min(chart.top + height, y));
-    const bodyTop = clampY(bodyTopRaw);
-    const bodyBottom = clampY(bodyBottomRaw);
+
+    const plotTop = chart.top;
+    const plotBottom = chart.top + height;
+    const overlaps = wickTopRaw <= plotBottom && wickBottomRaw >= plotTop;
+    // A candle whose own range is wider than the ENTIRE shown window would
+    // still count as "overlapping" by the check above, but clamping each of
+    // its points independently stretches it across the whole chart - this
+    // is the actual bug behind an earlier "candle turned into a full-height
+    // spike" report. Only possible for a candle that wasn't part of
+    // building that window in the first place (pre-simulation history,
+    // once the scale above narrows to just the simulation's own candles -
+    // no simulated candle's own range can ever exceed the aggregate range
+    // built from all of them). Pin it instead whenever that's true.
+    const spansWholeWindow = wickTopRaw <= plotTop && wickBottomRaw >= plotBottom;
+    let bodyTop, bodyBottom, wickTop, wickBottom;
+    if (overlaps && !spansWholeWindow) {
+      // This candle's own range overlaps the currently shown price window
+      // without swallowing it whole. Clamping each point independently is
+      // safe here because at least part of the candle genuinely belongs on
+      // screen, and a pre-simulation candle sitting close to the handoff
+      // price (the common case right before a simulation starts) still
+      // renders at its true position instead of being needlessly pinned.
+      const clampY = (y) => Math.max(plotTop, Math.min(plotBottom, y));
+      bodyTop = clampY(bodyTopRaw);
+      bodyBottom = clampY(bodyBottomRaw);
+      wickTop = clampY(wickTopRaw);
+      wickBottom = clampY(wickBottomRaw);
+    } else {
+      // Entirely outside the shown window, or wide enough to swallow it
+      // whole (see above) - pin the WHOLE candle to whichever edge it's
+      // nearest, as one small fixed-size marker, rather than clamping each
+      // point independently, which is what can stretch a candle across the
+      // entire chart. Pinning the entire candle to one edge means that can
+      // never happen - it just reads as "there's real data here, currently
+      // off this view's scale."
+      const nearTop = (bodyTopRaw + bodyBottomRaw) / 2 < (plotTop + plotBottom) / 2;
+      if (nearTop) {
+        wickTop = plotTop;
+        bodyTop = plotTop + 1;
+        bodyBottom = bodyTop + 2;
+        wickBottom = bodyBottom + 1;
+      } else {
+        wickBottom = plotBottom;
+        bodyBottom = plotBottom - 1;
+        bodyTop = bodyBottom - 2;
+        wickTop = bodyTop - 1;
+      }
+    }
     const bodyHeight = Math.max(2, bodyBottom - bodyTop);
-    const wickTop = clampY(wickTopRaw);
-    const wickBottom = clampY(wickBottomRaw);
 
     ctx.strokeStyle = wickColor;
     ctx.beginPath();
