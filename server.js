@@ -1773,17 +1773,30 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
   // of compounding stepPercent of the current (ever-growing) price every
   // tick, which blows up exponentially on any longer-running simulation -
   // that's what was turning a "nudge the price up" demo into a 20%+ move
-  // and wildly inflated floating/realized P&L. A target price paces off
-  // stepPercent-sized ticks to cover the distance; otherwise a duration
-  // paces the same stepPercent-per-tick drift across however many ticks
-  // that duration holds.
+  // and wildly inflated floating/realized P&L. A duration (when given)
+  // always wins the pacing: "1 hour, target +1%" must take the full hour to
+  // get there, not race to the target in the first handful of ticks just
+  // because stepPercent-paced ticks would cover 1% quickly. Only a target
+  // with NO duration falls back to pacing itself off stepPercent, since
+  // then there's no time budget to spread across - it just goes until it
+  // arrives.
   let totalTicksEstimate = null;
-  if (resolvedTargetPrice != null) {
+  if (clampedDurationMs) {
+    totalTicksEstimate = Math.max(10, Math.round(clampedDurationMs / priceSimulationTickMs));
+  } else if (resolvedTargetPrice != null) {
     const totalPercent = Math.abs(((resolvedTargetPrice - basePrice) / basePrice) * 100);
     totalTicksEstimate = Math.max(10, Math.round(totalPercent / resolvedStepPercent));
-  } else if (clampedDurationMs) {
-    totalTicksEstimate = Math.max(10, Math.round(clampedDurationMs / priceSimulationTickMs));
   }
+
+  // The steady per-tick move this run was planned around, at the moment it
+  // started - used below to keep noise/candle texture consistent for the
+  // whole run (see the tick loop), since the actual glide-path drift shrinks
+  // as price nears the target and would otherwise make candles flatten out
+  // right when the run is supposed to be arriving.
+  const baseDriftMagnitude =
+    resolvedTargetPrice != null && totalTicksEstimate
+      ? Math.abs(((resolvedTargetPrice - basePrice) / basePrice) * 100) / totalTicksEstimate
+      : resolvedStepPercent;
 
   const simulation = {
     direction,
@@ -1792,6 +1805,14 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     basePrice,
     targetPrice: resolvedTargetPrice,
     totalTicksEstimate,
+    baseDriftMagnitude,
+    ticksElapsed: 0,
+    // Whether this run is time-bounded: when it is, reaching targetPrice
+    // early (a lucky run of noise) does NOT end the run - it keeps gliding/
+    // hovering near the target for whatever time is left, and the duration
+    // timer below is what actually ends it. Without a duration, the target
+    // is the only stop condition there is.
+    hasDuration: Boolean(clampedDurationMs),
     // A snapshot of this symbol's real recent %-change-per-bar shape (see
     // buildVolatilityTemplate) - replayed as noise on top of the steady
     // drift below so the simulated candles vary in size and occasionally
@@ -1871,28 +1892,36 @@ function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO,
 setInterval(() => {
   for (const [symbol, simulation] of priceSimulations) {
     const dirSign = simulation.direction === "up" ? 1 : -1;
+    simulation.ticksElapsed += 1;
 
-    // Steady drift toward the goal, expressed as a % of the ORIGINAL base
-    // price (arithmetic) rather than the current, ever-moving price
-    // (compounding) - keeps a long-running simulation's total move bounded
-    // and predictable instead of exploding exponentially the way repeatedly
-    // compounding stepPercent of the current price did.
+    // Glide path: aim at whatever's left of the distance to target over
+    // whatever's left of the planned run, recomputed from the CURRENT price
+    // every tick (not just the plan made at the start). A run that gets
+    // ahead of pace (noise happened to push it close to target early) eases
+    // off instead of blowing past it; one that falls behind catches up -
+    // either way it keeps taking the full duration to get there instead of
+    // racing to the target in a handful of ticks. Without a target, this is
+    // just the plain steady drift as before.
+    const ticksLeft = simulation.totalTicksEstimate
+      ? Math.max(1, simulation.totalTicksEstimate - simulation.ticksElapsed)
+      : null;
     const driftPercent =
-      simulation.targetPrice != null && simulation.totalTicksEstimate
-        ? (((simulation.targetPrice - simulation.basePrice) / simulation.basePrice) * 100) / simulation.totalTicksEstimate
+      simulation.targetPrice != null && ticksLeft
+        ? (((simulation.targetPrice - simulation.price) / simulation.basePrice) * 100) / ticksLeft
         : simulation.stepPercent * dirSign;
 
     // Natural-looking noise, shaped by this symbol's own recent real
     // volatility (or a flat random fallback when none is stored yet) and
-    // scaled to be comparable to - and sometimes bigger than - the steady
-    // drift above, so ticks occasionally go against the overall trend. This
-    // is what turns the move from a flat staircase into something that
-    // actually looks like a market chart: varying candle sizes, real
-    // pullbacks, not just a smaller/bigger step every time in the same
-    // direction. Clamped so one outlier historical bar can't dominate a
-    // single tick.
+    // scaled off the run's ORIGINAL planned pace (baseDriftMagnitude, fixed
+    // at start) rather than the glide-path drift above, which shrinks as
+    // price nears the target - using it directly would flatten the candles
+    // out right when the run is supposed to be arriving. This is what turns
+    // the move from a flat staircase into something that actually looks
+    // like a market chart: varying candle sizes, real pullbacks, not just a
+    // smaller/bigger step every time in the same direction. Clamped so one
+    // outlier historical bar can't dominate a single tick.
     const template = simulation.volatilityTemplate;
-    const noiseIntensity = Math.max(simulation.stepPercent * 1.4, 0.05);
+    const noiseIntensity = Math.max(simulation.baseDriftMagnitude * 1.8, 0.0005);
     const rawNoisePercent = template && template.length
       ? template[Math.floor(Math.random() * template.length)] * noiseIntensity
       : (Math.random() * 2 - 1) * noiseIntensity;
@@ -1902,11 +1931,15 @@ setInterval(() => {
     const delta = simulation.basePrice * ((driftPercent + noisePercent) / 100);
     simulation.price = Math.max(0.00001, Number((simulation.price + delta).toFixed(6)));
 
-    // A target clamps the final tick to land exactly on it (rather than
-    // overshoot by a fraction of a step) and ends the simulation there,
-    // same clean handoff back to the real/mock feed that a duration expiry
-    // or a manual Stop already gives.
+    // Without a duration, the target is the only stop condition there is -
+    // snap to it exactly and end there, same as before. With a duration,
+    // the target is just where the glide path above aims; crossing it early
+    // doesn't end the run - it keeps gliding/hovering near the target for
+    // whatever time's left, and the expiry timer set in startPriceSimulation
+    // is what actually ends it, so "1 hour, target +1%" really runs the
+    // full hour instead of finishing in the first few ticks.
     const targetReached =
+      !simulation.hasDuration &&
       simulation.targetPrice != null &&
       (simulation.direction === "up" ? simulation.price >= simulation.targetPrice : simulation.price <= simulation.targetPrice);
     if (targetReached) simulation.price = simulation.targetPrice;
