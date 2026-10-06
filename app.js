@@ -2730,7 +2730,18 @@ function renderTradeCandles() {
   // pin-to-edge logic below) instead of being cropped out of the picture.
   if (tradeChartState.isSimulated && tradeChartState.simulationStartTime) {
     const markerIndex = candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
-    if (markerIndex >= 0 && candles.length - markerIndex >= 5) {
+    const simulatedCount = markerIndex >= 0 ? candles.length - markerIndex : 0;
+    // Only narrows the axis when the simulated candles are most of what's
+    // currently in view (the default tight view right as a simulation
+    // starts, or still zoomed in close to it) - once the user zooms out far
+    // enough to deliberately bring a lot of real history back into view too,
+    // narrowing to just the simulated slice would crush that real history
+    // into an unreadable flat line instead of showing the context actually
+    // being asked for. At that point the simulated move reading smaller
+    // next to more history is correct, not a bug - a short, fast move
+    // genuinely does look small next to a long quiet history once zoomed
+    // out far enough to see both at once.
+    if (markerIndex >= 0 && simulatedCount >= 5 && markerIndex <= candles.length * 0.4) {
       highs = highs.slice(markerIndex);
       lows = lows.slice(markerIndex);
     }
