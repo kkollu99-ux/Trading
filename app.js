@@ -2718,6 +2718,24 @@ function renderTradeCandles() {
   const height = rect.height - chart.top - chart.bottom;
   let highs = candles.map((candle) => candle.high);
   let lows = candles.map((candle) => candle.low);
+  // A candle's low is floored to 0.00001 wherever it's computed (see
+  // buildTradeCandles, anchorCandlesEndToPrice, applyLiveTick) as a "never
+  // let a price go to zero or negative" safety net - a sentinel for "this
+  // candle's true low was invalid," not a real quoted price. A single such
+  // candle anywhere in the currently visible range drags autoMin all the
+  // way down near zero, stretching the whole axis so far that every other
+  // candle - including a perfectly healthy simulated move - reads as a
+  // flat line pinned near the top (this is why zooming into just the
+  // simulated candles looked fine while zooming out to include real
+  // history made the exact same candles look broken: the one bad low only
+  // enters the range once real history's candles are back in view). Scale
+  // to the genuine data only; the per-candle clamp logic below still
+  // renders an outlier candle safely either way.
+  const isValidPrice = (value) => Number.isFinite(value) && value > 0.00002;
+  const scaleHighs = highs.filter(isValidPrice);
+  const scaleLows = lows.filter(isValidPrice);
+  if (scaleLows.length) lows = scaleLows;
+  if (scaleHighs.length) highs = scaleHighs;
   // While a simulation is running, scale to just its OWN candles once it has
   // produced enough of them (see simulationStartTime) - a simulated move
   // deliberately sized for a short demo would otherwise read as nearly flat
