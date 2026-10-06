@@ -1412,6 +1412,42 @@ function scaleSeries(series, factor) {
   series.anchor *= factor;
 }
 
+const seriesMatchFullBars = 360; // the last 30 minutes take the full adjustment
+const seriesMatchRampBars = 360; // the 30 minutes before that blend into it
+const seriesMatchMaxFactor = 100;
+
+// Scales the size of each recent bar's move (never its direction or shape) so
+// the typical move matches targetPercent. Prices are rebuilt backward from the
+// last close, so that close - where a simulation is about to start - stays
+// exactly put and every bar still opens at the previous close; older bars
+// blend in over a ramp and the oldest simply shift with them, so there's no
+// seam anywhere. Only ever makes a series livelier, and leaves bars from an
+// earlier simulation as they were.
+function matchHistoryVolatility(series, targetPercent) {
+  const bars = series.bars;
+  const recent = bars.slice(-seriesMatchFullBars).filter((bar) => !bar.simulated);
+  if (recent.length < 10 || !(targetPercent > 0)) return;
+  const meanAbsPercent = (recent.reduce((sum, bar) => sum + Math.abs(bar.close / bar.open - 1), 0) / recent.length) * 100;
+  if (!(meanAbsPercent > 0) || meanAbsPercent >= targetPercent * 0.5) return;
+  const factor = Math.min(seriesMatchMaxFactor, targetPercent / meanAbsPercent);
+  let close = bars.at(-1).close;
+  for (let index = bars.length - 1; index >= 0; index -= 1) {
+    const bar = bars[index];
+    const fromEnd = bars.length - 1 - index;
+    const weight = bar.simulated ? 0 : fromEnd < seriesMatchFullBars ? 1 : Math.max(0, 1 - (fromEnd - seriesMatchFullBars) / seriesMatchRampBars);
+    const scale = 1 + (factor - 1) * weight;
+    const bodyMove = Math.max(-0.5, (bar.close / bar.open - 1) * scale);
+    const wickUp = (bar.high / Math.max(bar.open, bar.close) - 1) * scale;
+    const wickDown = Math.max(-0.5, (bar.low / Math.min(bar.open, bar.close) - 1) * scale);
+    const open = close / (1 + bodyMove);
+    bar.open = open;
+    bar.close = close;
+    bar.high = Math.max(open, close) * (1 + wickUp);
+    bar.low = Math.max(0.00001, Math.min(open, close) * (1 + wickDown));
+    close = open;
+  }
+}
+
 function trimSeries(series) {
   if (series.bars.length > seriesMaxBars) series.bars.splice(0, series.bars.length - seriesMaxBars);
 }
@@ -1740,6 +1776,18 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     const totalPercent = Math.abs(((resolvedTargetPrice - basePrice) / basePrice) * 100);
     totalTicksEstimate = Math.max(10, Math.round(totalPercent / resolvedStepPercent));
   }
+
+  // A simulation moving much faster than this product's (synthetic) history
+  // would draw candles many times taller than every candle before it,
+  // flattening that history into a line along the bottom of the chart. Bring
+  // the recent history up to a comparable candle size first - done before the
+  // volatility template below is built, so the simulation's own noise is
+  // shaped from that same history and candles match across the handoff.
+  const perTickPercent =
+    resolvedTargetPrice != null && totalTicksEstimate
+      ? Math.abs(((resolvedTargetPrice - basePrice) / basePrice) * 100) / totalTicksEstimate
+      : resolvedStepPercent;
+  matchHistoryVolatility(series, perTickPercent * (seriesBucketMs / priceSimulationTickMs) * 0.6);
 
   const simulation = {
     direction,
