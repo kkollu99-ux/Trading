@@ -2159,7 +2159,9 @@ function isMarketClosedFor(apiSymbol) {
 // neither applies (e.g. right after startup, before the first quote poll
 // cycle has reached this symbol).
 function getTradePrice() {
-  if (tradeChartState.isSimulated) return tradeChartState.candles.at(-1)?.close || 0;
+  if (tradeChartState.isSimulated) {
+    return tradeChartState.candles.at(-1)?.close || getRealQuote(tradeChartState.apiSymbol)?.price || 0;
+  }
   const real = getRealQuote(tradeChartState.apiSymbol);
   return real?.price ?? (tradeChartState.candles.at(-1)?.close || 0);
 }
@@ -2276,6 +2278,30 @@ async function loadTradeInstruments() {
   } catch {
     renderTradeWatchlist([]);
   }
+}
+
+// Keeps the Market Watch prices current in place. Re-running
+// renderTradeWatchlist instead would re-select the current row and reload
+// the chart every time.
+async function refreshTradeWatchPrices() {
+  if (!tradeInstruments.length) return;
+  if (!document.querySelector("#trade")?.classList.contains("is-active")) return;
+  const quotes = await fetchTradeQuotes(tradeInstruments);
+  document.querySelectorAll("#tradeWatchTable .watch-row[data-api-symbol]").forEach((row) => {
+    const quote = getQuotePayload(quotes, row.dataset.apiSymbol);
+    if (!quote) return;
+    const price = quotePrice(quote, Number(row.dataset.priceUsd));
+    const changePercent = quoteChange(quote, 0);
+    row.dataset.priceUsd = String(price);
+    lastRealQuoteBySymbol.set(row.dataset.apiSymbol, { price, isMarketOpen: quote.is_market_open });
+    const priceElement = row.querySelector("em");
+    if (priceElement) priceElement.textContent = formatTradeNumber(price);
+    const changeElement = row.querySelector("b");
+    if (changeElement) {
+      changeElement.textContent = `${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%`;
+      changeElement.className = changePercent >= 0 ? "up" : "down";
+    }
+  });
 }
 
 const timeframeMinutes = {
@@ -2477,29 +2503,13 @@ const tradeChartState = {
   tick: 0,
   isLiveChart: false,
   isSimulated: false,
-  // True once the candle history has been re-anchored to the current
-  // simulation's own price stream (see applyLiveTick) - reset to false
-  // whenever a simulation is detected starting, from whichever of the three
-  // places notices that first (the WS "simulation-status" broadcast, a page/
-  // symbol load that finds one already running, or the tick itself).
-  simulationBaselineSynced: true,
-  // The .time of the candle where a running simulation's own price stream
-  // took over from real/synthetic history (set right where
-  // simulationBaselineSynced flips to true in applyLiveTick) - renderTradeCandles
-  // draws a labeled divider there so zooming out far enough to see real
-  // pre-simulation history next to a much bigger simulated move doesn't read
-  // as "the early part isn't real data", just as a much quieter period next
-  // to a deliberately dramatic one.
+  // The .time of the first candle of the latest simulated run in the loaded
+  // series - renderTradeCandles draws a divider there.
   simulationStartTime: null,
-  // Fixed once, at the same moment simulationBaselineSynced flips to true -
-  // the gap between the real/synthetic history's own last candle time and
-  // whenever (in real wall-clock time) the simulation's first tick actually
-  // arrived. Every simulated tick's timestamp is shifted by this offset
-  // (see applyLiveTick) so the simulated portion's clock continues forward
-  // from the real history already on the chart, in step with real elapsed
-  // time, rather than jumping to whatever real time of day testing happened
-  // to start.
-  simulationTimeOffsetMs: 0,
+  // Which symbol tradeChartState.candles currently holds the server price
+  // series for (see loadSimulationSeries), so a reload of the same symbol
+  // keeps the user's zoom/pan instead of resetting it.
+  seriesSymbol: null,
   viewCount: defaultTradeViewCount,
   viewOffset: 0,
   liveBid: null,
@@ -2611,6 +2621,9 @@ function formatChartTime(timeStr, timeframe) {
   if (!timeStr.includes(":") || timeframe === "1D") {
     return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
+  if (tradeChartState.isSimulated) {
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  }
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
@@ -2670,7 +2683,7 @@ function syncTradeTerminal(ohlcCandle) {
   setTradeText("#tradeAskValue", formatTradeNumber(ask));
   setTradeText("#tradeSpreadValue", formatTradeNumber(ask - bid));
   setTradeText("#tradePriceMarker", formatTradeNumber(latest.close));
-  setTradeText("#tradeTimeframeLabel", tradeChartState.timeframe);
+  setTradeText("#tradeTimeframeLabel", tradeChartState.isSimulated ? "5s" : tradeChartState.timeframe);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", movePercent >= 0);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", movePercent < 0);
 }
@@ -2749,34 +2762,6 @@ function renderTradeCandles() {
   const scaleLows = lows.filter(isValidPrice);
   if (scaleLows.length) lows = scaleLows;
   if (scaleHighs.length) highs = scaleHighs;
-  // While a simulation is running, scale to just its OWN candles once it has
-  // produced enough of them (see simulationStartTime) - a simulated move
-  // deliberately sized for a short demo would otherwise read as nearly flat
-  // next to real history that moved far more before the simulation even
-  // started (or the other way around - a modest real history squeezed
-  // alongside a dramatic simulated move). Falls back to the full visible
-  // range until there are enough simulated candles to scale to sensibly,
-  // and for ordinary (non-simulated) history as always. A real candle that
-  // falls outside this narrower range still renders (see the per-candle
-  // pin-to-edge logic below) instead of being cropped out of the picture.
-  if (tradeChartState.isSimulated && tradeChartState.simulationStartTime) {
-    const markerIndex = candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
-    const simulatedCount = markerIndex >= 0 ? candles.length - markerIndex : 0;
-    // Only narrows the axis when the simulated candles are most of what's
-    // currently in view (the default tight view right as a simulation
-    // starts, or still zoomed in close to it) - once the user zooms out far
-    // enough to deliberately bring a lot of real history back into view too,
-    // narrowing to just the simulated slice would crush that real history
-    // into an unreadable flat line instead of showing the context actually
-    // being asked for. At that point the simulated move reading smaller
-    // next to more history is correct, not a bug - a short, fast move
-    // genuinely does look small next to a long quiet history once zoomed
-    // out far enough to see both at once.
-    if (markerIndex >= 0 && simulatedCount >= 5 && markerIndex <= candles.length * 0.4) {
-      highs = highs.slice(markerIndex);
-      lows = lows.slice(markerIndex);
-    }
-  }
   // Auto-scale by default (fits the visible candles' high/low), but a manual
   // drag/scroll on the price axis (see setupPriceAxisInteractions) overrides
   // this with a fixed range until the user double-clicks it or the view resets.
@@ -3059,66 +3044,7 @@ async function loadRealCandles(symbol, range, customRange, externalToken) {
       close: Number(candle.close),
       volume: Number(candle.volume || 0),
     }));
-    // This fetch is kicked off without waiting for it (see
-    // loadChartForCurrentSymbol), so a simulation's first tick can land and
-    // start appending real simulated candles onto the synthetic placeholder
-    // history (see applyLiveTick's baseline-sync block) before it resolves.
-    // Overwriting tradeChartState.candles wholesale in that case would throw
-    // away every simulated candle rendered since AND orphan
-    // simulationStartTime - it would no longer match any candle's time,
-    // silently disabling the divider line and the scale-to-simulation
-    // logic in renderTradeCandles for the rest of the simulation's life.
-    // That orphaning, not the rendering logic itself, is why the simulated
-    // portion of the chart kept rendering flat/tiny next to real history
-    // no matter how that rendering logic was changed. Splice the real
-    // history in underneath the already-simulated tail instead of
-    // replacing it.
-    if (tradeChartState.isSimulated && tradeChartState.simulationBaselineSynced) {
-      const markerIndex = tradeChartState.candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
-      const simulatedTail = markerIndex >= 0 ? tradeChartState.candles.slice(markerIndex) : tradeChartState.candles.slice(-1);
-      // Deliberately NOT anchored to the simulated tail's price (tried
-      // previously) - a demo simulation is often started at a price quite
-      // far from wherever the real market actually is, and shifting this
-      // entire real-history block by that whole difference just to make its
-      // end line up turned the one real candle nearest the divider into a
-      // single giant bar spanning almost the full visible range (reported
-      // as the chart looking "unordered" right at the start of the
-      // simulation). The real history's own true prices, left alone, pin
-      // cleanly to whichever edge they fall outside of once the chart
-      // scales to the simulation's own range (see renderTradeCandles) - the
-      // divider line already marks the jump, so nothing needs to visually
-      // connect across it.
-      // The simulated tail's own candle times were set relative to whatever
-      // synthetic placeholder history was on screen when its first tick
-      // arrived (see applyLiveTick) - if this fetch hadn't resolved yet by
-      // then, that placeholder's times had no relation to this real
-      // history's actual timestamps, which is what just got spliced in
-      // below it. Left alone, the divider's two sides agree on price but
-      // not on time - the exact "x-axis jumps hours at the divider" bug,
-      // just from this fetch losing the race instead of #107's array-wipe
-      // race. Re-anchor every already-rendered simulated candle to
-      // continue from THIS real history's own last candle instead (the
-      // same reference a non-racing baseline sync would have used from the
-      // start), and carry the same shift forward via
-      // simulationTimeOffsetMs so every candle still to come keeps
-      // agreeing with it.
-      const realHistoryLastMs = parseChartTimeMs(candles.at(-1)?.time);
-      const tailFirstMs = parseChartTimeMs(simulatedTail[0]?.time);
-      if (Number.isFinite(realHistoryLastMs) && Number.isFinite(tailFirstMs)) {
-        const continuedStartMs = realHistoryLastMs + simulationCandleBucketMs;
-        const retroactiveDeltaMs = continuedStartMs - tailFirstMs;
-        if (retroactiveDeltaMs) {
-          simulatedTail.forEach((candle) => {
-            candle.time = new Date(parseChartTimeMs(candle.time) + retroactiveDeltaMs).toISOString();
-          });
-          tradeChartState.simulationStartTime = simulatedTail[0].time;
-          tradeChartState.simulationTimeOffsetMs = (tradeChartState.simulationTimeOffsetMs || 0) + retroactiveDeltaMs;
-        }
-      }
-      tradeChartState.candles = [...candles, ...simulatedTail];
-    } else {
-      tradeChartState.candles = candles;
-    }
+    tradeChartState.candles = candles;
     return true;
   } catch {
     return false;
@@ -3159,66 +3085,82 @@ function applyMarketStatus(payload) {
   }
 }
 
-async function loadChartForCurrentSymbol() {
-  // This function has five call sites - symbol selection, a timeframe
-  // click, navigating back to the Trade tab, and two reactive "a
-  // simulation is running" discovery paths - and every one of them used to
-  // unconditionally fall through to a full rebuild below: fresh synthetic
-  // placeholder history, simulationStartTime and the whole candle array
-  // wiped, waiting on a brand new baseline-sync tick. While a simulation
-  // was already running and fully synced for the symbol already on
-  // screen, that meant an admin doing something as ordinary as clicking a
-  // timeframe button or switching tabs and back mid-test would silently
-  // discard every simulated candle rendered so far and restart the entire
-  // handoff from zero - repeatedly, on every such interaction. That
-  // restart cycle, not any one rendering bug, is what kept reading as the
-  // chart "becoming unordered" after a simulation starts. Nothing here
-  // actually needs a rebuild unless the symbol or its simulated/live
-  // status has genuinely changed.
-  // simulationBaselineSynced alone is not enough here - it's also true for
-  // an ordinary non-simulated symbol (set to mean "nothing to sync"), so a
-  // page load that briefly shows the non-simulated view before the first
-  // tick for an already-running simulation arrives (e.g. right after a
-  // refresh, while the real apiSymbol is still being restored - see
-  // selectTradeSymbol) leaves that same flag true for the wrong reason.
-  // Without also requiring simulationStartTime - only ever set by a real
-  // baseline sync, and cleared on every full rebuild - that stale true
-  // read as "already set up" and skipped the rebuild a genuinely new
-  // simulation still needed: the synthetic placeholder, the real-candle
-  // fetch, and the baseline sync that establishes the divider. The chart
-  // was left stuck on leftover synthetic data with no divider and no real
-  // history ever loaded - reported as "not syncing with old data".
-  const alreadySimulatingThisSymbol =
-    tradeChartState.isSimulated &&
-    tradeChartState.simulationBaselineSynced &&
-    tradeChartState.simulationStartTime &&
-    activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
-  if (alreadySimulatingThisSymbol) {
-    if (tradeChartState.timeframe !== "1M") {
-      setActiveTimeframeControl("1M");
-      tradeChartState.timeframe = "1M";
-      tradeChartState.customRange = null;
-    }
-    document.querySelector("#tradePriceStatsRow")?.classList.remove("is-hidden");
-    document.querySelector(".timeframes")?.classList.remove("is-hidden");
-    // Needed even though nothing about the simulation itself changed - this
-    // runs on "navigating back to the Trade tab" too, where the canvas may
-    // currently be hidden behind the TradingView widget (e.g. the admin
-    // left the Trade page entirely and came back, or switched to a
-    // non-simulated symbol and back) and needs to be shown again.
-    showSimulationChart();
-    renderTradeCandles();
+// While a simulation runs, the chart is the product's own server-side price
+// series (see /api/markets/series in server.js): its history and its
+// simulated candles are one continuous series on one time axis, which the
+// server records as the simulation happens. The chart just loads that series
+// and draws it; live ticks then extend it in place (see applyLiveTick), using
+// the same 5-second buckets and the same tick timestamps the server used, so
+// what's drawn live and what a reload returns are the same candles.
+const simulationSeriesBucketMs = 5000;
+const maxSimulationSeriesCandles = 3000;
+let seriesRequestToken = 0;
+
+// Time of the first candle of the latest simulated run, for the divider.
+function latestSimulationStart(candles) {
+  let index = candles.length - 1;
+  while (index >= 0 && !candles[index].simulated) index -= 1;
+  if (index < 0) return null;
+  while (index > 0 && candles[index - 1].simulated) index -= 1;
+  return candles[index].time;
+}
+
+function clearTradeCanvas() {
+  const canvas = document.querySelector("#tradeCandleCanvas");
+  canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+async function loadSimulationSeries(symbol, attempt = 1) {
+  const token = ++seriesRequestToken;
+  const stillWanted = () => token === seriesRequestToken && tradeChartState.apiSymbol === symbol && tradeChartState.isSimulated;
+  let payload;
+  try {
+    const response = await fetch(`${apiBase}/api/markets/series?symbol=${encodeURIComponent(symbol)}`);
+    payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  } catch {
+    if (attempt < 4) setTimeout(() => stillWanted() && loadSimulationSeries(symbol, attempt + 1), 1500 * attempt);
     return;
   }
+  if (!stillWanted()) return;
+  const bars = (payload.bars || []).map((bar) => ({
+    time: bar.time,
+    open: Number(bar.open),
+    high: Number(bar.high),
+    low: Number(bar.low),
+    close: Number(bar.close),
+    volume: Number(bar.volume || 0),
+    simulated: Boolean(bar.simulated),
+  }));
+  if (!bars.length) return;
+  const sameSeries = tradeChartState.seriesSymbol === symbol;
+  // Ticks applied while this request was in flight - keep any that are newer
+  // than the last bar the server returned.
+  const lastServerMs = Date.parse(bars.at(-1).time);
+  const newerLocal = sameSeries ? tradeChartState.candles.filter((candle) => Date.parse(candle.time) > lastServerMs) : [];
+  tradeChartState.candles = [...bars, ...newerLocal];
+  tradeChartState.seriesSymbol = symbol;
+  tradeChartState.simulationStartTime = latestSimulationStart(tradeChartState.candles);
+  // The header's +/- move reads as the change since the simulation began,
+  // not since whatever (possibly stale) watchlist price the product was
+  // selected at.
+  const startCandle = tradeChartState.candles.find((candle) => candle.time === tradeChartState.simulationStartTime);
+  if (startCandle) tradeChartState.price = startCandle.open;
+  if (!sameSeries) {
+    tradeChartState.viewCount = defaultTradeViewCount;
+    tradeChartState.viewOffset = 0;
+    tradeChartState.manualPriceRange = null;
+  }
+  renderTradeCandles();
+  renderTradeTicket();
+}
 
+async function loadChartForCurrentSymbol() {
   tradeChartState.liveBid = null;
   tradeChartState.liveAsk = null;
   tradeChartState.slideAnim = null;
   tradeChartState.hover = null;
   tradeChartState.isSimulated = activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
-  tradeChartState.simulationBaselineSynced = !tradeChartState.isSimulated;
-  tradeChartState.simulationStartTime = null;
-  tradeChartState.simulationTimeOffsetMs = 0;
   updateTradeSimulationBadge();
 
   // A real market move (TradingView's own feed) and an admin's test
@@ -3227,6 +3169,8 @@ async function loadChartForCurrentSymbol() {
   // whichever applies gets the whole chart area to itself instead of the two
   // fighting over the same canvas.
   if (!tradeChartState.isSimulated) {
+    tradeChartState.seriesSymbol = null;
+    tradeChartState.simulationStartTime = null;
     tradeChartState.isLiveChart = false;
     setStreamStatus(null);
     // Our own Bid/Ask/Spread readout and timeframe row are only meaningful
@@ -3239,65 +3183,32 @@ async function loadChartForCurrentSymbol() {
     // TradingView owns the chart pixels now, but the order ticket and the
     // trade header text still read from tradeChartState.candles - rebuild
     // them for the newly selected symbol so that text doesn't keep showing
-    // whatever symbol was viewed previously (its price is still mock data
-    // seeded from the current price/symbol, since the real candles only
-    // exist inside the TradingView iframe we can't read from).
+    // whatever symbol was viewed previously.
     tradeChartState.candles = buildTradeCandles(tradeChartState);
     syncTradeTerminal();
     return;
   }
+
   document.querySelector("#tradePriceStatsRow")?.classList.remove("is-hidden");
   document.querySelector(".timeframes")?.classList.remove("is-hidden");
   showSimulationChart();
-
-  // A coarse timeframe (the default is 1H) absorbs a whole short test window
-  // into a single candle's wick - a real trend is invisible next to hours of
-  // unrelated history. Switching to 1M is what actually makes the point of
-  // simulating a move (watching it happen) visible.
   if (tradeChartState.timeframe !== "1M") {
     setActiveTimeframeControl("1M");
     tradeChartState.timeframe = "1M";
     tradeChartState.customRange = null;
   }
-
   setStreamStatus(null);
   tradeChartState.isLiveChart = false;
-  tradeChartState.candles = buildTradeCandles(tradeChartState);
-  resetTradeChartView();
-  renderTradeCandles();
 
-  // Upgrade from the synthetic placeholder above to the same real candle
-  // history TradingView itself was just showing, so a simulation visibly
-  // continues from the actual market move instead of a made-up shape. Every
-  // instrument now has a daily-refreshed real snapshot (see
-  // fetchDailyCandleSnapshots in server.js) backing this, not just the
-  // handful with a live stream - loadRealCandles only resolves false if
-  // that symbol's snapshot genuinely isn't available yet (e.g. the first
-  // day after a fresh deploy, before the job has reached it), in which case
-  // the synthetic fallback above simply stands.
-  const symbolForRealCandles = tradeChartState.apiSymbol;
-  const priceAtRequestTime = tradeChartState.candles.at(-1)?.close;
-  loadRealCandles(symbolForRealCandles, "1M").then((ok) => {
-    if (!ok || tradeChartState.apiSymbol !== symbolForRealCandles || !tradeChartState.isSimulated) return;
-    // Anchored the same way the synthetic history above is - real data's
-    // last close is already close to live, but anchoring guarantees this
-    // swap itself never introduces a jump. Preferring lastKnownPrice (set by
-    // every tick this chart has actually shown) over the priceAtRequestTime
-    // snapshot above means a tick or two landing while this fetch was in
-    // flight doesn't make the swap itself rewind the price back a step.
-    // Both skipped once the simulation's own first tick has already synced
-    // the baseline (see applyLiveTick) - loadRealCandles has already spliced
-    // the real history in underneath the simulated tail in that case (using
-    // the baseline candle's own price to anchor it, not this snapshot's),
-    // and resetting the view here would pull a swath of real history back
-    // alongside a simulated move that's often a very different scale (the
-    // exact "chart stopped respecting the tight view" symptom reported).
-    if (!tradeChartState.simulationBaselineSynced) {
-      anchorCandlesEndToPrice(tradeChartState.candles, tradeChartState.lastKnownPrice ?? priceAtRequestTime);
-      resetTradeChartView();
-    }
+  if (tradeChartState.seriesSymbol === tradeChartState.apiSymbol) {
     renderTradeCandles();
-  });
+  } else {
+    // Nothing of this product's series is on screen yet - don't leave the
+    // previous product's chart showing while it loads.
+    tradeChartState.candles = [];
+    clearTradeCanvas();
+  }
+  await loadSimulationSeries(tradeChartState.apiSymbol);
 }
 
 function selectTradeSymbol(row) {
@@ -3512,14 +3423,6 @@ function bucketStartMs(timeMs, timeframe) {
   return Math.floor(timeMs / stepMs) * stepMs;
 }
 
-// Simulation ticks land every 1.5s and compound a small step each time, so
-// bucketing them by the selected timeframe (e.g. 1M = 60s) let up to 40
-// ticks pile into one candle before it rolled over - the whole move showed
-// up as a single drastic jump instead of a gradual climb. Bucketing them on
-// this fixed, much shorter interval instead spreads the same move across
-// many small candles, independent of whatever timeframe is on screen.
-const simulationCandleBucketMs = 3000;
-
 // Ticks arrive from the server over /ws (either true Twelve Data stream pushes or
 // its safe-interval fallback poll — applyLiveTick doesn't care which). Each tick
 // either mutates the still-forming candle or, once its timestamp crosses into the
@@ -3568,13 +3471,8 @@ function applyLiveTick(tick) {
     // so loadChartForCurrentSymbol()'s own isSimulated re-derivation reads
     // true here rather than reverting what was just set two lines up.
     if (!wasSimulated) {
-      // tradeChartState.price is only ever set once, when the symbol was
-      // selected - it's never refreshed while TradingView's own (unrelated)
-      // feed is what the user has actually been watching since. Refreshing
-      // it from this tick right before rebuilding the candle history below
-      // means that history gets anchored to the exact price the simulation
-      // is actually starting from, not a snapshot that may be stale by
-      // however long the chart had been open before the simulation started.
+      // tradeChartState.price is the header's reference for its +/- move
+      // readout; measure the simulated move from where the simulation began.
       const tickPrice = Number(tick.price);
       if (Number.isFinite(tickPrice)) tradeChartState.price = tickPrice;
       loadChartForCurrentSymbol();
@@ -3583,15 +3481,13 @@ function applyLiveTick(tick) {
   }
   if (!isSimulationTick && !tradeChartState.isLiveChart) return;
   if (!tradeChartState.candles.length) return;
-  if (!document.querySelector("#trade")?.classList.contains("is-active")) return;
+  // A simulation tick extends the product's series even while another tab
+  // is showing, so the chart is already current when the Trade tab comes
+  // back; the live (non-simulated) chart only needs updating while visible.
+  if (!isSimulationTick && !document.querySelector("#trade")?.classList.contains("is-active")) return;
 
   const price = Number(tick.price);
   if (!Number.isFinite(price)) return;
-  // The freshest price this chart has actually shown, independent of
-  // whichever candles array currently holds it - loadChartForCurrentSymbol's
-  // real-candle upgrade reads this to anchor onto whatever's live *when it
-  // resolves*, not whatever was live when it was kicked off a moment earlier.
-  tradeChartState.lastKnownPrice = price;
 
   updateOrderConfirmLivePrice(tick.symbol, price);
 
@@ -3604,89 +3500,55 @@ function applyLiveTick(tick) {
 
   const candles = tradeChartState.candles;
   const last = candles.at(-1);
-
-  // A simulation's price is authoritative and can be arbitrarily far from
-  // whatever the chart's existing candle history happens to show (that
-  // history is independently-seeded mock/stale data whenever no real market
-  // data provider is configured, since the resync fetch this would otherwise
-  // trigger has nothing to resync from either). Without this, the handoff
-  // candle's wick stretches to span both the old, unrelated price range and
-  // the new one - rendering as one giant bar across the whole gap and
-  // blowing out the chart's auto-scaled range instead of a gradual move.
-  // Collapsing it flat (not just extending its high/low to reach price,
-  // which just moves the same giant wick onto this candle instead) at the
-  // simulation's starting price makes the handoff clean; only candles
-  // formed after this one carry any real shape. Gated on a dedicated flag
-  // rather than tradeChartState.isSimulated itself - that flag is also set
-  // by the "simulation-status" broadcast, which reliably arrives before the
-  // first price tick ever does, so checking it here would always read true
-  // and this would never run.
-  const rawTickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
-
-  if (isSimulationTick && !tradeChartState.simulationBaselineSynced) {
-    // A simulation's candles are meant to read as "what happens next" right
-    // after the real history already on the chart - continuing forward from
-    // its last candle in small, regular steps (see simulationCandleBucketMs)
-    // - not as whatever the real wall-clock time happens to be when the
-    // admin happens to start a test. Anchoring to real "now" instead (tried
-    // previously) made the x-axis jump straight from the real history's own
-    // time (e.g. "12:17 PM") to whatever time of day testing happened to be
-    // started (e.g. "6:02 PM"), unrelated to the simulation's own duration.
-    // simulationTimeOffsetMs is fixed once here and reused for every later
-    // tick (below), so the simulated portion's clock runs at the same rate
-    // as real time - ticks still arrive on their normal cadence - just
-    // shifted to start right where the real history leaves off.
-    // previousCandle.time can be a real candle's raw, zone-less timestamp
-    // (see parseChartTimeMs) - a bare `new Date(...)` on it would read as
-    // the browser's local time instead of the UTC instant it's displayed
-    // as, silently shifting every simulated candle after it by the
-    // browser's UTC offset (seen as the x-axis jumping from the real
-    // history's last displayed time straight to a wildly different one).
-    const previousCandle = candles.length > 1 ? candles[candles.length - 2] : null;
-    const previousCandleMs = previousCandle ? parseChartTimeMs(previousCandle.time) : NaN;
-    const continuedStartMs = Number.isFinite(previousCandleMs) ? previousCandleMs + simulationCandleBucketMs : rawTickMs;
-    tradeChartState.simulationTimeOffsetMs = continuedStartMs - rawTickMs;
-  }
-  const tickMs = isSimulationTick ? rawTickMs + (tradeChartState.simulationTimeOffsetMs || 0) : rawTickMs;
-  const bucketMs = isSimulationTick
-    ? Math.floor(tickMs / simulationCandleBucketMs) * simulationCandleBucketMs
-    : bucketStartMs(tickMs, tradeChartState.timeframe);
-
-  if (isSimulationTick && !tradeChartState.simulationBaselineSynced) {
-    last.open = price;
-    last.high = price;
-    last.low = price;
-    last.close = price;
-    last.time = new Date(bucketMs).toISOString();
-    tradeChartState.simulationBaselineSynced = true;
-    tradeChartState.simulationStartTime = last.time;
-    // Defaults to a tight window right as the simulation takes over, so by
-    // the time it's produced enough candles of its own the view is showing
-    // mostly/only those - not however much real history happened to be in
-    // view before, whose own range (quiet or dramatic, there's no way to
-    // know in advance) would otherwise share one scale with the simulated
-    // move and force one of the two to be unreadably small. The user can
-    // still zoom/pan back out manually to see more of the real history.
-    tradeChartState.viewCount = minTradeViewCount;
-    tradeChartState.viewOffset = 0;
-    // A price-axis drag from any time before this simulation started (see
-    // setupPriceAxisInteractions) pins the Y-axis to a fixed range that
-    // completely overrides renderTradeCandles' own auto-scaling - including
-    // the scale-to-simulation logic there, which never even runs its own
-    // computation while this is set. Left over from an earlier manual zoom,
-    // this was silently keeping the chart on a stale, wide range no matter
-    // what the simulation's own candles looked like.
-    tradeChartState.manualPriceRange = null;
-  }
-
-  const lastBucketMs = isSimulationTick
-    ? Math.floor(new Date(last.time).getTime() / simulationCandleBucketMs) * simulationCandleBucketMs
-    : bucketStartMs(new Date(last.time).getTime(), tradeChartState.timeframe);
+  const tickMs = tick.timestamp ? Date.parse(tick.timestamp) : Date.now();
   // viewOffset === 0 means the view is already pinned to the newest candle — keep
   // it pinned so the chart keeps scrolling forward as new candles land. A user who
   // has panned back into history (viewOffset > 0) keeps their place instead.
   const isFollowingLive = (tradeChartState.viewOffset || 0) === 0;
 
+  if (isSimulationTick) {
+    // Until this product's series has loaded, the server already holds this
+    // tick and the load will include it.
+    if (tradeChartState.seriesSymbol !== tick.symbol) return;
+    const bucketMs = Math.floor(tickMs / simulationSeriesBucketMs) * simulationSeriesBucketMs;
+    const lastMs = Date.parse(last.time);
+    if (bucketMs < lastMs) return;
+    if (bucketMs === lastMs) {
+      last.close = price;
+      last.high = Math.max(last.high, price);
+      last.low = Math.min(last.low, price);
+      last.volume += 20;
+      last.simulated = true;
+    } else {
+      // Same rule as the server's series: a bucket with no tick is carried
+      // flat at the last price, and a new candle opens at the previous close.
+      for (let t = lastMs + simulationSeriesBucketMs, filled = 0; t < bucketMs && filled < 60; t += simulationSeriesBucketMs, filled += 1) {
+        const previousClose = candles.at(-1).close;
+        candles.push({ time: new Date(t).toISOString(), open: previousClose, high: previousClose, low: previousClose, close: previousClose, volume: 0, simulated: true });
+      }
+      const open = candles.at(-1).close;
+      candles.push({
+        time: new Date(bucketMs).toISOString(),
+        open,
+        high: Math.max(open, price),
+        low: Math.min(open, price),
+        close: price,
+        volume: 20,
+        simulated: true,
+      });
+      if (candles.length > maxSimulationSeriesCandles) candles.splice(0, candles.length - maxSimulationSeriesCandles);
+      if (isFollowingLive) {
+        tradeChartState.viewOffset = 0;
+        tradeChartState.slideAnim = { startTime: performance.now(), duration: 260 };
+      }
+    }
+    tradeChartState.simulationStartTime = latestSimulationStart(candles);
+    scheduleTradeRender();
+    return;
+  }
+
+  const bucketMs = bucketStartMs(tickMs, tradeChartState.timeframe);
+  const lastBucketMs = bucketStartMs(new Date(last.time).getTime(), tradeChartState.timeframe);
   if (bucketMs > lastBucketMs) {
     candles.push({
       time: new Date(bucketMs).toISOString(),
@@ -5445,6 +5307,7 @@ loadManagedInstruments();
 loadOrders();
 setInterval(tickMarkets, 1500);
 setInterval(refreshMarketsQuotes, 7000);
+setInterval(refreshTradeWatchPrices, 5000);
 setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);
 startVersionCheck();
