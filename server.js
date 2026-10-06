@@ -2066,9 +2066,23 @@ setInterval(() => {
     // (now genuinely a last resort, capped at 0.4%) only when there's no
     // real history to scale from at all.
     const realTickFraction = Math.sqrt(priceSimulationTickMs / 60000);
-    const noiseIntensity = template
-      ? Math.max(template.meanAbsPercent * realTickFraction, 0.003) * simulation.volatilityLevel
-      : Math.min(Math.max(simulation.stepPercent * 3.5, 0.03) * simulation.volatilityLevel, 0.4);
+    const baseNoiseIntensity = template
+      ? Math.max(template.meanAbsPercent * realTickFraction, 0.003)
+      : Math.min(Math.max(simulation.stepPercent * 3.5, 0.03), 0.4);
+    // Floored against this tick's own drift magnitude (always, even at
+    // volatilityLevel's calm end - a calm-phase floor scaled down WITH
+    // volatilityLevel could still end up smaller than drift) so noise can
+    // always plausibly outweigh the deterministic step and pull a tick
+    // below the previous one, regardless of how quiet this instrument's
+    // real volatility is. Without it, a calm real instrument's own
+    // noiseIntensity can end up smaller than the glide path's per-tick
+    // drift, so every tick's price moves in lockstep with the trend and
+    // the chart reads as a near-monotonic staircase in one color - the
+    // exact candle-realism problem volatility texture exists to prevent,
+    // reappearing now that noise is correctly sized to match a real (but
+    // quiet) instrument instead of an arbitrary constant.
+    const driftMagnitude = Math.abs(driftPercent);
+    const noiseIntensity = Math.max(baseNoiseIntensity * simulation.volatilityLevel, driftMagnitude * 2.5);
     const rawNoisePercent = template
       ? template.shape[Math.floor(Math.random() * template.shape.length)] * noiseIntensity
       : (Math.random() * 2 - 1) * noiseIntensity;
