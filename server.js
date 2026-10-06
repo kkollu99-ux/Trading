@@ -1602,11 +1602,16 @@ async function saveCandleSnapshot(symbol, candles) {
   );
 }
 
-// Spaced out rather than fired in parallel - this loops every configured
-// instrument (currently ~35), and bursting that many requests at once risks
-// tripping the provider's per-minute rate limit even though the total daily
-// credit cost is trivial.
-const candleSnapshotFetchDelayMs = 400;
+// This account's real limit turned out to be much tighter than the
+// 800/day figure the rest of this file's pollers are budgeted against: Twelve
+// Data also enforces a per-MINUTE cap (8 credits/minute here), confirmed by
+// production logs where this job's very first few calls - fired right
+// alongside every other startup poller (pollQuotesOnce, pollLiveQuotesOnce,
+// etc., which all also fire at boot) - immediately blew through it and every
+// single instrument failed. Spacing calls 10s apart keeps this job's own
+// pace to ~6/minute, leaving headroom for whatever the other pollers use
+// concurrently; there's no rush since this only needs to finish once a day.
+const candleSnapshotFetchDelayMs = 10000;
 
 async function fetchDailyCandleSnapshots() {
   const provider = process.env.MARKET_DATA_PROVIDER || "mock";
@@ -1619,7 +1624,11 @@ async function fetchDailyCandleSnapshots() {
       const url = new URL("https://api.twelvedata.com/time_series");
       url.searchParams.set("symbol", instrument.symbol);
       url.searchParams.set("interval", "1min");
-      url.searchParams.set("outputsize", "200");
+      // Matches the outputsize already proven to work for the on-demand "1M"
+      // fetch elsewhere in this file (candleRangeConfig) - 200 cost enough
+      // per-call credits on its own to blow the per-minute cap above
+      // regardless of spacing.
+      url.searchParams.set("outputsize", "70");
       url.searchParams.set("timezone", "UTC");
       url.searchParams.set("apikey", key);
       const upstream = await fetch(url);
@@ -2708,7 +2717,13 @@ seedDefaults()
     // product has real candles/volatility shape available immediately
     // rather than only after today's fetch cycle finishes.
     await loadCandleSnapshotsFromDb();
-    fetchDailyCandleSnapshots();
+    // Delayed rather than kicked off immediately: every poller above also
+    // fires right at startup, and this account's per-minute credit cap (see
+    // fetchDailyCandleSnapshots) has no separate allowance for "but it's
+    // just starting up" - colliding with that burst is what caused every
+    // instrument to fail on the first deploy of this feature. By the time
+    // this fires, that startup burst has long settled.
+    setTimeout(fetchDailyCandleSnapshots, 90000);
     setInterval(fetchDailyCandleSnapshots, 24 * 60 * 60 * 1000);
   })
   .catch((error) => {
