@@ -2048,7 +2048,16 @@ setInterval(() => {
     simulation.volatilityLevel = Math.max(0.25, Math.min(3.5, simulation.volatilityLevel * (1 + (Math.random() - 0.5) * 0.18)));
 
     const template = simulation.volatilityTemplate;
-    const noiseIntensity = Math.max(simulation.stepPercent * 3.5, 0.03) * simulation.volatilityLevel;
+    // Capped regardless of stepPercent/volatilityLevel - stepPercent is also
+    // the "how fast should the overall trend move" dial (bigger for a large
+    // target reached quickly), and reusing it uncapped to size per-tick
+    // noise too meant an aggressive target/short duration produced
+    // individual candles many times the size of anything in real market
+    // data next to them, not just a faster-moving but still natural-looking
+    // chart. 0.4% keeps candles reading as normal market noise - varied,
+    // with visible calm/busy stretches from volatilityLevel - however fast
+    // the underlying trend itself is moving.
+    const noiseIntensity = Math.min(Math.max(simulation.stepPercent * 3.5, 0.03) * simulation.volatilityLevel, 0.4);
     const rawNoisePercent = template && template.length
       ? template[Math.floor(Math.random() * template.length)] * noiseIntensity
       : (Math.random() * 2 - 1) * noiseIntensity;
