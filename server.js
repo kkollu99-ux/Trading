@@ -1624,11 +1624,16 @@ async function fetchDailyCandleSnapshots() {
       const url = new URL("https://api.twelvedata.com/time_series");
       url.searchParams.set("symbol", instrument.symbol);
       url.searchParams.set("interval", "1min");
-      // Matches the outputsize already proven to work for the on-demand "1M"
-      // fetch elsewhere in this file (candleRangeConfig) - 200 cost enough
-      // per-call credits on its own to blow the per-minute cap above
-      // regardless of spacing.
-      url.searchParams.set("outputsize", "70");
+      // A full day of 1-minute bars rather than just the last ~70 minutes -
+      // "up to now" for a continuously-traded instrument (forex, crypto)
+      // and whatever a stock/commodity's own session actually held for
+      // anything with fixed trading hours (Twelve Data simply returns
+      // fewer bars than requested once a session's real history runs out,
+      // so this is a safe upper bound rather than something that needs to
+      // match each instrument's actual hours). Confirmed via production
+      // logs that it's the earlier concurrent-poller collision, not this
+      // per-call size, that tripped the per-minute credit cap above.
+      url.searchParams.set("outputsize", "1440");
       url.searchParams.set("timezone", "UTC");
       url.searchParams.set("apikey", key);
       const upstream = await fetch(url);
