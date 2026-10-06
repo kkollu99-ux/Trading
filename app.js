@@ -1716,7 +1716,13 @@ function applyIncomingOrderUpdate(payload) {
 // can show a live badge.
 function applySimulationStatus(payload) {
   if (!payload?.symbol) return;
-  if (payload.active) activeSimulationsBySymbol.set(payload.symbol, { direction: payload.direction, expiresAt: payload.expiresAt || null, targetPrice: payload.targetPrice || null });
+  if (payload.active)
+    activeSimulationsBySymbol.set(payload.symbol, {
+      direction: payload.direction,
+      expiresAt: payload.expiresAt || null,
+      targetPrice: payload.targetPrice || null,
+      startPrice: payload.startPrice || null,
+    });
   else activeSimulationsBySymbol.delete(payload.symbol);
 
   if (payload.symbol === tradeChartState.apiSymbol) {
@@ -1766,7 +1772,14 @@ function updateTradeSimulationBadge() {
 // "Simulating" badge with no gap.
 function applyScheduledSimulationStatus(payload) {
   if (!payload?.symbol) return;
-  if (payload.active) scheduledSimulationsBySymbol.set(payload.symbol, { direction: payload.direction, fromISO: payload.fromISO, toISO: payload.toISO, targetPrice: payload.targetPrice || null });
+  if (payload.active)
+    scheduledSimulationsBySymbol.set(payload.symbol, {
+      direction: payload.direction,
+      fromISO: payload.fromISO,
+      toISO: payload.toISO,
+      targetPrice: payload.targetPrice || null,
+      startPrice: payload.startPrice || null,
+    });
   else scheduledSimulationsBySymbol.delete(payload.symbol);
   if (document.querySelector("#managedInstrumentList")) renderManagedInstruments();
 }
@@ -3534,7 +3547,12 @@ function applyLiveTick(tick) {
         .then((status) => {
           simulationStatusFetchInFlight.delete(tick.symbol);
           if (!status?.active) return;
-          activeSimulationsBySymbol.set(tick.symbol, { direction: status.direction, expiresAt: status.expiresAt || null, targetPrice: status.targetPrice || null });
+          activeSimulationsBySymbol.set(tick.symbol, {
+            direction: status.direction,
+            expiresAt: status.expiresAt || null,
+            targetPrice: status.targetPrice || null,
+            startPrice: status.startPrice || null,
+          });
           if (tick.symbol === tradeChartState.apiSymbol) updateTradeSimulationBadge();
         })
         .catch(() => simulationStatusFetchInFlight.delete(tick.symbol));
@@ -4428,16 +4446,18 @@ function renderManagedInstruments() {
       const symbol = compactSymbol(instrument.symbol);
       const categoryKey = categoryFilter(instrument.category);
       const simulation = activeSimulationsBySymbol.get(instrument.symbol);
+      const simStartPrefix = simulation?.startPrice ? `${formatCurrency(simulation.startPrice)} ` : "";
       const simTargetSuffix = simulation?.targetPrice ? ` → ${formatCurrency(simulation.targetPrice)}` : "";
       const simBadge = simulation
         ? simulation.expiresAt
           ? `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}" data-sim-expires="${escapeHtml(simulation.expiresAt)}" data-sim-target="${simulation.targetPrice ? escapeHtml(String(simulation.targetPrice)) : ""}"></span>`
-          : `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}">Simulating ${simulation.direction === "up" ? "↑" : "↓"}${simTargetSuffix}</span>`
+          : `<span class="status-pill instrument-sim-badge ${simulation.direction === "up" ? "is-up" : "is-down"}">Simulating ${simStartPrefix}${simulation.direction === "up" ? "↑" : "↓"}${simTargetSuffix}</span>`
         : "";
       const scheduled = scheduledSimulationsBySymbol.get(instrument.symbol);
+      const scheduleStartPrefix = scheduled?.startPrice ? `${formatCurrency(scheduled.startPrice)} ` : "";
       const scheduleTargetSuffix = scheduled?.targetPrice ? ` → ${formatCurrency(scheduled.targetPrice)}` : "";
       const scheduleBadge = scheduled
-        ? `<span class="status-pill instrument-schedule-badge">⏰ ${formatTimeOfDay(scheduled.fromISO)}–${formatTimeOfDay(scheduled.toISO)} ${scheduled.direction === "up" ? "↑" : "↓"}${scheduleTargetSuffix}</span>`
+        ? `<span class="status-pill instrument-schedule-badge">⏰ ${formatTimeOfDay(scheduled.fromISO)}–${formatTimeOfDay(scheduled.toISO)} ${scheduleStartPrefix}${scheduled.direction === "up" ? "↑" : "↓"}${scheduleTargetSuffix}</span>`
         : "";
 
       // Each control gets its own labeled group stacked in a small grid,
@@ -4465,6 +4485,10 @@ function renderManagedInstruments() {
                     <option value="price">$</option>
                   </select>
                 </div>
+              </div>
+              <div class="sim-control-group">
+                <span class="sim-control-label">Start price (optional)</span>
+                <input type="number" step="any" min="0" class="sim-target-input" data-schedule-start-price="${escapeHtml(instrument.symbol)}" placeholder="e.g. 150" title="Open the simulation at this exact price instead of continuing from the current price" />
               </div>
             </div>
             <div class="product-sim-actions">
@@ -4636,10 +4660,25 @@ async function loadManagedInstruments() {
     try {
       const simData = await adminFetch("/api/admin/price-simulation");
       activeSimulationsBySymbol.clear();
-      (simData.simulations || []).forEach((sim) => activeSimulationsBySymbol.set(sim.symbol, { direction: sim.direction, expiresAt: sim.expiresAt || null, targetPrice: sim.targetPrice || null }));
+      (simData.simulations || []).forEach((sim) =>
+        activeSimulationsBySymbol.set(sim.symbol, {
+          direction: sim.direction,
+          expiresAt: sim.expiresAt || null,
+          targetPrice: sim.targetPrice || null,
+          startPrice: sim.startPrice || null,
+        })
+      );
       const scheduleData = await adminFetch("/api/admin/price-simulation/schedule");
       scheduledSimulationsBySymbol.clear();
-      (scheduleData.scheduled || []).forEach((s) => scheduledSimulationsBySymbol.set(s.symbol, { direction: s.direction, fromISO: s.fromISO, toISO: s.toISO, targetPrice: s.targetPrice || null }));
+      (scheduleData.scheduled || []).forEach((s) =>
+        scheduledSimulationsBySymbol.set(s.symbol, {
+          direction: s.direction,
+          fromISO: s.fromISO,
+          toISO: s.toISO,
+          targetPrice: s.targetPrice || null,
+          startPrice: s.startPrice || null,
+        })
+      );
     } catch {
       // Badges just stay whatever they were locally if this fetch fails - not worth blocking the instrument list over.
     }
@@ -5189,14 +5228,18 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
       const toInput = document.querySelector(`[data-schedule-to="${CSS.escape(symbol)}"]`);
       const targetInput = document.querySelector(`[data-schedule-target="${CSS.escape(symbol)}"]`);
       const targetUnitSelect = document.querySelector(`[data-schedule-target-unit="${CSS.escape(symbol)}"]`);
+      const startPriceInput = document.querySelector(`[data-schedule-start-price="${CSS.escape(symbol)}"]`);
       const from = timeInputToTodayISO(fromInput?.value);
       const to = timeInputToTodayISO(toInput?.value);
       const targetValue = Number(targetInput?.value);
       const hasTarget = Number.isFinite(targetValue) && targetValue > 0;
       const targetUnit = targetUnitSelect?.value || "percent";
+      const startPriceValue = Number(startPriceInput?.value);
+      const hasStartPrice = Number.isFinite(startPriceValue) && startPriceValue > 0;
       const targetFields = {
         ...(hasTarget && targetUnit === "price" ? { targetPrice: targetValue } : {}),
         ...(hasTarget && targetUnit === "percent" ? { targetPercent: targetValue } : {}),
+        ...(hasStartPrice ? { startPrice: startPriceValue } : {}),
       };
       if (!from && !to) {
         // No window picked - the admin just wants the move to start right now,

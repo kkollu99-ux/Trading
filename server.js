@@ -1320,17 +1320,109 @@ const quoteLiveSymbols = (process.env.MARKET_DATA_LIVE_SYMBOLS || "XAU/USD")
   .filter(Boolean);
 const marketStatusBySymbol = new Map();
 
+// ---------- Crypto live pricing (Binance public API) ----------
+// The one category of instrument this app fetches REAL external price data
+// for. Every other instrument (forex, metals, commodities, stocks) stays on
+// the local synthetic generation below - there's no free, keyless,
+// rate-limit-safe equivalent for those, which is exactly the failure mode
+// (Twelve Data's daily credit cap, shared across every symbol/category) that
+// got the external provider removed in the first place. Binance's public
+// market-data endpoints (ticker price, klines) need no API key, aren't
+// subject to a shared daily credit budget, and have rate limits generous
+// enough that polling a handful of symbols every couple seconds is a
+// rounding error - so pulling real crypto prices doesn't reintroduce that
+// risk for the rest of the app.
+const BINANCE_API_BASE = "https://api.binance.com";
+const cryptoBinanceSymbols = {
+  "BTC/USD": "BTCUSDT",
+  "ETH/USD": "ETHUSDT",
+  "XRP/USD": "XRPUSDT",
+  "BNB/USD": "BNBUSDT",
+  "SOL/USDC": "SOLUSDC",
+};
+const cryptoApiSymbols = Object.keys(cryptoBinanceSymbols);
+
+async function fetchCryptoPrices(symbols) {
+  if (!symbols.length) return {};
+  const pairs = symbols.map((symbol) => cryptoBinanceSymbols[symbol]).filter(Boolean);
+  if (!pairs.length) return {};
+  const url = `${BINANCE_API_BASE}/api/v3/ticker/price?symbols=${encodeURIComponent(JSON.stringify(pairs))}`;
+  const result = await fetch(url, { signal: AbortSignal.timeout(5000) });
+  if (!result.ok) throw new Error(`Binance ticker request failed: ${result.status}`);
+  const rows = await result.json();
+  const byPair = new Map(rows.map((row) => [row.symbol, Number(row.price)]));
+  const prices = {};
+  for (const symbol of symbols) {
+    const price = byPair.get(cryptoBinanceSymbols[symbol]);
+    if (Number.isFinite(price) && price > 0) prices[symbol] = price;
+  }
+  return prices;
+}
+
+// A full day (1440 one-minute bars) of this crypto symbol's own real trade
+// history from Binance, in the exact same shape generateSyntheticDayCandles
+// below produces - so the daily snapshot powering the chart/volatility
+// template is genuine market data for crypto instead of an invented wave.
+async function fetchCryptoDayCandles(binanceSymbol) {
+  const url = `${BINANCE_API_BASE}/api/v3/klines?symbol=${binanceSymbol}&interval=1m&limit=1440`;
+  const result = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!result.ok) throw new Error(`Binance klines request failed: ${result.status}`);
+  const rows = await result.json();
+  return rows.map((row) => ({
+    time: new Date(row[0]).toISOString(),
+    open: Number(row[1]),
+    high: Number(row[2]),
+    low: Number(row[3]),
+    close: Number(row[4]),
+    volume: Number(row[5]),
+  }));
+}
+
+// Mirrors tickSyntheticQuotes below but for the real crypto feed: pulls one
+// batched Binance request covering every crypto symbol (skipping any a
+// simulation currently owns, same as the synthetic path, so the two never
+// fight over the same price), then feeds the result into the exact same
+// quoteStore/streamCandleHistory/broadcast pipeline every other price source
+// uses - so nothing downstream (getCurrentPrice, the chart, the live ticker)
+// needs to know this symbol's price came from a real API instead of local
+// generation. Falls back to silently keeping the last known price on a
+// network hiccup rather than throwing - a dropped Binance poll shouldn't take
+// the rest of the app's price ticking down with it.
+async function tickCryptoQuotes() {
+  const symbols = cryptoApiSymbols.filter((symbol) => !priceSimulations.has(symbol));
+  if (!symbols.length) return;
+  let prices;
+  try {
+    prices = await fetchCryptoPrices(symbols);
+  } catch (error) {
+    console.warn("Crypto price fetch failed, keeping last known price:", error.message);
+    return;
+  }
+  for (const symbol of symbols) {
+    const price = prices[symbol];
+    if (!Number.isFinite(price) || price <= 0) continue;
+    quoteStore.set(symbol, { data: { symbol, close: price, price, is_market_open: true }, at: Date.now() });
+    recordStreamCandleTick(symbol, price, Date.now());
+    broadcast({ type: "price-tick", symbol, price, source: "poll", timestamp: new Date().toISOString() });
+    if (marketStatusBySymbol.get(symbol) !== true) {
+      marketStatusBySymbol.set(symbol, true);
+      broadcast({ type: "market-status", symbol, isOpen: true });
+    }
+  }
+}
+
 // A smooth, deterministic-ish per-symbol walk (small random step off
 // whatever this symbol last priced at, falling back to getCurrentPrice's
 // own hash-seeded starting point the first time) - same shape of movement
 // the old real poller produced, just generated locally instead of fetched.
 // Skips any symbol a simulation currently owns so the two never fight over
-// the same price.
+// the same price, and skips any symbol the real crypto feed above owns so
+// the two price sources never fight over the same symbol either.
 const syntheticQuoteTickIntervalMs = Number(process.env.SYNTHETIC_QUOTE_TICK_INTERVAL_MS || 2500);
 
 function tickSyntheticQuotes() {
   for (const symbol of quoteLiveSymbols) {
-    if (priceSimulations.has(symbol)) continue;
+    if (priceSimulations.has(symbol) || cryptoBinanceSymbols[symbol]) continue;
     const previous = Number(quoteStore.get(symbol)?.data?.close) || getCurrentPrice(symbol);
     const next = Math.max(0.00001, Number((previous * (1 + (Math.random() - 0.5) * 0.0015)).toFixed(6)));
     quoteStore.set(symbol, { data: { symbol, close: next, price: next, is_market_open: true }, at: Date.now() });
@@ -1476,7 +1568,18 @@ async function generateDailyCandleSnapshots() {
   const instruments = await listInstruments({});
   for (const instrument of instruments) {
     try {
-      const candles = generateSyntheticDayCandles(instrument.symbol, getCurrentPrice(instrument.symbol));
+      const binanceSymbol = cryptoBinanceSymbols[instrument.symbol];
+      let candles = null;
+      if (binanceSymbol) {
+        try {
+          candles = await fetchCryptoDayCandles(binanceSymbol);
+        } catch (error) {
+          console.warn(`Crypto candle fetch failed for ${instrument.symbol}, falling back to synthetic:`, error.message);
+        }
+      }
+      if (!candles || !candles.length) {
+        candles = generateSyntheticDayCandles(instrument.symbol, getCurrentPrice(instrument.symbol));
+      }
       await saveCandleSnapshot(instrument.symbol, candles);
       // Also feeds streamCandleHistory (a no-op for symbols that already
       // have a healthy amount of their own real-time-ticked data - see the
@@ -1583,13 +1686,16 @@ const priceSimulationMaxDurationMs = 60 * 60 * 1000; // 1h safety cap - this is 
 // absolute targetPrice, or null if neither was given - so the rest of the
 // simulation code only ever deals with one shape regardless of which the
 // admin picked.
-function resolveSimulationTarget(symbol, direction, body) {
+// basePriceOverride lets the caller pin the "current price" this resolves
+// a %-target against to an admin-given startPrice instead of the real
+// getCurrentPrice(symbol) - see startPrice on startPriceSimulation below.
+function resolveSimulationTarget(symbol, direction, body, basePriceOverride = null) {
   const targetPriceRaw = Number(body.targetPrice);
   if (Number.isFinite(targetPriceRaw) && targetPriceRaw > 0) return targetPriceRaw;
 
   const targetPercentRaw = Number(body.targetPercent);
   if (Number.isFinite(targetPercentRaw) && targetPercentRaw > 0) {
-    const basePrice = getCurrentPrice(symbol);
+    const basePrice = Number.isFinite(basePriceOverride) && basePriceOverride > 0 ? basePriceOverride : getCurrentPrice(symbol);
     const multiplier = direction === "up" ? 1 + targetPercentRaw / 100 : 1 - targetPercentRaw / 100;
     return Number((basePrice * multiplier).toFixed(6));
   }
@@ -1599,21 +1705,26 @@ function resolveSimulationTarget(symbol, direction, body) {
 // A target only makes sense on the correct side of the current price - an
 // "up to $X" that's already below the current price, or a "down to $X"
 // already above it, would either never fire or fire instantly, neither of
-// which is what the admin meant.
-function validateSimulationTarget(symbol, direction, targetPrice) {
+// which is what the admin meant. basePriceOverride mirrors the one above,
+// so a custom startPrice is validated against itself, not the real price.
+function validateSimulationTarget(symbol, direction, targetPrice, basePriceOverride = null) {
   if (targetPrice == null) return null;
-  const basePrice = getCurrentPrice(symbol);
+  const basePrice = Number.isFinite(basePriceOverride) && basePriceOverride > 0 ? basePriceOverride : getCurrentPrice(symbol);
   if (direction === "up" && targetPrice <= basePrice) return "Target must be above the current price for an upward simulation";
   if (direction === "down" && targetPrice >= basePrice) return "Target must be below the current price for a downward simulation";
   return null;
 }
 
-function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs, targetPrice = null) {
+// startPrice lets admin pin exactly what price this symbol's simulation
+// opens at (e.g. seeding a product that has no realistic price yet, or
+// deliberately gapping it to a specific level) instead of always continuing
+// from whatever getCurrentPrice(symbol) happens to be right now.
+function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs, targetPrice = null, startPrice = null) {
   const existing = priceSimulations.get(symbol);
   if (existing?.timer) clearTimeout(existing.timer);
   cancelScheduledSimulation(symbol); // a manual/auto trigger supersedes any pending scheduled window
 
-  const basePrice = getCurrentPrice(symbol);
+  const basePrice = Number.isFinite(startPrice) && startPrice > 0 ? startPrice : getCurrentPrice(symbol);
   const clampedDurationMs = Number.isFinite(durationMs) && durationMs > 0 ? Math.min(durationMs, priceSimulationMaxDurationMs) : null;
   const expiresAt = clampedDurationMs ? new Date(Date.now() + clampedDurationMs).toISOString() : null;
   const resolvedStepPercent = Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent;
@@ -1693,7 +1804,7 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     }, clampedDurationMs);
   }
   priceSimulations.set(symbol, simulation);
-  broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt, targetPrice: simulation.targetPrice });
+  broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt, targetPrice: simulation.targetPrice, startPrice: simulation.basePrice });
 }
 
 function stopPriceSimulation(symbol) {
@@ -1722,7 +1833,7 @@ function cancelScheduledSimulation(symbol) {
   return existed;
 }
 
-function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO, startedBy, targetPrice = null) {
+function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO, startedBy, targetPrice = null, startPrice = null) {
   cancelScheduledSimulation(symbol);
   const fromMs = new Date(fromISO).getTime();
   const toMs = new Date(toISO).getTime();
@@ -1731,17 +1842,17 @@ function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO,
   if (fromMs <= now) {
     // The window's start has already arrived (e.g. admin picked "from" a
     // minute in the past) - just start right away for whatever's left of it.
-    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - now, targetPrice);
+    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - now, targetPrice, startPrice);
     return { scheduled: false, active: true };
   }
 
   const startTimer = setTimeout(() => {
     scheduledSimulations.delete(symbol);
-    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - Date.now(), targetPrice);
+    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - Date.now(), targetPrice, startPrice);
   }, fromMs - now);
 
-  scheduledSimulations.set(symbol, { direction, stepPercent, fromISO, toISO, startedBy, startTimer, targetPrice });
-  broadcast({ type: "simulation-scheduled", symbol, active: true, direction, fromISO, toISO, targetPrice });
+  scheduledSimulations.set(symbol, { direction, stepPercent, fromISO, toISO, startedBy, startTimer, targetPrice, startPrice });
+  broadcast({ type: "simulation-scheduled", symbol, active: true, direction, fromISO, toISO, targetPrice, startPrice });
   return { scheduled: true, active: false };
 }
 
@@ -1869,15 +1980,17 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
   const direction = String(request.body.direction || "").toLowerCase();
   const stepPercent = Number(request.body.stepPercent);
   const durationSeconds = Number(request.body.durationSeconds);
+  const startPriceRaw = Number(request.body.startPrice);
+  const startPrice = Number.isFinite(startPriceRaw) && startPriceRaw > 0 ? startPriceRaw : null;
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
 
-  const targetPrice = resolveSimulationTarget(symbol, direction, request.body);
-  const targetError = validateSimulationTarget(symbol, direction, targetPrice);
+  const targetPrice = resolveSimulationTarget(symbol, direction, request.body, startPrice);
+  const targetError = validateSimulationTarget(symbol, direction, targetPrice, startPrice);
   if (targetError) return response.status(400).json({ error: targetError });
 
   const durationMs = Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds * 1000 : null;
-  startPriceSimulation(symbol, direction, stepPercent, request.user.id, durationMs, targetPrice);
+  startPriceSimulation(symbol, direction, stepPercent, request.user.id, durationMs, targetPrice, startPrice);
   const simulation = priceSimulations.get(symbol);
   logEvent({
     category: "chart",
@@ -1885,9 +1998,16 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
     actorId: request.user.id,
     actorLabel: request.user.email,
     targetLabel: symbol,
-    details: { direction, stepPercent, durationSeconds: durationSeconds || null, targetPrice: simulation?.targetPrice || null },
+    details: { direction, stepPercent, durationSeconds: durationSeconds || null, targetPrice: simulation?.targetPrice || null, startPrice: simulation?.basePrice || null },
   });
-  response.json({ symbol, direction, active: true, expiresAt: simulation?.expiresAt || null, targetPrice: simulation?.targetPrice || null });
+  response.json({
+    symbol,
+    direction,
+    active: true,
+    expiresAt: simulation?.expiresAt || null,
+    targetPrice: simulation?.targetPrice || null,
+    startPrice: simulation?.basePrice || null,
+  });
 });
 
 app.post("/api/admin/price-simulation/stop", requireAuth, attachUser, requireRole("admin"), (request, response) => {
@@ -1912,6 +2032,7 @@ app.get("/api/admin/price-simulation", requireAuth, attachUser, requireRole("adm
     startedAt: simulation.startedAt,
     expiresAt: simulation.expiresAt,
     targetPrice: simulation.targetPrice,
+    startPrice: simulation.basePrice,
   }));
   response.json({ simulations });
 });
@@ -1927,7 +2048,14 @@ app.get("/api/price-simulation-status", requireAuth, attachUser, (request, respo
   const symbol = String(request.query.symbol || "").trim().toUpperCase();
   const simulation = priceSimulations.get(symbol);
   if (!simulation) return response.json({ active: false });
-  response.json({ active: true, direction: simulation.direction, expiresAt: simulation.expiresAt, targetPrice: simulation.targetPrice });
+  response.json({
+    active: true,
+    direction: simulation.direction,
+    expiresAt: simulation.expiresAt,
+    targetPrice: simulation.targetPrice,
+    startPrice: simulation.basePrice,
+    price: simulation.price,
+  });
 });
 
 // A per-symbol opt-in: once enabled, placing a buy order on that symbol
@@ -1984,6 +2112,8 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
   const stepPercent = Number(request.body.stepPercent);
   const from = String(request.body.from || "");
   const to = String(request.body.to || "");
+  const startPriceRaw = Number(request.body.startPrice);
+  const startPrice = Number.isFinite(startPriceRaw) && startPriceRaw > 0 ? startPriceRaw : null;
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
 
@@ -1994,8 +2124,8 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
   if (toMs <= Date.now()) return response.status(400).json({ error: "To time must be in the future" });
   if (toMs - fromMs > priceSimulationMaxDurationMs) return response.status(400).json({ error: "Window can be at most 1 hour" });
 
-  const targetPrice = resolveSimulationTarget(symbol, direction, request.body);
-  const targetError = validateSimulationTarget(symbol, direction, targetPrice);
+  const targetPrice = resolveSimulationTarget(symbol, direction, request.body, startPrice);
+  const targetError = validateSimulationTarget(symbol, direction, targetPrice, startPrice);
   if (targetError) return response.status(400).json({ error: targetError });
 
   const result = schedulePriceSimulation(
@@ -2005,7 +2135,8 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
     from,
     to,
     request.user.id,
-    targetPrice
+    targetPrice,
+    startPrice
   );
   logEvent({
     category: "chart",
@@ -2013,9 +2144,9 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
     actorId: request.user.id,
     actorLabel: request.user.email,
     targetLabel: symbol,
-    details: { direction, stepPercent, from, to, targetPrice },
+    details: { direction, stepPercent, from, to, targetPrice, startPrice },
   });
-  response.json({ symbol, direction, targetPrice, ...result });
+  response.json({ symbol, direction, targetPrice, startPrice, ...result });
 });
 
 app.post("/api/admin/price-simulation/schedule/cancel", requireAuth, attachUser, requireRole("admin"), (request, response) => {
@@ -2039,6 +2170,7 @@ app.get("/api/admin/price-simulation/schedule", requireAuth, attachUser, require
     fromISO: s.fromISO,
     toISO: s.toISO,
     targetPrice: s.targetPrice,
+    startPrice: s.startPrice,
   }));
   response.json({ scheduled });
 });
@@ -2448,6 +2580,10 @@ seedDefaults()
     });
     tickSyntheticQuotes();
     setInterval(tickSyntheticQuotes, syntheticQuoteTickIntervalMs);
+    await tickCryptoQuotes().catch((error) => console.warn("Initial crypto quote tick failed:", error.message));
+    setInterval(() => {
+      tickCryptoQuotes().catch((error) => console.warn("Crypto quote tick failed:", error.message));
+    }, syntheticQuoteTickIntervalMs);
     // Yesterday's (or earlier today's) snapshot is useful the instant the
     // process comes back up - loaded before the fresh generation below so
     // every product has candles/volatility shape available immediately
