@@ -155,6 +155,7 @@ function normalizeUser(row) {
     kycStatus: row.kyc_status || row.kycStatus,
     balance: Number(row.balance || 0),
     marginUsed: Number(row.margin_used ?? row.marginUsed ?? 0),
+    preferences: row.preferences || {},
     passwordHash: row.password_hash || row.passwordHash,
     createdAt: row.created_at || row.createdAt,
   };
@@ -221,6 +222,7 @@ async function createUser({ email, password, name, role = "user", referredBy = n
     kycStatus,
     balance,
     marginUsed: 0,
+    preferences: {},
     createdAt: new Date().toISOString(),
   };
   memory.users.push(user);
@@ -282,6 +284,25 @@ async function updateUser(id, patch) {
   const user = memory.users.find((item) => item.id === id);
   if (!user) return null;
   Object.assign(user, patch);
+  return user;
+}
+
+// Shallow-merges `patch` into the user's stored preferences (jsonb || jsonb
+// in Postgres, Object.assign in memory mode) rather than replacing the
+// whole blob, so a client only ever needs to send the keys it's changing -
+// e.g. just { displayCurrency: "EUR" } - without first reading back and
+// resending every other preference already set.
+async function updateUserPreferences(id, patch) {
+  if (pool) {
+    const rows = await query(
+      `UPDATE users SET preferences = preferences || $2::jsonb WHERE id = $1 RETURNING *`,
+      [id, JSON.stringify(patch)],
+    );
+    return normalizeUser(rows[0]);
+  }
+  const user = memory.users.find((item) => item.id === id);
+  if (!user) return null;
+  user.preferences = { ...(user.preferences || {}), ...patch };
   return user;
 }
 
@@ -811,6 +832,14 @@ async function seedDefaults() {
     await query(fs.readFileSync(schemaPath, "utf8"));
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0`);
+    // Per-account UI preferences (display currency, sidebar collapsed state,
+    // etc.) - a single JSONB blob rather than one column per setting, so a
+    // new preference never needs its own migration. Previously only
+    // persisted in localStorage, which is per-browser: it survived a
+    // refresh but not switching devices or a fresh login on a shared
+    // machine, since logging out clears auth state but was never meant to
+    // (and doesn't) touch other browsers' localStorage at all.
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'`);
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_loss_amount NUMERIC(14, 2)`);
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS take_profit_amount NUMERIC(14, 2)`);
     // Lets the admin inbox sort by whichever conversation is actually
@@ -1029,6 +1058,20 @@ app.post("/api/auth/login", async (request, response) => {
 
 app.get("/api/me", requireAuth, attachUser, (request, response) => {
   response.json({ user: publicUser(request.user) });
+});
+
+// Only a fixed, known set of UI-preference keys - an open-ended merge here
+// would let a client stash arbitrary data on every user row.
+const allowedPreferenceKeys = ["displayCurrency", "sidebarCollapsed"];
+
+app.patch("/api/me/preferences", requireAuth, attachUser, async (request, response) => {
+  const patch = {};
+  for (const key of allowedPreferenceKeys) {
+    if (Object.prototype.hasOwnProperty.call(request.body, key)) patch[key] = request.body[key];
+  }
+  if (!Object.keys(patch).length) return response.status(400).json({ error: "No recognized preference keys in body" });
+  const user = await updateUserPreferences(request.user.id, patch);
+  response.json({ user: publicUser(user) });
 });
 
 app.get("/api/admin/users", requireAuth, attachUser, requireRole("admin"), async (_request, response) => {
