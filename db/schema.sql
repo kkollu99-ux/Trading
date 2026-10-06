@@ -126,6 +126,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Once-a-day snapshot of real OHLC candles per instrument - gives every
+-- product (not just the couple with a live price stream) a real historical
+-- chart, and is what a price simulation's per-tick noise is shaped from
+-- (see buildVolatilityTemplate in server.js). A handful of REST calls a day
+-- is a trivial cost against the market data provider's daily credit cap,
+-- unlike polling or streaming every instrument live would be.
+CREATE TABLE IF NOT EXISTS candle_snapshots (
+  symbol TEXT PRIMARY KEY,
+  candles JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_service_requests_user_id ON service_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_request_id ON chat_messages(request_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
