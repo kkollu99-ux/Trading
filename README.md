@@ -83,9 +83,7 @@ Required Railway variables:
 ```text
 JWT_SECRET=<strong random secret>
 DATABASE_URL=<Railway Postgres URL>
-MARKET_DATA_PROVIDER=twelvedata
-MARKET_DATA_API_KEY=<provider key>
 ALLOWED_SYMBOLS=XAU/USD,XAG/USD,BTC/USD,EUR/USD,GBP/USD,USOIL
 ```
 
-The backend also accepts `TWELVEDATA_API_KEY`, `TWELVEDATAAPI`, or `twelvedataAPI` as aliases for the Twelve Data key.
+No external market-data provider is required - quotes, candle history, and FX conversion are all generated locally (see `server.js`).
