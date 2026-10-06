@@ -3157,6 +3157,13 @@ async function loadChartForCurrentSymbol() {
 
 function selectTradeSymbol(row) {
   Object.assign(tradeChartState, readTradeRow(row));
+  // Mirrors fxccActiveSection below (see hydrateSession) - without this, a
+  // refresh always comes back to the chart's hardcoded default symbol
+  // (XAUUSD), not whatever was actually being viewed/simulated, so a
+  // running simulation on any other symbol looks like it "resets" to
+  // TradingView's real chart after a refresh - that symbol genuinely isn't
+  // simulated, the page just isn't showing the one that is anymore.
+  localStorage.setItem("fxccTradeSymbol", tradeChartState.symbol);
   document.querySelectorAll(".watch-row").forEach((item) => item.classList.toggle("is-selected", item === row));
   loadChartForCurrentSymbol();
   renderTradeTicket();
@@ -5216,6 +5223,12 @@ document.querySelector("#updateBannerRefresh")?.addEventListener("click", () => 
 });
 
 seedMetalData();
+// Restored before hydrateSession so the "trade" section it may jump back
+// into (and renderTradeWatchlist's own selection, once instruments load)
+// both already agree on which symbol was actually being viewed - see
+// selectTradeSymbol, which is where this gets written.
+const savedTradeSymbol = localStorage.getItem("fxccTradeSymbol");
+if (savedTradeSymbol) tradeChartState.symbol = savedTradeSymbol;
 hydrateSession();
 renderTickers();
 renderBook();
