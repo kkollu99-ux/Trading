@@ -1569,6 +1569,88 @@ function seedStreamCandleHistoryFromRest(symbol, candles) {
   streamCandleHistory.set(symbol, mapped);
 }
 
+// A once-a-day snapshot of real candles for EVERY instrument (not just the
+// couple with a live stream subscription - see quoteLiveSymbols) - gives
+// every product a real historical chart and real volatility to simulate
+// from, at the cost of one REST call per instrument per day rather than
+// continuously polling/streaming all of them (which the market data
+// provider's daily credit cap couldn't sustain). candleSnapshotStore is the
+// in-memory "hot" copy every request reads; candle_snapshots is where it's
+// persisted so a restart doesn't lose the day's data and force every
+// product back to synthetic-only until the next fetch cycle.
+const candleSnapshotStore = new Map(); // symbol -> { candles, updatedAt }
+
+async function loadCandleSnapshotsFromDb() {
+  if (!pool) return;
+  try {
+    const rows = await query("SELECT symbol, candles, updated_at FROM candle_snapshots");
+    for (const row of rows) {
+      candleSnapshotStore.set(row.symbol, { candles: row.candles, updatedAt: row.updated_at });
+    }
+  } catch (error) {
+    console.warn("Loading candle snapshots failed:", error.message);
+  }
+}
+
+async function saveCandleSnapshot(symbol, candles) {
+  candleSnapshotStore.set(symbol, { candles, updatedAt: new Date().toISOString() });
+  if (!pool) return;
+  await query(
+    `INSERT INTO candle_snapshots (symbol, candles, updated_at) VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (symbol) DO UPDATE SET candles = EXCLUDED.candles, updated_at = NOW()`,
+    [symbol, JSON.stringify(candles)],
+  );
+}
+
+// Spaced out rather than fired in parallel - this loops every configured
+// instrument (currently ~35), and bursting that many requests at once risks
+// tripping the provider's per-minute rate limit even though the total daily
+// credit cost is trivial.
+const candleSnapshotFetchDelayMs = 400;
+
+async function fetchDailyCandleSnapshots() {
+  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
+  const key = marketDataApiKey;
+  if (provider !== "twelvedata" || !key) return;
+
+  const instruments = await listInstruments({});
+  for (const instrument of instruments) {
+    try {
+      const url = new URL("https://api.twelvedata.com/time_series");
+      url.searchParams.set("symbol", instrument.symbol);
+      url.searchParams.set("interval", "1min");
+      url.searchParams.set("outputsize", "200");
+      url.searchParams.set("timezone", "UTC");
+      url.searchParams.set("apikey", key);
+      const upstream = await fetch(url);
+      const payload = await upstream.json();
+      if (payload?.status === "error" || !Array.isArray(payload?.values)) {
+        console.warn(`Daily candle snapshot skipped for ${instrument.symbol}:`, payload?.message || "no data returned");
+      } else {
+        const candles = payload.values
+          .map((point) => ({
+            time: point.datetime,
+            open: Number(point.open),
+            high: Number(point.high),
+            low: Number(point.low),
+            close: Number(point.close),
+            volume: Number(point.volume || 0),
+          }))
+          .reverse();
+        await saveCandleSnapshot(instrument.symbol, candles);
+        // Also feeds streamCandleHistory (a no-op for symbols the live
+        // stream already keeps well-stocked - see the guard inside) so a
+        // simulation on any instrument draws noise from real shape, not
+        // just the couple that have their own live tick stream.
+        seedStreamCandleHistoryFromRest(instrument.symbol, candles);
+      }
+    } catch (error) {
+      console.warn(`Daily candle snapshot failed for ${instrument.symbol}:`, error.message);
+    }
+    await new Promise((resolve) => setTimeout(resolve, candleSnapshotFetchDelayMs));
+  }
+}
+
 // The "earlier data" a simulation replays as noise: the real %-change from
 // one stored 1-minute bar's close to the next, across whatever real history
 // is on hand (stream-built or REST-seeded - see above). Sampling from this
@@ -1576,7 +1658,7 @@ function seedStreamCandleHistoryFromRest(symbol, candles) {
 // the instrument's own actual recent volatility shape - its mix of small
 // drifts and occasional bigger moves - rather than inventing one.
 function buildVolatilityTemplate(symbol) {
-  const history = streamCandleHistory.get(symbol);
+  const history = streamCandleHistory.get(symbol) || candleSnapshotStore.get(symbol)?.candles;
   if (!history || history.length < 5) return null;
   const changes = [];
   for (let i = 1; i < history.length; i += 1) {
@@ -2412,6 +2494,16 @@ app.get("/api/markets/candles", async (request, response) => {
   }
 
   if (!quoteLiveSymbols.includes(symbol)) {
+    // Not worth an on-demand REST call for every product a user happens to
+    // open a chart for (that's exactly the credit-budget risk
+    // quoteLiveSymbols exists to avoid) - but the once-a-day snapshot job
+    // (see fetchDailyCandleSnapshots) already paid that cost for every
+    // instrument up front, so serve its result instead of a flat 400
+    // whenever it has one.
+    if (range === "1M") {
+      const snapshot = candleSnapshotStore.get(symbol);
+      if (snapshot?.candles?.length) return response.json({ symbol, range, candles: snapshot.candles, source: "daily" });
+    }
     return response.status(400).json({ error: "Historical candles are only available for live-enabled symbols right now." });
   }
 
@@ -2598,7 +2690,7 @@ wss.on("connection", (socket) => {
 });
 
 seedDefaults()
-  .then(() => {
+  .then(async () => {
     server.listen(port, () => {
       console.log(`FXCC platform running on http://127.0.0.1:${port}`);
     });
@@ -2611,6 +2703,13 @@ seedDefaults()
     setInterval(pollMarketStatusOnce, marketStatusPollIntervalMs);
     pollFxRatesOnce();
     setInterval(pollFxRatesOnce, fxRatePollIntervalMs);
+    // Yesterday's (or earlier today's) snapshot is useful the instant the
+    // process comes back up - loaded before the fresh fetch below so every
+    // product has real candles/volatility shape available immediately
+    // rather than only after today's fetch cycle finishes.
+    await loadCandleSnapshotsFromDb();
+    fetchDailyCandleSnapshots();
+    setInterval(fetchDailyCandleSnapshots, 24 * 60 * 60 * 1000);
   })
   .catch((error) => {
     console.error("Failed to start FXCC platform", error);
