@@ -61,13 +61,6 @@ const allowedSymbols = (process.env.ALLOWED_SYMBOLS || defaultAllowedSymbols)
   .map((symbol) => symbol.trim().toUpperCase())
   .filter(Boolean);
 
-const marketDataApiKey =
-  process.env.MARKET_DATA_API_KEY ||
-  process.env.TWELVEDATA_API_KEY ||
-  process.env.TWELVEDATAAPI ||
-  process.env.twelvedataAPI ||
-  "";
-
 const defaultInstruments = [
   { symbol: "XAU/USD", displayName: "Gold / US Dollar", category: "metals", enabled: true, tradeEnabled: true },
   { symbol: "XAG/USD", displayName: "Silver / US Dollar", category: "metals", enabled: true, tradeEnabled: true },
@@ -1305,188 +1298,64 @@ app.get("/api/admin/logs", requireAuth, attachUser, requireRole("admin"), async 
   response.json({ logs });
 });
 
-// Twelve Data's free/basic tier caps at ~8 credits/minute AND a hard 800
-// credits/DAY (1 credit per symbol per call) - the app needs quotes for 40+
-// symbols. A single big batched call would blow the whole minute's budget in
-// one request no matter how rarely it's made, and per-request caching
-// doesn't help either, because every browser tab would still need its own
-// eventual upstream fetch. So instead of fetching on request, a single
-// background poller owns the upstream budget: it rotates through the
-// tradable instrument list in small batches and writes results into a
-// shared in-memory store. Every client request just reads that store —
-// free, instant, and its cost is fixed regardless of how many tabs or users
-// are watching.
+// No external market-data provider: every price in this app - quotes,
+// candle history, FX conversion - is generated locally. That used to be
+// just the last-resort fallback for when a real provider (Twelve Data)
+// wasn't configured or its credits ran out; it's now the only path. The
+// previous design (polling 40+ symbols on a schedule, a live WebSocket
+// subscription, daily REST candle fetches per instrument) existed purely
+// to stay under a real provider's rate/credit limits - none of that
+// applies to a local computation, so it's gone rather than kept around
+// disabled, removing the risk of ever silently depending on it again.
 //
-// The interval is sized against the DAILY cap, not just the per-minute one -
-// at 7 credits/batch, one batch every 30 minutes is ~336 credits/day,
-// leaving headroom for the other pollers below (market status, FX rates)
-// and for on-demand candle fetches, all sharing the same 800/day budget.
-// Learned the hard way: an earlier version of this poller ran every 60s
-// once widened to the full catalog, which blew the entire day's credit
-// budget in under 10 minutes and took the previously-reliable XAU/USD live
-// feed down with it for the rest of the day.
-const quotePollBatchSize = Number(process.env.MARKET_DATA_POLL_BATCH_SIZE || 7);
-const quotePollIntervalMs = Number(process.env.MARKET_DATA_POLL_INTERVAL_MS || 1800000);
+// quoteLiveSymbols still scopes which symbols get an actively "ticking"
+// price broadcast over /ws (see tickSyntheticQuotes below) for a
+// realistic-feeling live Trade page - everything else is priced on demand
+// via getCurrentPrice's own synthetic formula instead of being ticked in
+// the background for no one to see.
 const quoteStore = new Map();
-let quotePollCursor = 0;
-
-// Scopes the two things below that need snappier-than-the-60s-rotation
-// updates: pollLiveQuotesOnce's own short-interval poll, and the Twelve Data
-// WebSocket subscription. pollQuotesOnce (above) is NOT scoped to this list -
-// it always rotates the full tradable catalog at a fixed, budget-safe pace;
-// this just gives a handful of symbols a faster top-up on top of that.
 const quoteLiveSymbols = (process.env.MARKET_DATA_LIVE_SYMBOLS || "XAU/USD")
   .split(",")
   .map((symbol) => symbol.trim().toUpperCase())
   .filter(Boolean);
-
-async function pollQuotesOnce() {
-  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
-  const key = marketDataApiKey;
-  if (provider !== "twelvedata" || !key) return;
-
-  // Rotates the FULL tradable catalog (not just quoteLiveSymbols, which
-  // scopes the separate faster poller below) - batched at quotePollBatchSize
-  // per cycle so this stays within budget however large the catalog is,
-  // just taking longer to fully rotate through everyone.
-  const symbols = (await listInstruments({ tradeOnly: true })).map((instrument) => instrument.symbol);
-  if (!symbols.length) return;
-
-  const batch = [];
-  for (let i = 0; i < Math.min(quotePollBatchSize, symbols.length); i += 1) {
-    batch.push(symbols[quotePollCursor % symbols.length]);
-    quotePollCursor += 1;
-  }
-
-  try {
-    const url = new URL("https://api.twelvedata.com/quote");
-    url.searchParams.set("symbol", batch.join(","));
-    url.searchParams.set("timezone", "UTC");
-    url.searchParams.set("apikey", key);
-    const upstream = await fetch(url);
-    const data = await upstream.json();
-    if (data?.status === "error") {
-      console.warn("Market data poll error:", data.message);
-      return;
-    }
-    const quotesBySymbol = batch.length === 1 ? { [batch[0]]: data } : data;
-    for (const symbol of batch) {
-      if (quotesBySymbol[symbol]) quoteStore.set(symbol, { data: quotesBySymbol[symbol], at: Date.now() });
-    }
-  } catch (error) {
-    console.warn("Market data poll failed:", error.message);
-  }
-}
-
-// Live symbols (Gold, for now) need much snappier updates than the 60s rotation
-// above can give a single symbol its fair share of credits for. Twelve Data's push
-// WebSocket (below) is the real fix — ticks arrive as they happen with no REST
-// credit cost at all — but while that connection is down/unavailable we still want
-// something better than a 60s-stale price, so this dedicated poller refreshes just
-// the live symbols on its own short interval. It's sized to stay under the ~8
-// credit/minute cap even if it's the only thing spending credits: interval_ms =
-// (symbolCount / 7) * 60000, i.e. at most ~7 credits/minute, leaving headroom for
-// on-demand candle fetches.
-const quoteLivePollIntervalMs = Math.max(
-  5000,
-  Number(process.env.MARKET_DATA_LIVE_POLL_INTERVAL_MS) || Math.ceil((Math.max(1, quoteLiveSymbols.length) / 7) * 60000),
-);
-let twelveDataStreamConnected = false;
-
-async function pollLiveQuotesOnce() {
-  if (twelveDataStreamConnected) return; // WS stream already delivering live ticks for free
-  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
-  const key = marketDataApiKey;
-  if (provider !== "twelvedata" || !key || !quoteLiveSymbols.length) return;
-
-  try {
-    const url = new URL("https://api.twelvedata.com/quote");
-    url.searchParams.set("symbol", quoteLiveSymbols.join(","));
-    url.searchParams.set("timezone", "UTC");
-    url.searchParams.set("apikey", key);
-    const upstream = await fetch(url);
-    const data = await upstream.json();
-    if (data?.status === "error") {
-      console.warn("Live quote poll error:", data.message);
-      return;
-    }
-    const quotesBySymbol = quoteLiveSymbols.length === 1 ? { [quoteLiveSymbols[0]]: data } : data;
-    for (const symbol of quoteLiveSymbols) {
-      const quote = quotesBySymbol[symbol];
-      if (!quote) continue;
-      quoteStore.set(symbol, { data: quote, at: Date.now() });
-      const price = Number(quote.close ?? quote.price);
-      if (Number.isFinite(price)) {
-        recordStreamCandleTick(symbol, price, Date.now());
-        broadcast({ type: "price-tick", symbol, price, source: "poll", timestamp: new Date().toISOString() });
-      }
-    }
-  } catch (error) {
-    console.warn("Live quote poll failed:", error.message);
-  }
-}
-
-// Neither the WS price stream's tick payloads nor pollLiveQuotesOnce (which stops
-// running once the stream is connected) ever say whether the market is actually
-// open — a closed market just goes quiet, indistinguishable from a stalled feed.
-// Twelve Data's REST /quote response carries an explicit is_market_open flag, so
-// a slow, always-on poller (independent of stream state) tracks it separately and
-// broadcasts only on change. Kept in the same 800-credit/day budget as
-// pollQuotesOnce above - narrowly scoped (quoteLiveSymbols, a handful of
-// symbols at most) so it stays cheap even at this interval.
-const marketStatusPollIntervalMs = Math.max(60000, Number(process.env.MARKET_DATA_STATUS_POLL_INTERVAL_MS) || 1800000);
 const marketStatusBySymbol = new Map();
 
-async function pollMarketStatusOnce() {
-  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
-  const key = marketDataApiKey;
-  if (provider !== "twelvedata" || !key || !quoteLiveSymbols.length) return;
+// A smooth, deterministic-ish per-symbol walk (small random step off
+// whatever this symbol last priced at, falling back to getCurrentPrice's
+// own hash-seeded starting point the first time) - same shape of movement
+// the old real poller produced, just generated locally instead of fetched.
+// Skips any symbol a simulation currently owns so the two never fight over
+// the same price.
+const syntheticQuoteTickIntervalMs = Number(process.env.SYNTHETIC_QUOTE_TICK_INTERVAL_MS || 2500);
 
-  try {
-    const url = new URL("https://api.twelvedata.com/quote");
-    url.searchParams.set("symbol", quoteLiveSymbols.join(","));
-    url.searchParams.set("timezone", "UTC");
-    url.searchParams.set("apikey", key);
-    const upstream = await fetch(url);
-    const data = await upstream.json();
-    if (data?.status === "error") {
-      console.warn("Market status poll error:", data.message);
-      return;
+function tickSyntheticQuotes() {
+  for (const symbol of quoteLiveSymbols) {
+    if (priceSimulations.has(symbol)) continue;
+    const previous = Number(quoteStore.get(symbol)?.data?.close) || getCurrentPrice(symbol);
+    const next = Math.max(0.00001, Number((previous * (1 + (Math.random() - 0.5) * 0.0015)).toFixed(6)));
+    quoteStore.set(symbol, { data: { symbol, close: next, price: next, is_market_open: true }, at: Date.now() });
+    recordStreamCandleTick(symbol, next, Date.now());
+    broadcast({ type: "price-tick", symbol, price: next, source: "poll", timestamp: new Date().toISOString() });
+    if (marketStatusBySymbol.get(symbol) !== true) {
+      marketStatusBySymbol.set(symbol, true);
+      broadcast({ type: "market-status", symbol, isOpen: true });
     }
-    const quotesBySymbol = quoteLiveSymbols.length === 1 ? { [quoteLiveSymbols[0]]: data } : data;
-    for (const symbol of quoteLiveSymbols) {
-      const quote = quotesBySymbol[symbol];
-      if (!quote || typeof quote.is_market_open !== "boolean") continue;
-      const previous = marketStatusBySymbol.get(symbol);
-      marketStatusBySymbol.set(symbol, quote.is_market_open);
-      if (previous !== quote.is_market_open) {
-        broadcast({ type: "market-status", symbol, isOpen: quote.is_market_open });
-      }
-    }
-  } catch (error) {
-    console.warn("Market status poll failed:", error.message);
   }
 }
 
 // Lets the client show account balances, P&L, and instrument prices in a
 // currency other than USD - purely a display conversion (everything stays
 // stored and computed in USD; see /api/markets/fx-rate for how the client
-// gets this rate). One credit per currency per cycle, so this list (27
-// currencies) costs 27 credits every cycle - at a 3-hour interval that's
-// ~216/day, sharing the same 800/day budget as the pollers above. Exchange
-// rates don't move fast enough in a demo app to need anything tighter.
-const fxRatePollIntervalMs = Math.max(60000, Number(process.env.MARKET_DATA_FX_POLL_INTERVAL_MS) || 10800000);
-// USD is the base currency - always rate 1, never polled or stored.
+// gets this rate). These are fixed approximations (roughly early-2026
+// rates) rather than polled from a live source - exchange rates don't move
+// fast enough in a demo app to need anything tighter, and it removes a
+// whole category of external dependency for a number that's only ever
+// cosmetic here.
 const supportedDisplayCurrencies = [
   "INR", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY", "SGD", "HKD",
   "NZD", "AED", "SAR", "ZAR", "SEK", "NOK", "DKK", "MXN", "BRL", "RUB",
   "KRW", "THB", "IDR", "MYR", "PHP", "TRY", "PLN",
 ];
-const fxRateStore = new Map(); // currency -> { rate, at }
-// Used until the first successful poll succeeds, or whenever the Twelve Data
-// provider isn't configured (local/demo mode) - clearly an approximation
-// (rounded, roughly early-2026 rates), never treated as live (see the
-// isLive flag in the endpoint below).
 const fxRateFallbacks = {
   INR: 83.5, EUR: 0.92, GBP: 0.79, JPY: 149, AUD: 1.52, CAD: 1.36,
   CHF: 0.88, CNY: 7.24, SGD: 1.34, HKD: 7.82, NZD: 1.64, AED: 3.67,
@@ -1495,39 +1364,11 @@ const fxRateFallbacks = {
   PHP: 56.4, TRY: 32.1, PLN: 4.0,
 };
 
-async function pollFxRatesOnce() {
-  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
-  const key = marketDataApiKey;
-  if (provider !== "twelvedata" || !key) return;
-
-  for (const currency of supportedDisplayCurrencies) {
-    try {
-      const url = new URL("https://api.twelvedata.com/exchange_rate");
-      url.searchParams.set("symbol", `USD/${currency}`);
-      url.searchParams.set("apikey", key);
-      const upstream = await fetch(url);
-      const data = await upstream.json();
-      const rate = Number(data?.rate);
-      if (data?.status === "error" || !Number.isFinite(rate)) {
-        console.warn(`FX rate poll error (USD/${currency}):`, data?.message);
-        continue;
-      }
-      fxRateStore.set(currency, { rate, at: Date.now() });
-    } catch (error) {
-      console.warn(`FX rate poll failed (USD/${currency}):`, error.message);
-    }
-  }
-}
-
-// A rolling, real 1-minute candle history built entirely from the live
-// stream ticks below - at no REST credit cost, unlike /api/markets/candles'
-// own Twelve Data time_series call. That call shares the same daily credit
-// cap as every other REST poll in this file, so it fails right along with
-// them once the cap is hit (see pollQuotesOnce), and the chart would
-// otherwise have nothing real to fall back on even though gold's price
-// stream itself keeps working fine throughout. Capped to a couple hours of
-// 1-minute bars per symbol - plenty for the "1M" simulation chart, which
-// only ever wants the most recent ~70.
+// A rolling 1-minute candle history built from tickSyntheticQuotes' ticks
+// (quoteLiveSymbols only - everything else relies on the daily synthetic
+// snapshot below instead). Capped to a couple hours of 1-minute bars per
+// symbol - plenty for the "1M" simulation chart, which only ever wants the
+// most recent ~70.
 const streamCandleBucketMs = 60000;
 const streamCandleMaxBars = 180;
 const streamCandleHistory = new Map();
@@ -1569,15 +1410,13 @@ function seedStreamCandleHistoryFromRest(symbol, candles) {
   streamCandleHistory.set(symbol, mapped);
 }
 
-// A once-a-day snapshot of real candles for EVERY instrument (not just the
-// couple with a live stream subscription - see quoteLiveSymbols) - gives
-// every product a real historical chart and real volatility to simulate
-// from, at the cost of one REST call per instrument per day rather than
-// continuously polling/streaming all of them (which the market data
-// provider's daily credit cap couldn't sustain). candleSnapshotStore is the
-// in-memory "hot" copy every request reads; candle_snapshots is where it's
-// persisted so a restart doesn't lose the day's data and force every
-// product back to synthetic-only until the next fetch cycle.
+// A once-a-day candle history for EVERY instrument, generated locally (see
+// generateSyntheticDayCandles below) rather than fetched - gives every
+// product a historical chart and a volatility shape to simulate from, with
+// no external dependency or rate limit to manage. candleSnapshotStore is
+// the in-memory "hot" copy every request reads; candle_snapshots is where
+// it's persisted so a restart doesn't lose the day's data and regenerate
+// everyone from scratch on every deploy.
 const candleSnapshotStore = new Map(); // symbol -> { candles, updatedAt }
 
 async function loadCandleSnapshotsFromDb() {
@@ -1602,66 +1441,51 @@ async function saveCandleSnapshot(symbol, candles) {
   );
 }
 
-// This account's real limit turned out to be much tighter than the
-// 800/day figure the rest of this file's pollers are budgeted against: Twelve
-// Data also enforces a per-MINUTE cap (8 credits/minute here), confirmed by
-// production logs where this job's very first few calls - fired right
-// alongside every other startup poller (pollQuotesOnce, pollLiveQuotesOnce,
-// etc., which all also fire at boot) - immediately blew through it and every
-// single instrument failed. Spacing calls 10s apart keeps this job's own
-// pace to ~6/minute, leaving headroom for whatever the other pollers use
-// concurrently; there's no rush since this only needs to finish once a day.
-const candleSnapshotFetchDelayMs = 10000;
+// A full day (1440 one-minute bars) of locally-generated OHLC candles,
+// mean-reverting toward a slowly-oscillating trend line anchored at
+// basisPrice rather than a plain unbounded random walk - that trend line is
+// itself just two bounded sine/cosine waves, so it wanders without ever
+// drifting far from basisPrice over 1440 steps. Gives every instrument a
+// plausible-looking, internally-consistent day of history (and, via
+// buildVolatilityTemplate, a real-shaped mix of small/large moves for a
+// simulation's own noise to draw from) with no network call at all.
+function generateSyntheticDayCandles(symbol, basisPrice) {
+  const seed = [...symbol].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const spread = Math.max(basisPrice * 0.0007, 0.01);
+  const bars = 1440;
+  const now = Date.now();
+  let close = basisPrice;
+  const candles = [];
+  for (let index = 0; index < bars; index += 1) {
+    const wave = Math.sin((index + seed) / 180) * spread * 6;
+    const pressure = Math.cos((index + seed) / 340) * spread * 4;
+    const noise = (Math.random() - 0.5) * spread * 1.2;
+    const trendTarget = basisPrice + wave + pressure;
+    const open = close;
+    close = Math.max(0.00001, open + (trendTarget - open) * 0.02 + noise);
+    const high = Math.max(open, close) + Math.abs(noise) * 0.7 + spread * 0.1;
+    const low = Math.max(0.00001, Math.min(open, close) - Math.abs(noise) * 0.7 - spread * 0.1);
+    const volume = 20 + Math.abs(Math.sin(index / 24 + seed)) * 60;
+    const time = new Date(now - (bars - 1 - index) * streamCandleBucketMs).toISOString();
+    candles.push({ time, open, high, low, close, volume });
+  }
+  return candles;
+}
 
-async function fetchDailyCandleSnapshots() {
-  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
-  const key = marketDataApiKey;
-  if (provider !== "twelvedata" || !key) return;
-
+async function generateDailyCandleSnapshots() {
   const instruments = await listInstruments({});
   for (const instrument of instruments) {
     try {
-      const url = new URL("https://api.twelvedata.com/time_series");
-      url.searchParams.set("symbol", instrument.symbol);
-      url.searchParams.set("interval", "1min");
-      // A full day of 1-minute bars rather than just the last ~70 minutes -
-      // "up to now" for a continuously-traded instrument (forex, crypto)
-      // and whatever a stock/commodity's own session actually held for
-      // anything with fixed trading hours (Twelve Data simply returns
-      // fewer bars than requested once a session's real history runs out,
-      // so this is a safe upper bound rather than something that needs to
-      // match each instrument's actual hours). Confirmed via production
-      // logs that it's the earlier concurrent-poller collision, not this
-      // per-call size, that tripped the per-minute credit cap above.
-      url.searchParams.set("outputsize", "1440");
-      url.searchParams.set("timezone", "UTC");
-      url.searchParams.set("apikey", key);
-      const upstream = await fetch(url);
-      const payload = await upstream.json();
-      if (payload?.status === "error" || !Array.isArray(payload?.values)) {
-        console.warn(`Daily candle snapshot skipped for ${instrument.symbol}:`, payload?.message || "no data returned");
-      } else {
-        const candles = payload.values
-          .map((point) => ({
-            time: point.datetime,
-            open: Number(point.open),
-            high: Number(point.high),
-            low: Number(point.low),
-            close: Number(point.close),
-            volume: Number(point.volume || 0),
-          }))
-          .reverse();
-        await saveCandleSnapshot(instrument.symbol, candles);
-        // Also feeds streamCandleHistory (a no-op for symbols the live
-        // stream already keeps well-stocked - see the guard inside) so a
-        // simulation on any instrument draws noise from real shape, not
-        // just the couple that have their own live tick stream.
-        seedStreamCandleHistoryFromRest(instrument.symbol, candles);
-      }
+      const candles = generateSyntheticDayCandles(instrument.symbol, getCurrentPrice(instrument.symbol));
+      await saveCandleSnapshot(instrument.symbol, candles);
+      // Also feeds streamCandleHistory (a no-op for symbols that already
+      // have a healthy amount of their own real-time-ticked data - see the
+      // guard inside) so a simulation on any instrument draws noise from a
+      // real-shaped history, not just quoteLiveSymbols' own ticked ones.
+      seedStreamCandleHistoryFromRest(instrument.symbol, candles);
     } catch (error) {
-      console.warn(`Daily candle snapshot failed for ${instrument.symbol}:`, error.message);
+      console.warn(`Daily candle snapshot generation failed for ${instrument.symbol}:`, error.message);
     }
-    await new Promise((resolve) => setTimeout(resolve, candleSnapshotFetchDelayMs));
   }
 }
 
@@ -1696,93 +1520,6 @@ function buildVolatilityTemplate(symbol) {
   return { shape: changes.map((change) => change / meanAbs), meanAbsPercent: meanAbs };
 }
 
-// True push-based streaming: Twelve Data's WebSocket relays ticks the instant they
-// happen, at no REST credit cost, so this is the preferred path whenever the plan
-// supports it. It's proxied here (rather than opened directly from the browser) so
-// the API key never reaches the client, and ticks are fanned out to every connected
-// browser over the app's own /ws channel via broadcast().
-let twelveDataStreamReconnectMs = 2000;
-const twelveDataStreamMaxReconnectMs = 30000;
-let twelveDataStreamReconnectScheduled = false;
-
-function connectTwelveDataStream() {
-  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
-  const key = marketDataApiKey;
-  if (provider !== "twelvedata" || !key || !quoteLiveSymbols.length) return;
-
-  let socket;
-  try {
-    socket = new WebSocket(`wss://ws.twelvedata.com/v1/quotes/price?apikey=${key}`);
-  } catch (error) {
-    console.warn("Twelve Data stream connect failed:", error.message);
-    scheduleStreamReconnect();
-    return;
-  }
-
-  let heartbeat;
-
-  socket.on("open", () => {
-    twelveDataStreamConnected = true;
-    twelveDataStreamReconnectMs = 2000;
-    console.log("Twelve Data live price stream connected for", quoteLiveSymbols.join(", "));
-    socket.send(JSON.stringify({ action: "subscribe", params: { symbols: quoteLiveSymbols.join(",") } }));
-    heartbeat = setInterval(() => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ action: "heartbeat" }));
-    }, 10000);
-  });
-
-  socket.on("message", (raw) => {
-    let payload;
-    try {
-      payload = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
-    if (payload?.event !== "price" || !payload.symbol) return;
-    const symbol = String(payload.symbol).toUpperCase();
-    if (!quoteLiveSymbols.includes(symbol)) return;
-    const price = Number(payload.price);
-    if (!Number.isFinite(price)) return;
-
-    const existing = quoteStore.get(symbol);
-    quoteStore.set(symbol, {
-      data: { ...(existing?.data || {}), symbol, close: price, price, timestamp: payload.timestamp },
-      at: Date.now(),
-    });
-    recordStreamCandleTick(symbol, price, payload.timestamp ? payload.timestamp * 1000 : Date.now());
-    broadcast({
-      type: "price-tick",
-      symbol,
-      price,
-      bid: Number.isFinite(Number(payload.bid)) ? Number(payload.bid) : undefined,
-      ask: Number.isFinite(Number(payload.ask)) ? Number(payload.ask) : undefined,
-      source: "stream",
-      timestamp: payload.timestamp ? new Date(payload.timestamp * 1000).toISOString() : new Date().toISOString(),
-    });
-  });
-
-  socket.on("close", () => {
-    twelveDataStreamConnected = false;
-    if (heartbeat) clearInterval(heartbeat);
-    scheduleStreamReconnect();
-  });
-
-  socket.on("error", (error) => {
-    console.warn("Twelve Data stream error:", error.message);
-    twelveDataStreamConnected = false;
-  });
-}
-
-function scheduleStreamReconnect() {
-  if (twelveDataStreamReconnectScheduled) return;
-  twelveDataStreamReconnectScheduled = true;
-  setTimeout(() => {
-    twelveDataStreamReconnectScheduled = false;
-    connectTwelveDataStream();
-  }, twelveDataStreamReconnectMs);
-  twelveDataStreamReconnectMs = Math.min(twelveDataStreamMaxReconnectMs, twelveDataStreamReconnectMs * 2);
-}
-
 // Standard forex/CFD convention: 1 lot = 100 units of the instrument. Margin
 // required = (lots * unitsPerLot * price) / multiplier (multiplier acting as
 // leverage, e.g. 100 = 1:100), plus a small handling fee on top of margin.
@@ -1790,10 +1527,10 @@ const orderUnitsPerLot = 100;
 const orderFeeRate = 0.001;
 
 // Best-effort current price for order pricing: prefer the live quoteStore
-// (populated by the twelvedata pollers/stream, but only for quoteLiveSymbols
-// - a handful of instruments, Gold only by default), then the daily candle
+// (populated by tickSyntheticQuotes, but only for quoteLiveSymbols - a
+// handful of instruments, Gold only by default), then the daily candle
 // snapshot (candleSnapshotStore, populated for every tradable instrument -
-// see fetchDailyCandleSnapshots), and only fall back to a deterministic,
+// see generateDailyCandleSnapshots), and only fall back to a deterministic,
 // slowly-drifting per-symbol synthetic price when NEITHER real source has
 // this symbol yet (mock mode, or the very first day before either job has
 // reached it) - so opening and closing a position still produce a sane,
@@ -2476,30 +2213,27 @@ app.get("/api/markets/quotes", async (request, response) => {
   const symbols = requestedSymbols.filter((symbol) => tradableSymbols.has(symbol));
   if (!symbols.length) return response.status(400).json({ error: "No allowed symbols requested" });
 
-  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
   // Falling back to getCurrentPrice() - the same choke point an admin
   // simulation's starting price and every order/margin calc already go
   // through - instead of each symbol's own unrelated random/index-based mock
   // price keeps whatever this client ends up displaying in sync with the
   // price a simulation will actually start from. Without this, a symbol
-  // quoteStore hasn't been polled for yet (always true right after a
-  // restart, with no real provider configured, or any time the day's API
-  // credit cap is hit) showed a price with no relation to getCurrentPrice()'s
-  // fallback, so starting a simulation on it jumped straight from that
-  // mismatched price to the real one.
+  // quoteStore hasn't been ticked for yet (anything outside
+  // quoteLiveSymbols, or right after a restart) showed a price with no
+  // relation to getCurrentPrice()'s fallback, so starting a simulation on it
+  // jumped straight from that mismatched price to the real one.
   const data = {};
   for (const symbol of symbols) {
     const entry = quoteStore.get(symbol);
     data[symbol] = entry ? entry.data : { symbol, price: getCurrentPrice(symbol), simulated: true, timestamp: new Date().toISOString() };
   }
-  response.json({ provider, symbols, data });
+  response.json({ provider: "synthetic", symbols, data });
 });
 
 // Backs the display-currency picker - a pure USD-to-<currency> conversion
 // rate for the client to multiply its (always USD-denominated internally)
-// balances, P&L, and prices by. isLive tells the client whether this is a
-// real polled rate or the fallback approximation, in case it wants to show
-// that distinction somewhere.
+// balances, P&L, and prices by. Fixed approximations rather than live rates
+// - see fxRateFallbacks above.
 app.get("/api/markets/fx-rate", (request, response) => {
   const currency = String(request.query.currency || "").toUpperCase();
   if (currency === "USD") {
@@ -2508,55 +2242,63 @@ app.get("/api/markets/fx-rate", (request, response) => {
   if (!supportedDisplayCurrencies.includes(currency)) {
     return response.status(400).json({ error: "Unsupported currency" });
   }
-  const entry = fxRateStore.get(currency);
-  if (entry) return response.json({ currency, rate: entry.rate, isLive: true, at: new Date(entry.at).toISOString() });
   response.json({ currency, rate: fxRateFallbacks[currency], isLive: false, at: new Date().toISOString() });
 });
 
-// Historical OHLC candles for the chart. Twelve Data's time_series endpoint is
-// ~1 credit per call regardless of outputsize, so unlike /quote this is cheap enough
-// to fetch on demand (timeframe switch) rather than needing a background poller — but
-// it's still scoped to quoteLiveSymbols (Gold only, for now) and short-cached so a user
-// rapidly clicking between timeframes can't spam the upstream API.
-const candleRangeConfig = {
-  "1M": { interval: "1min", outputsize: 70 },
-  "5M": { interval: "5min", outputsize: 70 },
-  "15M": { interval: "15min", outputsize: 70 },
-  "30M": { interval: "30min", outputsize: 70 },
-  "1H": { interval: "1h", outputsize: 70 },
-  "1D": { interval: "1day", outputsize: 70 },
-  "5D": { interval: "1h", outputsize: 120 },
-  "1MO": { interval: "1day", outputsize: 30 },
-  "5MO": { interval: "1day", outputsize: 150 },
-  "1Y": { interval: "1week", outputsize: 52 },
-  // Twelve Data has no literal "give me everything" mode - this is a practical
-  // stand-in (5 years of monthly bars) rather than a true unbounded history.
-  ALL: { interval: "1month", outputsize: 60 },
+// Historical OHLC candles for the chart. Served entirely from this
+// instrument's daily synthetic snapshot (see generateDailyCandleSnapshots) -
+// 1440 one-minute bars - resampled into whatever coarser interval was
+// asked for (see resampleCandles). Every symbol can be served this way now,
+// not just a scoped "live" subset - generating/resampling is free. A daily
+// snapshot only covers a single day, so a range wider than that (1Y, ALL,
+// a multi-year custom span) just resamples down to however few bars one
+// day's worth actually produces rather than inventing years of history.
+const candleRangeMinutes = {
+  "1M": 1, "5M": 5, "15M": 15, "30M": 30, "1H": 60, "1D": 1440,
+  "5D": 60, "1MO": 1440, "5MO": 1440, "1Y": 10080, ALL: 43200,
 };
-const candleRangeErrorMessage = `Invalid range. Use ${Object.keys(candleRangeConfig).join(", ")}.`;
-const candleCacheTtlMs = Number(process.env.MARKET_DATA_CANDLE_CACHE_TTL_MS || 30000);
-const candleCache = new Map();
+const candleRangeErrorMessage = `Invalid range. Use ${Object.keys(candleRangeMinutes).join(", ")}.`;
 
 // The calendar/date-range picker needs an arbitrary [start, end] window rather
-// than one of the fixed canned ranges above, so interval can't be looked up from
-// a table - it's picked from the span itself, coarsening as the window widens to
-// keep the response size (and Twelve Data's own per-call limits) reasonable.
-function intervalForSpan(days) {
-  if (days <= 7) return "1h";
-  if (days <= 90) return "1day";
-  if (days <= 730) return "1week";
-  return "1month";
+// than one of the fixed canned ranges above, so the bucket size can't be
+// looked up from a table - it's picked from the span itself, coarsening as
+// the window widens.
+function intervalMinutesForSpan(days) {
+  if (days <= 7) return 60;
+  if (days <= 90) return 1440;
+  if (days <= 730) return 10080;
+  return 43200;
 }
 
-app.get("/api/markets/candles", async (request, response) => {
+// Aggregates consecutive 1-minute bars into bucketMinutes-wide bars -
+// open/close from the bucket's first/last bar, high/low across the whole
+// bucket, volume summed. A no-op for the native 1-minute bucket size.
+function resampleCandles(oneMinuteCandles, bucketMinutes) {
+  if (bucketMinutes <= 1 || !oneMinuteCandles.length) return oneMinuteCandles;
+  const resampled = [];
+  for (let i = 0; i < oneMinuteCandles.length; i += bucketMinutes) {
+    const chunk = oneMinuteCandles.slice(i, i + bucketMinutes);
+    if (!chunk.length) continue;
+    resampled.push({
+      time: chunk[0].time,
+      open: chunk[0].open,
+      close: chunk[chunk.length - 1].close,
+      high: Math.max(...chunk.map((candle) => candle.high)),
+      low: Math.min(...chunk.map((candle) => candle.low)),
+      volume: chunk.reduce((sum, candle) => sum + (candle.volume || 0), 0),
+    });
+  }
+  return resampled;
+}
+
+app.get("/api/markets/candles", (request, response) => {
   const symbol = String(request.query.symbol || "").trim().toUpperCase();
   const startParam = String(request.query.start || "").trim();
   const endParam = String(request.query.end || "").trim();
   const isCustomRange = Boolean(startParam && endParam);
 
   let range;
-  let rangeSpec;
-  let cacheKey;
+  let bucketMinutes;
 
   if (isCustomRange) {
     const startDate = new Date(`${startParam}T00:00:00Z`);
@@ -2566,100 +2308,18 @@ app.get("/api/markets/candles", async (request, response) => {
     }
     const spanDays = (endDate - startDate) / 86400000;
     range = "CUSTOM";
-    rangeSpec = { interval: intervalForSpan(spanDays) };
-    cacheKey = `${symbol}:CUSTOM:${startParam}:${endParam}`;
+    bucketMinutes = intervalMinutesForSpan(spanDays);
   } else {
     range = String(request.query.range || "1H").trim().toUpperCase();
-    rangeSpec = candleRangeConfig[range];
-    if (!rangeSpec) return response.status(400).json({ error: candleRangeErrorMessage });
-    cacheKey = `${symbol}:${range}`;
+    bucketMinutes = candleRangeMinutes[range];
+    if (!bucketMinutes) return response.status(400).json({ error: candleRangeErrorMessage });
   }
 
-  if (!quoteLiveSymbols.includes(symbol)) {
-    // Not worth an on-demand REST call for every product a user happens to
-    // open a chart for (that's exactly the credit-budget risk
-    // quoteLiveSymbols exists to avoid) - but the once-a-day snapshot job
-    // (see fetchDailyCandleSnapshots) already paid that cost for every
-    // instrument up front, so serve its result instead of a flat 400
-    // whenever it has one.
-    if (range === "1M") {
-      const snapshot = candleSnapshotStore.get(symbol);
-      if (snapshot?.candles?.length) return response.json({ symbol, range, candles: snapshot.candles, source: "daily" });
-    }
-    return response.status(400).json({ error: "Historical candles are only available for live-enabled symbols right now." });
+  const snapshot = candleSnapshotStore.get(symbol);
+  if (!snapshot?.candles?.length) {
+    return response.status(400).json({ error: "Historical candles aren't available for this symbol yet." });
   }
-
-  const provider = process.env.MARKET_DATA_PROVIDER || "mock";
-  const key = marketDataApiKey;
-  if (provider !== "twelvedata" || !key) {
-    return response.status(400).json({ error: "Market data provider not configured" });
-  }
-
-  const cached = candleCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < candleCacheTtlMs) {
-    return response.json({ symbol, range, candles: cached.candles });
-  }
-
-  // Real candles built from the free price-stream buffer (see
-  // recordStreamCandleTick above) - only meaningful for the "1M" range,
-  // since the buffer is always 1-minute bars. Used below whenever the
-  // time_series call itself fails, which happens together with every other
-  // REST poll in this file once the day's Twelve Data credit cap is hit -
-  // the stream (a separate, uncapped connection) keeps working regardless,
-  // so this keeps "1M" charts (what the simulation feature uses) on real
-  // data instead of falling all the way back to a synthetic mock shape.
-  const streamFallback = () => {
-    if (range !== "1M") return null;
-    const history = streamCandleHistory.get(symbol);
-    if (!history || history.length < 3) return null;
-    return history.map(({ time, open, high, low, close, volume }) => ({ time, open, high, low, close, volume }));
-  };
-
-  try {
-    const url = new URL("https://api.twelvedata.com/time_series");
-    url.searchParams.set("symbol", symbol);
-    url.searchParams.set("interval", rangeSpec.interval);
-    if (isCustomRange) {
-      url.searchParams.set("start_date", startParam);
-      url.searchParams.set("end_date", endParam);
-    } else {
-      url.searchParams.set("outputsize", String(rangeSpec.outputsize));
-    }
-    url.searchParams.set("timezone", "UTC");
-    url.searchParams.set("apikey", key);
-    const upstream = await fetch(url);
-    const payload = await upstream.json();
-
-    if (payload?.status === "error" || !Array.isArray(payload?.values)) {
-      if (cached) return response.json({ symbol, range, candles: cached.candles, stale: true });
-      const fromStream = streamFallback();
-      if (fromStream) return response.json({ symbol, range, candles: fromStream, source: "stream" });
-      return response.status(502).json({ error: payload?.message || "Market data provider error" });
-    }
-
-    const candles = payload.values
-      .map((point) => ({
-        time: point.datetime,
-        open: Number(point.open),
-        high: Number(point.high),
-        low: Number(point.low),
-        close: Number(point.close),
-        volume: Number(point.volume || 0),
-      }))
-      .reverse();
-
-    candleCache.set(cacheKey, { candles, at: Date.now() });
-    // Only 1-minute bars match streamCandleHistory's own bucket size - seeding
-    // from a coarser range (1H/1D/etc.) would feed hourly/daily-sized swings
-    // into a simulation's per-tick noise, producing wild single-tick jumps.
-    if (rangeSpec.interval === "1min") seedStreamCandleHistoryFromRest(symbol, candles);
-    return response.json({ symbol, range, candles });
-  } catch (error) {
-    if (cached) return response.json({ symbol, range, candles: cached.candles, stale: true });
-    const fromStream = streamFallback();
-    if (fromStream) return response.json({ symbol, range, candles: fromStream, source: "stream" });
-    return response.status(502).json({ error: error.message || "Market data provider error" });
-  }
+  response.json({ symbol, range, candles: resampleCandles(snapshot.candles, bucketMinutes), source: "daily" });
 });
 
 app.post("/api/service-requests", requireAuth, attachUser, upload.single("attachment"), async (request, response) => {
@@ -2773,8 +2433,9 @@ function broadcast(payload) {
 
 wss.on("connection", (socket) => {
   socket.send(JSON.stringify({ type: "connected", message: "FXCC realtime channel connected" }));
-  // A freshly-connected client would otherwise wait up to marketStatusPollIntervalMs
-  // for its first market-status update, so hand it whatever's already known now.
+  // A freshly-connected client would otherwise wait up to the next
+  // tickSyntheticQuotes cycle for its first market-status update, so hand
+  // it whatever's already known now.
   for (const [symbol, isOpen] of marketStatusBySymbol.entries()) {
     socket.send(JSON.stringify({ type: "market-status", symbol, isOpen }));
   }
@@ -2785,28 +2446,15 @@ seedDefaults()
     server.listen(port, () => {
       console.log(`FXCC platform running on http://127.0.0.1:${port}`);
     });
-    pollQuotesOnce();
-    setInterval(pollQuotesOnce, quotePollIntervalMs);
-    connectTwelveDataStream();
-    pollLiveQuotesOnce();
-    setInterval(pollLiveQuotesOnce, quoteLivePollIntervalMs);
-    pollMarketStatusOnce();
-    setInterval(pollMarketStatusOnce, marketStatusPollIntervalMs);
-    pollFxRatesOnce();
-    setInterval(pollFxRatesOnce, fxRatePollIntervalMs);
+    tickSyntheticQuotes();
+    setInterval(tickSyntheticQuotes, syntheticQuoteTickIntervalMs);
     // Yesterday's (or earlier today's) snapshot is useful the instant the
-    // process comes back up - loaded before the fresh fetch below so every
-    // product has real candles/volatility shape available immediately
-    // rather than only after today's fetch cycle finishes.
+    // process comes back up - loaded before the fresh generation below so
+    // every product has candles/volatility shape available immediately
+    // rather than only after today's generation finishes.
     await loadCandleSnapshotsFromDb();
-    // Delayed rather than kicked off immediately: every poller above also
-    // fires right at startup, and this account's per-minute credit cap (see
-    // fetchDailyCandleSnapshots) has no separate allowance for "but it's
-    // just starting up" - colliding with that burst is what caused every
-    // instrument to fail on the first deploy of this feature. By the time
-    // this fires, that startup burst has long settled.
-    setTimeout(fetchDailyCandleSnapshots, 90000);
-    setInterval(fetchDailyCandleSnapshots, 24 * 60 * 60 * 1000);
+    await generateDailyCandleSnapshots();
+    setInterval(() => generateDailyCandleSnapshots(), 24 * 60 * 60 * 1000);
   })
   .catch((error) => {
     console.error("Failed to start FXCC platform", error);
