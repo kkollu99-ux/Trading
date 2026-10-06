@@ -3445,6 +3445,14 @@ function applyLiveTick(tick) {
     // still zoom/pan back out manually to see more of the real history.
     tradeChartState.viewCount = minTradeViewCount;
     tradeChartState.viewOffset = 0;
+    // A price-axis drag from any time before this simulation started (see
+    // setupPriceAxisInteractions) pins the Y-axis to a fixed range that
+    // completely overrides renderTradeCandles' own auto-scaling - including
+    // the scale-to-simulation logic there, which never even runs its own
+    // computation while this is set. Left over from an earlier manual zoom,
+    // this was silently keeping the chart on a stale, wide range no matter
+    // what the simulation's own candles looked like.
+    tradeChartState.manualPriceRange = null;
   }
 
   const tickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
