@@ -2470,6 +2470,14 @@ const tradeChartState = {
   // places notices that first (the WS "simulation-status" broadcast, a page/
   // symbol load that finds one already running, or the tick itself).
   simulationBaselineSynced: true,
+  // The .time of the candle where a running simulation's own price stream
+  // took over from real/synthetic history (set right where
+  // simulationBaselineSynced flips to true in applyLiveTick) - renderTradeCandles
+  // draws a labeled divider there so zooming out far enough to see real
+  // pre-simulation history next to a much bigger simulated move doesn't read
+  // as "the early part isn't real data", just as a much quieter period next
+  // to a deliberately dramatic one.
+  simulationStartTime: null,
   viewCount: defaultTradeViewCount,
   viewOffset: 0,
   liveBid: null,
@@ -2752,11 +2760,17 @@ function renderTradeCandles() {
     // top of everything else already changing.
     const bodyColor = isUp ? "#089981" : "#f23645";
     const wickColor = isUp ? "#1a5a54" : "#7f312f";
-    const wickTop = yFor(candle.high);
-    const wickBottom = yFor(candle.low);
     const bodyTop = yFor(Math.max(candle.open, candle.close));
     const bodyBottom = yFor(Math.min(candle.open, candle.close));
     const bodyHeight = Math.max(2, bodyBottom - bodyTop);
+    // Floored the same way the body is above: a real candle whose actual
+    // high/low barely clears its open/close (common for quiet pre-simulation
+    // history sitting on the same scale as a much bigger simulated move)
+    // would otherwise draw a wick shorter than a pixel - at a glance
+    // indistinguishable from no wick at all. This keeps a sliver visible
+    // without changing which candles have one or how big a real wick reads.
+    const wickTop = Math.min(yFor(candle.high), bodyTop - 1);
+    const wickBottom = Math.max(yFor(candle.low), bodyBottom + 1);
 
     ctx.strokeStyle = wickColor;
     ctx.beginPath();
@@ -2773,6 +2787,39 @@ function renderTradeCandles() {
     ctx.fillRect(x - candleWidth / 2, rect.height - 30 - volumeHeight, candleWidth, volumeHeight);
     ctx.globalAlpha = 1;
   });
+
+  // Marks where a running simulation's own price stream took over from
+  // real/synthetic history (see simulationStartTime above) - without this,
+  // zooming out far enough to see real pre-simulation candles next to a much
+  // bigger simulated move makes the quiet real portion look like it might be
+  // placeholder data rather than what it actually is: real history that just
+  // barely moved compared to the deliberately larger simulated swing next to
+  // it.
+  if (tradeChartState.simulationStartTime) {
+    const markerIndex = candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
+    if (markerIndex >= 0) {
+      const markerX = chart.left + markerIndex * candleStep + candleStep / 2;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = "rgba(255, 176, 0, 0.55)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(markerX, chart.top);
+      ctx.lineTo(markerX, chart.top + height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.font = "11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+      const label = "Simulation started";
+      const labelWidth = ctx.measureText(label).width + 12;
+      const labelX = Math.min(Math.max(markerX - labelWidth / 2, chart.left), rect.width - chart.right - labelWidth);
+      ctx.fillStyle = "rgba(14, 22, 38, 0.92)";
+      ctx.fillRect(labelX, chart.top + 4, labelWidth, 16);
+      ctx.fillStyle = "#ffb000";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, labelX + 6, chart.top + 12);
+      ctx.textBaseline = "alphabetic";
+    }
+  }
 
   const latest = candles.at(-1);
   const priceY = yFor(latest.close);
@@ -2932,6 +2979,7 @@ async function loadChartForCurrentSymbol() {
   tradeChartState.hover = null;
   tradeChartState.isSimulated = activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
   tradeChartState.simulationBaselineSynced = !tradeChartState.isSimulated;
+  tradeChartState.simulationStartTime = null;
   updateTradeSimulationBadge();
 
   // A real market move (TradingView's own feed) and an admin's test
@@ -3316,6 +3364,7 @@ function applyLiveTick(tick) {
     last.low = price;
     last.close = price;
     tradeChartState.simulationBaselineSynced = true;
+    tradeChartState.simulationStartTime = last.time;
   }
 
   const tickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
