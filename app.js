@@ -4469,11 +4469,11 @@ function renderManagedInstruments() {
             ${simBadge || scheduleBadge ? `<div class="product-sim-badges">${simBadge}${scheduleBadge}</div>` : ""}
             <div class="product-sim-controls">
               <div class="sim-control-group">
-                <span class="sim-control-label">Window (optional)</span>
+                <span class="sim-control-label">From / To time (optional)</span>
                 <div class="sim-time-pair">
-                  <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" title="Start time (today) - leave blank with End to start immediately" />
+                  <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" title="From: start time (today) - leave blank with To to start immediately" />
                   <span class="sim-time-sep">–</span>
-                  <input type="time" class="sim-time-input" data-schedule-to="${escapeHtml(instrument.symbol)}" title="End time (today) - auto-reverts to real-time here. Leave blank with Start to start immediately for 5 minutes" />
+                  <input type="time" class="sim-time-input" data-schedule-to="${escapeHtml(instrument.symbol)}" title="To: end time (today) - auto-reverts to real-time here. Leave blank with From to start immediately for 5 minutes" />
                 </div>
               </div>
               <div class="sim-control-group">
