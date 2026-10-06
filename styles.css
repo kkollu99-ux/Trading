@@ -2034,6 +2034,14 @@ select:focus {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  /* #toggleWatchPanel sits at the panel's exact right edge (see
+     .panel-toggle-left), vertically centered on the whole trade terminal -
+     wherever that lands, it was overlapping that row's Chg% text, since
+     .watch-panel's own 0.75rem padding doesn't clear the toggle's 1.3rem
+     width. This reserves enough extra space that it never does, at any
+     panel width (the toggle's position is always "edge minus a constant",
+     so a fixed clearance here covers every width). */
+  padding-right: 0.75rem;
   border-top: 1px solid var(--trade-border);
   scrollbar-width: thin;
   scrollbar-color: rgba(120, 131, 151, 0.65) transparent;
@@ -2676,7 +2684,12 @@ select:focus {
   flex-direction: column;
   border-right: 0;
   overflow-y: auto;
-  padding: 1rem 0.75rem;
+  /* Mirrors .watch-table's padding-right above: #toggleOrderTicket sits at
+     this panel's exact left edge, vertically centered on the whole trade
+     terminal, and was overlapping whatever control landed there (e.g. the
+     Multiplier select) since the panel's own 0.75rem padding doesn't clear
+     the toggle's 1.3rem width. */
+  padding: 1rem 0.75rem 1rem 1.5rem;
   scrollbar-width: thin;
   scrollbar-color: rgba(120, 131, 151, 0.65) transparent;
 }
