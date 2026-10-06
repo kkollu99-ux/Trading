@@ -3045,7 +3045,18 @@ async function loadRealCandles(symbol, range, customRange, externalToken) {
     if (tradeChartState.isSimulated && tradeChartState.simulationBaselineSynced) {
       const markerIndex = tradeChartState.candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
       const simulatedTail = markerIndex >= 0 ? tradeChartState.candles.slice(markerIndex) : tradeChartState.candles.slice(-1);
-      anchorCandlesEndToPrice(candles, simulatedTail[0]?.open);
+      // Deliberately NOT anchored to the simulated tail's price (tried
+      // previously) - a demo simulation is often started at a price quite
+      // far from wherever the real market actually is, and shifting this
+      // entire real-history block by that whole difference just to make its
+      // end line up turned the one real candle nearest the divider into a
+      // single giant bar spanning almost the full visible range (reported
+      // as the chart looking "unordered" right at the start of the
+      // simulation). The real history's own true prices, left alone, pin
+      // cleanly to whichever edge they fall outside of once the chart
+      // scales to the simulation's own range (see renderTradeCandles) - the
+      // divider line already marks the jump, so nothing needs to visually
+      // connect across it.
       // The simulated tail's own candle times were set relative to whatever
       // synthetic placeholder history was on screen when its first tick
       // arrived (see applyLiveTick) - if this fetch hadn't resolved yet by
