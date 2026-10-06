@@ -2478,6 +2478,15 @@ const tradeChartState = {
   // as "the early part isn't real data", just as a much quieter period next
   // to a deliberately dramatic one.
   simulationStartTime: null,
+  // Fixed once, at the same moment simulationBaselineSynced flips to true -
+  // the gap between the real/synthetic history's own last candle time and
+  // whenever (in real wall-clock time) the simulation's first tick actually
+  // arrived. Every simulated tick's timestamp is shifted by this offset
+  // (see applyLiveTick) so the simulated portion's clock continues forward
+  // from the real history already on the chart, in step with real elapsed
+  // time, rather than jumping to whatever real time of day testing happened
+  // to start.
+  simulationTimeOffsetMs: 0,
   viewCount: defaultTradeViewCount,
   viewOffset: 0,
   liveBid: null,
@@ -3064,6 +3073,7 @@ async function loadChartForCurrentSymbol() {
   tradeChartState.isSimulated = activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
   tradeChartState.simulationBaselineSynced = !tradeChartState.isSimulated;
   tradeChartState.simulationStartTime = null;
+  tradeChartState.simulationTimeOffsetMs = 0;
   updateTradeSimulationBadge();
 
   // A real market move (TradingView's own feed) and an admin's test
@@ -3454,7 +3464,26 @@ function applyLiveTick(tick) {
   // by the "simulation-status" broadcast, which reliably arrives before the
   // first price tick ever does, so checking it here would always read true
   // and this would never run.
-  const tickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
+  const rawTickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
+
+  if (isSimulationTick && !tradeChartState.simulationBaselineSynced) {
+    // A simulation's candles are meant to read as "what happens next" right
+    // after the real history already on the chart - continuing forward from
+    // its last candle in small, regular steps (see simulationCandleBucketMs)
+    // - not as whatever the real wall-clock time happens to be when the
+    // admin happens to start a test. Anchoring to real "now" instead (tried
+    // previously) made the x-axis jump straight from the real history's own
+    // time (e.g. "12:17 PM") to whatever time of day testing happened to be
+    // started (e.g. "6:02 PM"), unrelated to the simulation's own duration.
+    // simulationTimeOffsetMs is fixed once here and reused for every later
+    // tick (below), so the simulated portion's clock runs at the same rate
+    // as real time - ticks still arrive on their normal cadence - just
+    // shifted to start right where the real history leaves off.
+    const previousCandle = candles.length > 1 ? candles[candles.length - 2] : null;
+    const continuedStartMs = previousCandle ? new Date(previousCandle.time).getTime() + simulationCandleBucketMs : rawTickMs;
+    tradeChartState.simulationTimeOffsetMs = continuedStartMs - rawTickMs;
+  }
+  const tickMs = isSimulationTick ? rawTickMs + (tradeChartState.simulationTimeOffsetMs || 0) : rawTickMs;
   const bucketMs = isSimulationTick
     ? Math.floor(tickMs / simulationCandleBucketMs) * simulationCandleBucketMs
     : bucketStartMs(tickMs, tradeChartState.timeframe);
@@ -3464,16 +3493,6 @@ function applyLiveTick(tick) {
     last.high = price;
     last.low = price;
     last.close = price;
-    // The candle being flattened into the simulation's starting point can be
-    // a real historical candle (whenever loadRealCandles' fetch has already
-    // resolved by the time the first tick arrives, rather than racing it)
-    // carrying whatever stale timestamp its snapshot was taken at - hours
-    // earlier in the day. Left alone, every candle the simulation appends
-    // after this one is bucketed off the actual current time, so the x-axis
-    // jumps straight from that stale label to "now" right at the divider -
-    // unrelated to the simulation's own countdown ("4:15 left" etc). The
-    // simulation starts now, so its starting candle's time should say so
-    // too, bucketed the same way every candle after it will be.
     last.time = new Date(bucketMs).toISOString();
     tradeChartState.simulationBaselineSynced = true;
     tradeChartState.simulationStartTime = last.time;
