@@ -1298,136 +1298,246 @@ app.get("/api/admin/logs", requireAuth, attachUser, requireRole("admin"), async 
   response.json({ logs });
 });
 
-// No external market-data provider: every price in this app - quotes,
-// candle history, FX conversion - is generated locally. That used to be
-// just the last-resort fallback for when a real provider (Twelve Data)
-// wasn't configured or its credits ran out; it's now the only path. The
-// previous design (polling 40+ symbols on a schedule, a live WebSocket
-// subscription, daily REST candle fetches per instrument) existed purely
-// to stay under a real provider's rate/credit limits - none of that
-// applies to a local computation, so it's gone rather than kept around
-// disabled, removing the risk of ever silently depending on it again.
-//
-// quoteLiveSymbols still scopes which symbols get an actively "ticking"
-// price broadcast over /ws (see tickSyntheticQuotes below) for a
-// realistic-feeling live Trade page - everything else is priced on demand
-// via getCurrentPrice's own synthetic formula instead of being ticked in
-// the background for no one to see.
-const quoteStore = new Map();
+// ---------- Local price engine ----------
+// Every price in this app - quotes, order fills, SL/TP, the chart's candles
+// and an admin simulation's moves - comes from one place: a per-symbol series
+// of fixed 5-second OHLC bars kept in memory here (priceSeries). There is no
+// external market-data provider. Quotes read the series' last close, the
+// chart reads the series itself, and a running simulation records its ticks
+// into that very same series, so the simulated part of a chart is simply the
+// next bars of one continuous history - same time axis, same price scale -
+// rather than a second data source stitched on in the browser.
+const marketStatusBySymbol = new Map();
+// Symbols that get a price-tick broadcast every few seconds even with no
+// simulation running (see tickSyntheticQuotes). Every other symbol still
+// moves - its series is advanced on demand whenever something reads it.
 const quoteLiveSymbols = (process.env.MARKET_DATA_LIVE_SYMBOLS || "XAU/USD")
   .split(",")
   .map((symbol) => symbol.trim().toUpperCase())
   .filter(Boolean);
-const marketStatusBySymbol = new Map();
 
-// ---------- Crypto live pricing (Binance public API) ----------
-// The one category of instrument this app fetches REAL external price data
-// for. Every other instrument (forex, metals, commodities, stocks) stays on
-// the local synthetic generation below - there's no free, keyless,
-// rate-limit-safe equivalent for those, which is exactly the failure mode
-// (Twelve Data's daily credit cap, shared across every symbol/category) that
-// got the external provider removed in the first place. Binance's public
-// market-data endpoints (ticker price, klines) need no API key, aren't
-// subject to a shared daily credit budget, and have rate limits generous
-// enough that polling a handful of symbols every couple seconds is a
-// rounding error - so pulling real crypto prices doesn't reintroduce that
-// risk for the rest of the app.
-const BINANCE_API_BASE = "https://api.binance.com";
-const cryptoBinanceSymbols = {
-  "BTC/USD": "BTCUSDT",
-  "ETH/USD": "ETHUSDT",
-  "XRP/USD": "XRPUSDT",
-  "BNB/USD": "BNBUSDT",
-  "SOL/USDC": "SOLUSDC",
+// Approximate real-world price levels (demo only, never refreshed) so each
+// product's synthetic price starts somewhere recognizable.
+const referencePrices = {
+  "XAU/USD": 4521.75, "XAG/USD": 52.4, "BTC/USD": 112000, "ETH/USD": 4200, "XRP/USD": 2.75,
+  "SOL/USDC": 210, "BNB/USD": 1050, "EUR/USD": 1.165, "GBP/USD": 1.338, "AUD/USD": 0.655,
+  "NZD/USD": 0.577, "USD/JPY": 148.5, "USD/CHF": 0.798, "USD/CAD": 1.392, "AUD/JPY": 97.3,
+  "AUD/CAD": 0.912, "EUR/JPY": 173, "AUD/NZD": 1.135, "AUD/CHF": 0.523, "GBP/JPY": 198.7,
+  "EUR/AUD": 1.779, "CAD/JPY": 106.7, "EUR/CAD": 1.622, "GBP/AUD": 2.043, "CHF/JPY": 186.1,
+  "EUR/CHF": 0.93, "GBP/CAD": 1.862, "NZD/CHF": 0.46, "GBP/NZD": 2.319, "EUR/GBP": 0.871,
+  "NZD/JPY": 85.7, "GBP/CHF": 1.068, "CAD/CHF": 0.573, "EUR/NZD": 2.019, USOIL: 62.4,
+  UKOIL: 66.1, NATGAS: 3.3, AAPL: 256, TSLA: 438, GOOGL: 246, MSFT: 517,
 };
-const cryptoApiSymbols = Object.keys(cryptoBinanceSymbols);
 
-async function fetchCryptoPrices(symbols) {
-  if (!symbols.length) return {};
-  const pairs = symbols.map((symbol) => cryptoBinanceSymbols[symbol]).filter(Boolean);
-  if (!pairs.length) return {};
-  const url = `${BINANCE_API_BASE}/api/v3/ticker/price?symbols=${encodeURIComponent(JSON.stringify(pairs))}`;
-  const result = await fetch(url, { signal: AbortSignal.timeout(5000) });
-  if (!result.ok) throw new Error(`Binance ticker request failed: ${result.status}`);
-  const rows = await result.json();
-  const byPair = new Map(rows.map((row) => [row.symbol, Number(row.price)]));
-  const prices = {};
-  for (const symbol of symbols) {
-    const price = byPair.get(cryptoBinanceSymbols[symbol]);
-    if (Number.isFinite(price) && price > 0) prices[symbol] = price;
-  }
-  return prices;
+// Typical size of one 5-second move as a fraction of price, by category.
+const seriesVolatilityByCategory = {
+  crypto: 0.00025,
+  metals: 0.00012,
+  commodities: 0.00015,
+  stocks: 0.00012,
+  forex: 0.00005,
+};
+const instrumentCategoryBySymbol = new Map(defaultInstruments.map((instrument) => [instrument.symbol, instrument.category]));
+
+const seriesBucketMs = 5000;
+const seriesMaxBars = 2880; // 4 hours of 5-second bars
+const seriesSeedBars = 720; // 1 hour of history generated the first time a symbol is used
+const seriesChartBars = 1440; // the last 2 hours, as served to the chart
+const priceSeries = new Map(); // symbol -> { bars: [{ t, open, high, low, close, volume, simulated }], sigma, volLevel, anchor }
+
+function seriesBucket(ms) {
+  return Math.floor(ms / seriesBucketMs) * seriesBucketMs;
 }
 
-// A full day (1440 one-minute bars) of this crypto symbol's own real trade
-// history from Binance, in the exact same shape generateSyntheticDayCandles
-// below produces - so the daily snapshot powering the chart/volatility
-// template is genuine market data for crypto instead of an invented wave.
-async function fetchCryptoDayCandles(binanceSymbol) {
-  const url = `${BINANCE_API_BASE}/api/v3/klines?symbol=${binanceSymbol}&interval=1m&limit=1440`;
-  const result = await fetch(url, { signal: AbortSignal.timeout(8000) });
-  if (!result.ok) throw new Error(`Binance klines request failed: ${result.status}`);
-  const rows = await result.json();
-  return rows.map((row) => ({
-    time: new Date(row[0]).toISOString(),
-    open: Number(row[1]),
-    high: Number(row[2]),
-    low: Number(row[3]),
-    close: Number(row[4]),
-    volume: Number(row[5]),
+function gaussian() {
+  let u = 0;
+  while (u === 0) u = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+}
+
+// Where a symbol's series starts the first time this process uses it: the
+// last price persisted before a restart (see persistSeriesSnapshots) when it
+// sits in a plausible band around the reference level, otherwise the
+// reference level. The band check discards snapshots saved back when symbols
+// had no reference level and were priced off a hash of their name.
+function seedBasisPrice(symbol) {
+  const reference = referencePrices[symbol];
+  const persisted = Number(candleSnapshotStore.get(symbol)?.candles?.at(-1)?.close);
+  if (Number.isFinite(persisted) && persisted > 0 && (!reference || (persisted > reference / 3 && persisted < reference * 3))) {
+    return persisted;
+  }
+  if (reference) return reference;
+  const seed = [...symbol].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return 50 + (seed % 200);
+}
+
+// One step of the synthetic walk: a volatility-clustered random shock plus a
+// gentle pull toward a slowly wandering anchor, so prices meander like a
+// market without drifting off without bound. fraction is how much of one
+// 5-second bar this step represents (a 2.5s tick is half a bar).
+function syntheticStep(series, price, fraction = 1) {
+  series.volLevel = Math.max(0.5, Math.min(2.2, series.volLevel * (1 + (Math.random() - 0.5) * 0.12)));
+  series.anchor = Math.max(0.00001, series.anchor * (1 + series.sigma * 0.25 * gaussian() * Math.sqrt(fraction)));
+  const pull = (series.anchor - price) * 0.015 * fraction;
+  const shock = price * series.sigma * series.volLevel * gaussian() * Math.sqrt(fraction);
+  return Math.max(0.00001, price + pull + shock);
+}
+
+function generatedBar(series, t, open) {
+  const close = syntheticStep(series, open);
+  const wick = open * series.sigma * series.volLevel * 0.5;
+  return {
+    t,
+    open,
+    close,
+    high: Math.max(open, close) + Math.abs(gaussian()) * wick,
+    low: Math.max(0.00001, Math.min(open, close) - Math.abs(gaussian()) * wick),
+    volume: 20 + Math.random() * 60 * series.volLevel,
+    simulated: false,
+  };
+}
+
+// Multiplies the whole series' prices by factor - used to rebase a product's
+// history onto an admin-given simulation start price, so the chart's history
+// ends exactly where the simulation begins. Multiplicative (not additive) so
+// the history keeps the same percentage moves at the new level.
+function scaleSeries(series, factor) {
+  if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return;
+  for (const bar of series.bars) {
+    bar.open *= factor;
+    bar.high *= factor;
+    bar.low *= factor;
+    bar.close *= factor;
+  }
+  series.anchor *= factor;
+}
+
+function trimSeries(series) {
+  if (series.bars.length > seriesMaxBars) series.bars.splice(0, series.bars.length - seriesMaxBars);
+}
+
+function getSeries(symbol) {
+  const existing = priceSeries.get(symbol);
+  if (existing) return existing;
+  const basis = seedBasisPrice(symbol);
+  const series = {
+    bars: [],
+    sigma: seriesVolatilityByCategory[instrumentCategoryBySymbol.get(symbol)] || 0.0001,
+    volLevel: 1,
+    anchor: basis,
+  };
+  const lastBucket = seriesBucket(Date.now()) - seriesBucketMs;
+  let price = basis;
+  for (let index = seriesSeedBars - 1; index >= 0; index -= 1) {
+    const bar = generatedBar(series, lastBucket - index * seriesBucketMs, price);
+    series.bars.push(bar);
+    price = bar.close;
+  }
+  // The walk wanders off basis; rescale so the history ends exactly on it.
+  scaleSeries(series, basis / price);
+  series.anchor = basis;
+  priceSeries.set(symbol, series);
+  return series;
+}
+
+// Brings a series up to the present: every whole 5-second bucket that went
+// by with no tick recorded gets a generated bar continuing from the last
+// close, so quotes keep moving and the chart never has a hole. While a
+// simulation owns the symbol its ticks drive the series, so a missed bucket
+// (an event-loop hiccup) is filled flat at the last price instead of with
+// unrelated random movement.
+function advanceSeries(symbol, series, nowMs = Date.now()) {
+  const currentBucket = seriesBucket(nowMs);
+  const missing = Math.floor((currentBucket - series.bars.at(-1).t) / seriesBucketMs) - 1;
+  if (missing <= 0) return;
+  const simulating = priceSimulations.has(symbol);
+  const fill = Math.min(missing, seriesMaxBars);
+  for (let t = currentBucket - fill * seriesBucketMs; t < currentBucket; t += seriesBucketMs) {
+    const lastClose = series.bars.at(-1).close;
+    series.bars.push(
+      simulating
+        ? { t, open: lastClose, high: lastClose, low: lastClose, close: lastClose, volume: 0, simulated: true }
+        : generatedBar(series, t, lastClose),
+    );
+  }
+  trimSeries(series);
+}
+
+// Records one price into the symbol's series at time ms: extends the bar for
+// that 5-second bucket if it's already open, otherwise opens the next bar at
+// the previous bar's close - so consecutive candles always join up.
+function recordSeriesTick(symbol, price, ms, simulated) {
+  const series = getSeries(symbol);
+  advanceSeries(symbol, series, ms);
+  const t = seriesBucket(ms);
+  const last = series.bars.at(-1);
+  if (last.t === t) {
+    last.high = Math.max(last.high, price);
+    last.low = Math.min(last.low, price);
+    last.close = price;
+    last.volume += 10 + Math.random() * 30;
+    if (simulated) last.simulated = true;
+  } else if (t > last.t) {
+    series.bars.push({
+      t,
+      open: last.close,
+      high: Math.max(last.close, price),
+      low: Math.min(last.close, price),
+      close: price,
+      volume: 10 + Math.random() * 30,
+      simulated: Boolean(simulated),
+    });
+    trimSeries(series);
+  }
+}
+
+function roundPrice(value) {
+  return Number(value.toPrecision(10));
+}
+
+function serializeBars(bars) {
+  return bars.map((bar) => ({
+    time: new Date(bar.t).toISOString(),
+    open: roundPrice(bar.open),
+    high: roundPrice(bar.high),
+    low: roundPrice(bar.low),
+    close: roundPrice(bar.close),
+    volume: Math.round(bar.volume),
+    simulated: Boolean(bar.simulated),
   }));
 }
 
-// Mirrors tickSyntheticQuotes below but for the real crypto feed: pulls one
-// batched Binance request covering every crypto symbol (skipping any a
-// simulation currently owns, same as the synthetic path, so the two never
-// fight over the same price), then feeds the result into the exact same
-// quoteStore/streamCandleHistory/broadcast pipeline every other price source
-// uses - so nothing downstream (getCurrentPrice, the chart, the live ticker)
-// needs to know this symbol's price came from a real API instead of local
-// generation. Falls back to silently keeping the last known price on a
-// network hiccup rather than throwing - a dropped Binance poll shouldn't take
-// the rest of the app's price ticking down with it.
-async function tickCryptoQuotes() {
-  const symbols = cryptoApiSymbols.filter((symbol) => !priceSimulations.has(symbol));
-  if (!symbols.length) return;
-  let prices;
-  try {
-    prices = await fetchCryptoPrices(symbols);
-  } catch (error) {
-    console.warn("Crypto price fetch failed, keeping last known price:", error.message);
-    return;
-  }
-  for (const symbol of symbols) {
-    const price = prices[symbol];
-    if (!Number.isFinite(price) || price <= 0) continue;
-    quoteStore.set(symbol, { data: { symbol, close: price, price, is_market_open: true }, at: Date.now() });
-    recordStreamCandleTick(symbol, price, Date.now());
-    broadcast({ type: "price-tick", symbol, price, source: "poll", timestamp: new Date().toISOString() });
-    if (marketStatusBySymbol.get(symbol) !== true) {
-      marketStatusBySymbol.set(symbol, true);
-      broadcast({ type: "market-status", symbol, isOpen: true });
+// Aggregates the 5-second bars into bucketMs-wide candles (open/close from
+// the first/last bar, high/low across all of them, volume summed).
+function resampleBars(bars, bucketMs) {
+  const candles = [];
+  for (const bar of bars) {
+    const t = Math.floor(bar.t / bucketMs) * bucketMs;
+    const last = candles.at(-1);
+    if (last && last.t === t) {
+      last.high = Math.max(last.high, bar.high);
+      last.low = Math.min(last.low, bar.low);
+      last.close = bar.close;
+      last.volume += bar.volume;
+      last.simulated = last.simulated || bar.simulated;
+    } else {
+      candles.push({ ...bar, t });
     }
   }
+  return serializeBars(candles);
 }
 
-// A smooth, deterministic-ish per-symbol walk (small random step off
-// whatever this symbol last priced at, falling back to getCurrentPrice's
-// own hash-seeded starting point the first time) - same shape of movement
-// the old real poller produced, just generated locally instead of fetched.
-// Skips any symbol a simulation currently owns so the two never fight over
-// the same price, and skips any symbol the real crypto feed above owns so
-// the two price sources never fight over the same symbol either.
 const syntheticQuoteTickIntervalMs = Number(process.env.SYNTHETIC_QUOTE_TICK_INTERVAL_MS || 2500);
 
 function tickSyntheticQuotes() {
+  const now = Date.now();
   for (const symbol of quoteLiveSymbols) {
-    if (priceSimulations.has(symbol) || cryptoBinanceSymbols[symbol]) continue;
-    const previous = Number(quoteStore.get(symbol)?.data?.close) || getCurrentPrice(symbol);
-    const next = Math.max(0.00001, Number((previous * (1 + (Math.random() - 0.5) * 0.0015)).toFixed(6)));
-    quoteStore.set(symbol, { data: { symbol, close: next, price: next, is_market_open: true }, at: Date.now() });
-    recordStreamCandleTick(symbol, next, Date.now());
-    broadcast({ type: "price-tick", symbol, price: next, source: "poll", timestamp: new Date().toISOString() });
+    if (priceSimulations.has(symbol)) continue;
+    const series = getSeries(symbol);
+    advanceSeries(symbol, series, now);
+    const price = roundPrice(syntheticStep(series, series.bars.at(-1).close, syntheticQuoteTickIntervalMs / seriesBucketMs));
+    recordSeriesTick(symbol, price, now, false);
+    broadcast({ type: "price-tick", symbol, price, source: "poll", timestamp: new Date(now).toISOString() });
     if (marketStatusBySymbol.get(symbol) !== true) {
       marketStatusBySymbol.set(symbol, true);
       broadcast({ type: "market-status", symbol, isOpen: true });
@@ -1456,60 +1566,12 @@ const fxRateFallbacks = {
   PHP: 56.4, TRY: 32.1, PLN: 4.0,
 };
 
-// A rolling 1-minute candle history built from tickSyntheticQuotes' ticks
-// (quoteLiveSymbols only - everything else relies on the daily synthetic
-// snapshot below instead). Capped to a couple hours of 1-minute bars per
-// symbol - plenty for the "1M" simulation chart, which only ever wants the
-// most recent ~70.
-const streamCandleBucketMs = 60000;
-const streamCandleMaxBars = 180;
-const streamCandleHistory = new Map();
-
-function recordStreamCandleTick(symbol, price, atMs) {
-  const bucketStart = Math.floor(atMs / streamCandleBucketMs) * streamCandleBucketMs;
-  const history = streamCandleHistory.get(symbol) || [];
-  const last = history[history.length - 1];
-  if (last && last.bucketStart === bucketStart) {
-    last.high = Math.max(last.high, price);
-    last.low = Math.min(last.low, price);
-    last.close = price;
-  } else {
-    history.push({ bucketStart, time: new Date(bucketStart).toISOString(), open: price, high: price, low: price, close: price, volume: 0 });
-    if (history.length > streamCandleMaxBars) history.shift();
-  }
-  streamCandleHistory.set(symbol, history);
-}
-
-// Seeds streamCandleHistory from a real REST time_series response (1-minute
-// bars only - see the interval check at the call site) so there's genuine
-// historical shape to build a simulation's volatility template from right
-// away, instead of waiting for the live stream to accumulate its own bars
-// from a cold start/restart. Skipped once the stream buffer already has a
-// healthy amount of its own real data, so this never clobbers fresher ticks.
-function seedStreamCandleHistoryFromRest(symbol, candles) {
-  if (!Array.isArray(candles) || candles.length < 5) return;
-  const existing = streamCandleHistory.get(symbol);
-  if (existing && existing.length >= 20) return;
-  const mapped = candles.slice(-streamCandleMaxBars).map((candle) => ({
-    bucketStart: new Date(candle.time).getTime(),
-    time: candle.time,
-    open: candle.open,
-    high: candle.high,
-    low: candle.low,
-    close: candle.close,
-    volume: candle.volume || 0,
-  }));
-  streamCandleHistory.set(symbol, mapped);
-}
-
-// A once-a-day candle history for EVERY instrument, generated locally (see
-// generateSyntheticDayCandles below) rather than fetched - gives every
-// product a historical chart and a volatility shape to simulate from, with
-// no external dependency or rate limit to manage. candleSnapshotStore is
-// the in-memory "hot" copy every request reads; candle_snapshots is where
-// it's persisted so a restart doesn't lose the day's data and regenerate
-// everyone from scratch on every deploy.
+// Persists each product's recent price history (resampled to 1-minute
+// candles) so a restart or redeploy resumes every product at the price it
+// was at, rather than jumping back to its reference level - see
+// seedBasisPrice. candleSnapshotStore is the in-memory copy of what's saved.
 const candleSnapshotStore = new Map(); // symbol -> { candles, updatedAt }
+const seriesPersistIntervalMs = 2 * 60 * 1000;
 
 async function loadCandleSnapshotsFromDb() {
   if (!pool) return;
@@ -1533,74 +1595,25 @@ async function saveCandleSnapshot(symbol, candles) {
   );
 }
 
-// A full day (1440 one-minute bars) of locally-generated OHLC candles,
-// mean-reverting toward a slowly-oscillating trend line anchored at
-// basisPrice rather than a plain unbounded random walk - that trend line is
-// itself just two bounded sine/cosine waves, so it wanders without ever
-// drifting far from basisPrice over 1440 steps. Gives every instrument a
-// plausible-looking, internally-consistent day of history (and, via
-// buildVolatilityTemplate, a real-shaped mix of small/large moves for a
-// simulation's own noise to draw from) with no network call at all.
-function generateSyntheticDayCandles(symbol, basisPrice) {
-  const seed = [...symbol].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const spread = Math.max(basisPrice * 0.0007, 0.01);
-  const bars = 1440;
-  const now = Date.now();
-  let close = basisPrice;
-  const candles = [];
-  for (let index = 0; index < bars; index += 1) {
-    const wave = Math.sin((index + seed) / 180) * spread * 6;
-    const pressure = Math.cos((index + seed) / 340) * spread * 4;
-    const noise = (Math.random() - 0.5) * spread * 1.2;
-    const trendTarget = basisPrice + wave + pressure;
-    const open = close;
-    close = Math.max(0.00001, open + (trendTarget - open) * 0.02 + noise);
-    const high = Math.max(open, close) + Math.abs(noise) * 0.7 + spread * 0.1;
-    const low = Math.max(0.00001, Math.min(open, close) - Math.abs(noise) * 0.7 - spread * 0.1);
-    const volume = 20 + Math.abs(Math.sin(index / 24 + seed)) * 60;
-    const time = new Date(now - (bars - 1 - index) * streamCandleBucketMs).toISOString();
-    candles.push({ time, open, high, low, close, volume });
-  }
-  return candles;
-}
-
-async function generateDailyCandleSnapshots() {
-  const instruments = await listInstruments({});
-  for (const instrument of instruments) {
+async function persistSeriesSnapshots() {
+  for (const [symbol, series] of priceSeries) {
     try {
-      const binanceSymbol = cryptoBinanceSymbols[instrument.symbol];
-      let candles = null;
-      if (binanceSymbol) {
-        try {
-          candles = await fetchCryptoDayCandles(binanceSymbol);
-        } catch (error) {
-          console.warn(`Crypto candle fetch failed for ${instrument.symbol}, falling back to synthetic:`, error.message);
-        }
-      }
-      if (!candles || !candles.length) {
-        candles = generateSyntheticDayCandles(instrument.symbol, getCurrentPrice(instrument.symbol));
-      }
-      await saveCandleSnapshot(instrument.symbol, candles);
-      // Also feeds streamCandleHistory (a no-op for symbols that already
-      // have a healthy amount of their own real-time-ticked data - see the
-      // guard inside) so a simulation on any instrument draws noise from a
-      // real-shaped history, not just quoteLiveSymbols' own ticked ones.
-      seedStreamCandleHistoryFromRest(instrument.symbol, candles);
+      await saveCandleSnapshot(symbol, resampleBars(series.bars, 60000).slice(-240));
     } catch (error) {
-      console.warn(`Daily candle snapshot generation failed for ${instrument.symbol}:`, error.message);
+      console.warn(`Saving price history failed for ${symbol}:`, error.message);
     }
   }
 }
 
-// The "earlier data" a simulation replays as noise: the real %-change from
-// one stored 1-minute bar's close to the next, across whatever real history
-// is on hand (stream-built or REST-seeded - see above). Sampling from this
-// instead of a flat/synthetic random range means a simulated run inherits
-// the instrument's own actual recent volatility shape - its mix of small
-// drifts and occasional bigger moves - rather than inventing one.
+// The shape a simulation's noise is drawn from: the %-change from one
+// 5-second bar's close to the next across this product's own recent
+// (non-simulated) history. Normalized to unit average magnitude - what's kept
+// is the relative mix of small and large moves and how often one goes against
+// the last; meanAbsPercent carries the actual size, which the tick loop
+// rescales from one bar to one tick.
 function buildVolatilityTemplate(symbol) {
-  const history = streamCandleHistory.get(symbol) || candleSnapshotStore.get(symbol)?.candles;
-  if (!history || history.length < 5) return null;
+  const history = getSeries(symbol).bars.filter((bar) => !bar.simulated).slice(-720);
+  if (history.length < 5) return null;
   const changes = [];
   for (let i = 1; i < history.length; i += 1) {
     const prevClose = history[i - 1].close;
@@ -1609,15 +1622,6 @@ function buildVolatilityTemplate(symbol) {
     if (Number.isFinite(change)) changes.push(change);
   }
   if (!changes.length) return null;
-  // Normalized to unit average magnitude for the shape array: what's worth
-  // keeping from real data here is the *relative* mix of small and large
-  // moves and how often one goes against the last, not its absolute size -
-  // meanAbsPercent (the real bars' own average |% change|) is returned
-  // alongside it instead, so the tick loop can rescale the shape back to a
-  // size that's actually proportionate to this instrument's real behavior
-  // (see its own comment for why that rescale can't just reuse meanAbsPercent
-  // directly either - a 1-minute real bar and a several-second simulated
-  // tick aren't the same timescale).
   const meanAbs = changes.reduce((sum, change) => sum + Math.abs(change), 0) / changes.length;
   if (!(meanAbs > 0)) return null;
   return { shape: changes.map((change) => change / meanAbs), meanAbsPercent: meanAbs };
@@ -1629,38 +1633,15 @@ function buildVolatilityTemplate(symbol) {
 const orderUnitsPerLot = 100;
 const orderFeeRate = 0.001;
 
-// Best-effort current price for order pricing: prefer the live quoteStore
-// (populated by tickSyntheticQuotes, but only for quoteLiveSymbols - a
-// handful of instruments, Gold only by default), then the daily candle
-// snapshot (candleSnapshotStore, populated for every tradable instrument -
-// see generateDailyCandleSnapshots), and only fall back to a deterministic,
-// slowly-drifting per-symbol synthetic price when NEITHER real source has
-// this symbol yet (mock mode, or the very first day before either job has
-// reached it) - so opening and closing a position still produce a sane,
-// non-random P&L instead of two unrelated Math.random() calls.
-//
-// Skipping straight from quoteStore to the synthetic fallback (as this used
-// to) meant every symbol outside quoteLiveSymbols got a basePrice with zero
-// relationship to its own real price history - starting a simulation on,
-// say, a ~$500 instrument could seed it from a synthetic ~$150 price
-// instead, so the chart's real candle history (correctly built from
-// candleSnapshotStore) and the simulation's own price (and everything that
-// reads it - the live BID/ASK, the simulated candles themselves) landed on
-// two unrelated price scales, reported as "simulated candles doesn't match
-// real-time fetched candles".
+// The one price every calculation uses (order entry, floating P&L, SL/TP,
+// close P&L, quotes): a running simulation's price if there is one, otherwise
+// the last close of this product's own price series, advanced to now.
 function getCurrentPrice(symbol) {
   const simulation = priceSimulations.get(symbol);
   if (simulation) return simulation.price;
-
-  const entry = quoteStore.get(symbol);
-  const price = Number(entry?.data?.close ?? entry?.data?.price);
-  if (Number.isFinite(price) && price > 0) return price;
-
-  const snapshotClose = Number(candleSnapshotStore.get(symbol)?.candles?.at(-1)?.close);
-  if (Number.isFinite(snapshotClose) && snapshotClose > 0) return snapshotClose;
-
-  const seed = [...symbol].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return Number((50 + (seed % 200) + Math.sin(Date.now() / 60000 + seed) * 5).toFixed(4));
+  const series = getSeries(symbol);
+  advanceSeries(symbol, series);
+  return series.bars.at(-1).close;
 }
 
 // ---------- Admin price simulation (demo/testing only) ----------
@@ -1724,7 +1705,17 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
   if (existing?.timer) clearTimeout(existing.timer);
   cancelScheduledSimulation(symbol); // a manual/auto trigger supersedes any pending scheduled window
 
-  const basePrice = Number.isFinite(startPrice) && startPrice > 0 ? startPrice : getCurrentPrice(symbol);
+  // The simulation opens exactly at the series' last close, so its first
+  // simulated candle continues straight on from the history before it. An
+  // admin-given startPrice rebases that history onto the new level first,
+  // rather than leaving the simulation to jump away from it.
+  const series = getSeries(symbol);
+  // Includes the bucket in progress right now, so the simulation's first
+  // ticks extend that candle instead of a flat filler candle appearing at
+  // the handoff.
+  advanceSeries(symbol, series, Date.now() + seriesBucketMs);
+  if (Number.isFinite(startPrice) && startPrice > 0) scaleSeries(series, startPrice / series.bars.at(-1).close);
+  const basePrice = series.bars.at(-1).close;
   const clampedDurationMs = Number.isFinite(durationMs) && durationMs > 0 ? Math.min(durationMs, priceSimulationMaxDurationMs) : null;
   const expiresAt = clampedDurationMs ? new Date(Date.now() + clampedDurationMs).toISOString() : null;
   const resolvedStepPercent = Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent;
@@ -1913,7 +1904,7 @@ setInterval(() => {
     // ones despite the cap. Falls back to the old stepPercent-based sizing
     // (now genuinely a last resort, capped at 0.4%) only when there's no
     // real history to scale from at all.
-    const realTickFraction = Math.sqrt(priceSimulationTickMs / 60000);
+    const realTickFraction = Math.sqrt(priceSimulationTickMs / seriesBucketMs);
     const baseNoiseIntensity = template
       ? Math.max(template.meanAbsPercent * realTickFraction, 0.003)
       : Math.min(Math.max(simulation.stepPercent * 3.5, 0.03), 0.4);
@@ -1956,12 +1947,14 @@ setInterval(() => {
       simulation.price = simulation.targetPrice;
     }
 
-    // Deliberately NOT written into quoteStore: getCurrentPrice already checks
-    // priceSimulations first (above), so quoteStore never needs to know about
-    // this and never ends up holding a stale simulated price once the
-    // simulation stops - it just keeps reflecting whatever it always would
-    // have (real feed or the drifting mock fallback), untouched throughout.
-    broadcast({ type: "price-tick", symbol, price: simulation.price, source: "simulation", timestamp: new Date().toISOString() });
+    // Recorded into the product's own price series (the same one its history
+    // and quotes come from) before broadcasting, with the same timestamp the
+    // broadcast carries - so a chart loaded now and a chart that has been
+    // applying these ticks live bucket them into identical candles. Once the
+    // simulation ends the series simply carries on from its last price.
+    const tickMs = Date.now();
+    recordSeriesTick(symbol, simulation.price, tickMs, true);
+    broadcast({ type: "price-tick", symbol, price: simulation.price, source: "simulation", timestamp: new Date(tickMs).toISOString() });
     if (targetReached) {
       stopPriceSimulation(symbol);
       logEvent({
@@ -2345,19 +2338,23 @@ app.get("/api/markets/quotes", async (request, response) => {
   const symbols = requestedSymbols.filter((symbol) => tradableSymbols.has(symbol));
   if (!symbols.length) return response.status(400).json({ error: "No allowed symbols requested" });
 
-  // Falling back to getCurrentPrice() - the same choke point an admin
-  // simulation's starting price and every order/margin calc already go
-  // through - instead of each symbol's own unrelated random/index-based mock
-  // price keeps whatever this client ends up displaying in sync with the
-  // price a simulation will actually start from. Without this, a symbol
-  // quoteStore hasn't been ticked for yet (anything outside
-  // quoteLiveSymbols, or right after a restart) showed a price with no
-  // relation to getCurrentPrice()'s fallback, so starting a simulation on it
-  // jumped straight from that mismatched price to the real one.
+  // Same getCurrentPrice() every order and simulation uses, so the price a
+  // client displays is always the price it would trade at. percent_change is
+  // measured across the product's own held history (up to the last 4 hours).
   const data = {};
+  const timestamp = new Date().toISOString();
   for (const symbol of symbols) {
-    const entry = quoteStore.get(symbol);
-    data[symbol] = entry ? entry.data : { symbol, price: getCurrentPrice(symbol), simulated: true, timestamp: new Date().toISOString() };
+    const price = roundPrice(getCurrentPrice(symbol));
+    const firstClose = getSeries(symbol).bars[0].close;
+    data[symbol] = {
+      symbol,
+      price,
+      close: price,
+      percent_change: Number((((price - firstClose) / firstClose) * 100).toFixed(2)),
+      is_market_open: true,
+      simulated: priceSimulations.has(symbol),
+      timestamp,
+    };
   }
   response.json({ provider: "synthetic", symbols, data });
 });
@@ -2377,24 +2374,15 @@ app.get("/api/markets/fx-rate", (request, response) => {
   response.json({ currency, rate: fxRateFallbacks[currency], isLive: false, at: new Date().toISOString() });
 });
 
-// Historical OHLC candles for the chart. Served entirely from this
-// instrument's daily synthetic snapshot (see generateDailyCandleSnapshots) -
-// 1440 one-minute bars - resampled into whatever coarser interval was
-// asked for (see resampleCandles). Every symbol can be served this way now,
-// not just a scoped "live" subset - generating/resampling is free. A daily
-// snapshot only covers a single day, so a range wider than that (1Y, ALL,
-// a multi-year custom span) just resamples down to however few bars one
-// day's worth actually produces rather than inventing years of history.
+// Candles resampled from a product's price series into whatever interval a
+// range maps to. The series holds the last 4 hours, so wider ranges return
+// however many candles those 4 hours make rather than inventing older data.
 const candleRangeMinutes = {
   "1M": 1, "5M": 5, "15M": 15, "30M": 30, "1H": 60, "1D": 1440,
   "5D": 60, "1MO": 1440, "5MO": 1440, "1Y": 10080, ALL: 43200,
 };
 const candleRangeErrorMessage = `Invalid range. Use ${Object.keys(candleRangeMinutes).join(", ")}.`;
 
-// The calendar/date-range picker needs an arbitrary [start, end] window rather
-// than one of the fixed canned ranges above, so the bucket size can't be
-// looked up from a table - it's picked from the span itself, coarsening as
-// the window widens.
 function intervalMinutesForSpan(days) {
   if (days <= 7) return 60;
   if (days <= 90) return 1440;
@@ -2402,28 +2390,11 @@ function intervalMinutesForSpan(days) {
   return 43200;
 }
 
-// Aggregates consecutive 1-minute bars into bucketMinutes-wide bars -
-// open/close from the bucket's first/last bar, high/low across the whole
-// bucket, volume summed. A no-op for the native 1-minute bucket size.
-function resampleCandles(oneMinuteCandles, bucketMinutes) {
-  if (bucketMinutes <= 1 || !oneMinuteCandles.length) return oneMinuteCandles;
-  const resampled = [];
-  for (let i = 0; i < oneMinuteCandles.length; i += bucketMinutes) {
-    const chunk = oneMinuteCandles.slice(i, i + bucketMinutes);
-    if (!chunk.length) continue;
-    resampled.push({
-      time: chunk[0].time,
-      open: chunk[0].open,
-      close: chunk[chunk.length - 1].close,
-      high: Math.max(...chunk.map((candle) => candle.high)),
-      low: Math.min(...chunk.map((candle) => candle.low)),
-      volume: chunk.reduce((sum, candle) => sum + (candle.volume || 0), 0),
-    });
-  }
-  return resampled;
+async function isKnownInstrument(symbol) {
+  return (await listInstruments({})).some((instrument) => instrument.symbol === symbol);
 }
 
-app.get("/api/markets/candles", (request, response) => {
+app.get("/api/markets/candles", async (request, response) => {
   const symbol = String(request.query.symbol || "").trim().toUpperCase();
   const startParam = String(request.query.start || "").trim();
   const endParam = String(request.query.end || "").trim();
@@ -2438,20 +2409,32 @@ app.get("/api/markets/candles", (request, response) => {
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || startDate >= endDate) {
       return response.status(400).json({ error: "Invalid date range. Use start/end as YYYY-MM-DD with start before end." });
     }
-    const spanDays = (endDate - startDate) / 86400000;
     range = "CUSTOM";
-    bucketMinutes = intervalMinutesForSpan(spanDays);
+    bucketMinutes = intervalMinutesForSpan((endDate - startDate) / 86400000);
   } else {
     range = String(request.query.range || "1H").trim().toUpperCase();
     bucketMinutes = candleRangeMinutes[range];
     if (!bucketMinutes) return response.status(400).json({ error: candleRangeErrorMessage });
   }
 
-  const snapshot = candleSnapshotStore.get(symbol);
-  if (!snapshot?.candles?.length) {
-    return response.status(400).json({ error: "Historical candles aren't available for this symbol yet." });
-  }
-  response.json({ symbol, range, candles: resampleCandles(snapshot.candles, bucketMinutes), source: "daily" });
+  if (!(await isKnownInstrument(symbol))) return response.status(400).json({ error: "Unknown symbol" });
+  const series = getSeries(symbol);
+  advanceSeries(symbol, series);
+  response.json({ symbol, range, candles: resampleBars(series.bars, bucketMinutes * 60000), source: "series" });
+});
+
+// The product's full price series at its native 5-second resolution - what
+// the Trade page chart draws while a simulation is running. Simulated bars
+// are flagged, so the chart can mark where the simulation took over; because
+// simulation ticks are recorded here as they happen, loading this at any
+// point (a refresh, switching tabs or products and back) returns the same
+// continuous chart the live view had been building.
+app.get("/api/markets/series", async (request, response) => {
+  const symbol = String(request.query.symbol || "").trim().toUpperCase();
+  if (!(await isKnownInstrument(symbol))) return response.status(400).json({ error: "Unknown symbol" });
+  const series = getSeries(symbol);
+  advanceSeries(symbol, series);
+  response.json({ symbol, bucketMs: seriesBucketMs, bars: serializeBars(series.bars.slice(-seriesChartBars)) });
 });
 
 app.post("/api/service-requests", requireAuth, attachUser, upload.single("attachment"), async (request, response) => {
@@ -2575,22 +2558,17 @@ wss.on("connection", (socket) => {
 
 seedDefaults()
   .then(async () => {
+    // Loaded before anything prices a product, so every series resumes from
+    // where it was before this restart (see seedBasisPrice).
+    await loadCandleSnapshotsFromDb();
     server.listen(port, () => {
       console.log(`FXCC platform running on http://127.0.0.1:${port}`);
     });
     tickSyntheticQuotes();
     setInterval(tickSyntheticQuotes, syntheticQuoteTickIntervalMs);
-    await tickCryptoQuotes().catch((error) => console.warn("Initial crypto quote tick failed:", error.message));
     setInterval(() => {
-      tickCryptoQuotes().catch((error) => console.warn("Crypto quote tick failed:", error.message));
-    }, syntheticQuoteTickIntervalMs);
-    // Yesterday's (or earlier today's) snapshot is useful the instant the
-    // process comes back up - loaded before the fresh generation below so
-    // every product has candles/volatility shape available immediately
-    // rather than only after today's generation finishes.
-    await loadCandleSnapshotsFromDb();
-    await generateDailyCandleSnapshots();
-    setInterval(() => generateDailyCandleSnapshots(), 24 * 60 * 60 * 1000);
+      persistSeriesSnapshots().catch((error) => console.warn("Persisting price history failed:", error.message));
+    }, seriesPersistIntervalMs);
   })
   .catch((error) => {
     console.error("Failed to start FXCC platform", error);
