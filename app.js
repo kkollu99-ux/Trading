@@ -3048,10 +3048,13 @@ async function loadChartForCurrentSymbol() {
 
   // Upgrade from the synthetic placeholder above to the same real candle
   // history TradingView itself was just showing, so a simulation visibly
-  // continues from the actual market move instead of a made-up shape. Only
-  // XAU/USD has real historical data wired up server-side right now (see
-  // quoteLiveSymbols in server.js) - loadRealCandles resolves false for
-  // every other symbol and the synthetic fallback above simply stands.
+  // continues from the actual market move instead of a made-up shape. Every
+  // instrument now has a daily-refreshed real snapshot (see
+  // fetchDailyCandleSnapshots in server.js) backing this, not just the
+  // handful with a live stream - loadRealCandles only resolves false if
+  // that symbol's snapshot genuinely isn't available yet (e.g. the first
+  // day after a fresh deploy, before the job has reached it), in which case
+  // the synthetic fallback above simply stands.
   const symbolForRealCandles = tradeChartState.apiSymbol;
   const priceAtRequestTime = tradeChartState.candles.at(-1)?.close;
   loadRealCandles(symbolForRealCandles, "1M").then((ok) => {
@@ -3063,7 +3066,13 @@ async function loadChartForCurrentSymbol() {
     // snapshot above means a tick or two landing while this fetch was in
     // flight doesn't make the swap itself rewind the price back a step.
     anchorCandlesEndToPrice(tradeChartState.candles, tradeChartState.lastKnownPrice ?? priceAtRequestTime);
-    resetTradeChartView();
+    // Skipped once the simulation's own first tick has already narrowed the
+    // view to its tight default (see applyLiveTick) - this fetch racing
+    // with that tick and resolving after it would otherwise reset the view
+    // back to the wide default, pulling a swath of real history back
+    // alongside a simulated move that's often a very different scale (the
+    // exact "chart stopped respecting the tight view" symptom reported).
+    if (!tradeChartState.simulationBaselineSynced) resetTradeChartView();
     renderTradeCandles();
   });
 }
