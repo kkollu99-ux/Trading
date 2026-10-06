@@ -2685,23 +2685,18 @@ function renderTradeCandles() {
   const chart = tradeChartMargins;
   const width = rect.width - chart.left - chart.right;
   const height = rect.height - chart.top - chart.bottom;
-  let highs = candles.map((candle) => candle.high);
-  let lows = candles.map((candle) => candle.low);
-  // While a simulation is running, scale to just its OWN candles once it has
-  // produced enough of them (see simulationStartTime) - a deliberately large
-  // simulated move sharing one scale with real pre-simulation history (whose
-  // natural range is usually much smaller) forces the simulated candles'
-  // own detail down to fit the real ones in too, which is exactly backwards
-  // from what's actually worth watching closely. Falls back to the full
-  // visible range until there are enough simulated candles to scale to
-  // sensibly, and for ordinary (non-simulated) history as always.
-  if (tradeChartState.isSimulated && tradeChartState.simulationStartTime) {
-    const markerIndex = candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
-    if (markerIndex >= 0 && candles.length - markerIndex >= 5) {
-      highs = highs.slice(markerIndex);
-      lows = lows.slice(markerIndex);
-    }
-  }
+  // Scaling to just a running simulation's own candles (tried earlier) turned
+  // out to backfire: a real pre-simulation candle genuinely can move by more
+  // than a deliberately modest simulated range (an overnight gap on a stock,
+  // for instance), and clamping that candle into a scale far narrower than
+  // its own real move rendered it as a jarring full-height spike - worse
+  // than the small-candle problem it was meant to fix. Sharing one scale
+  // across everything visible, as before, means nothing ever has to be
+  // squeezed or clamped to fit: a real move that's genuinely smaller than
+  // the simulated one reads as smaller, honestly, and a real move that
+  // isn't never gets distorted into looking like one.
+  const highs = candles.map((candle) => candle.high);
+  const lows = candles.map((candle) => candle.low);
   // Auto-scale by default (fits the visible candles' high/low), but a manual
   // drag/scroll on the price axis (see setupPriceAxisInteractions) overrides
   // this with a fixed range until the user double-clicks it or the view resets.
@@ -2785,13 +2780,13 @@ function renderTradeCandles() {
     // without changing which candles have one or how big a real wick reads.
     const wickTopRaw = Math.min(yFor(candle.high), bodyTopRaw - 1);
     const wickBottomRaw = Math.max(yFor(candle.low), bodyBottomRaw + 1);
-    // While scaled to just a running simulation's own range (see highs/lows
-    // above), a real pre-simulation candle whose price sits outside that
-    // range would otherwise land outside the plot area entirely - overlapping
-    // the volume bars or axis labels below/above it instead of just being
-    // off the currently chosen scale. Clamping every edge to the plot bounds
-    // keeps it a harmless sliver pinned to the edge, same as any chart
-    // showing "there's real data here, just off this view's range."
+    // Only bites when manualPriceRange (a user-dragged/zoomed price axis -
+    // see setupPriceAxisInteractions) is narrower than the full auto-fit
+    // range above: a candle outside it would otherwise land outside the
+    // plot area entirely, overlapping the volume bars or axis labels
+    // instead of just being off the currently chosen scale. A no-op the
+    // rest of the time, since autoMax/autoMin above already span every
+    // visible candle.
     const clampY = (y) => Math.max(chart.top, Math.min(chart.top + height, y));
     const bodyTop = clampY(bodyTopRaw);
     const bodyBottom = clampY(bodyBottomRaw);
