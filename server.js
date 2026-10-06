@@ -1788,11 +1788,24 @@ const orderUnitsPerLot = 100;
 const orderFeeRate = 0.001;
 
 // Best-effort current price for order pricing: prefer the live quoteStore
-// (populated by the twelvedata pollers/stream), and fall back to a
-// deterministic, slowly-drifting per-symbol price when no real feed is
-// configured (mock mode) or the poller hasn't reached this symbol yet - so
-// opening and closing a position still produce a sane, non-random P&L instead
-// of two unrelated Math.random() calls.
+// (populated by the twelvedata pollers/stream, but only for quoteLiveSymbols
+// - a handful of instruments, Gold only by default), then the daily candle
+// snapshot (candleSnapshotStore, populated for every tradable instrument -
+// see fetchDailyCandleSnapshots), and only fall back to a deterministic,
+// slowly-drifting per-symbol synthetic price when NEITHER real source has
+// this symbol yet (mock mode, or the very first day before either job has
+// reached it) - so opening and closing a position still produce a sane,
+// non-random P&L instead of two unrelated Math.random() calls.
+//
+// Skipping straight from quoteStore to the synthetic fallback (as this used
+// to) meant every symbol outside quoteLiveSymbols got a basePrice with zero
+// relationship to its own real price history - starting a simulation on,
+// say, a ~$500 instrument could seed it from a synthetic ~$150 price
+// instead, so the chart's real candle history (correctly built from
+// candleSnapshotStore) and the simulation's own price (and everything that
+// reads it - the live BID/ASK, the simulated candles themselves) landed on
+// two unrelated price scales, reported as "simulated candles doesn't match
+// real-time fetched candles".
 function getCurrentPrice(symbol) {
   const simulation = priceSimulations.get(symbol);
   if (simulation) return simulation.price;
@@ -1800,6 +1813,9 @@ function getCurrentPrice(symbol) {
   const entry = quoteStore.get(symbol);
   const price = Number(entry?.data?.close ?? entry?.data?.price);
   if (Number.isFinite(price) && price > 0) return price;
+
+  const snapshotClose = Number(candleSnapshotStore.get(symbol)?.candles?.at(-1)?.close);
+  if (Number.isFinite(snapshotClose) && snapshotClose > 0) return snapshotClose;
 
   const seed = [...symbol].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return Number((50 + (seed % 200) + Math.sin(Date.now() / 60000 + seed) * 5).toFixed(4));
