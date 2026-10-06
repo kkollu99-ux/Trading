@@ -3129,6 +3129,41 @@ function applyMarketStatus(payload) {
 }
 
 async function loadChartForCurrentSymbol() {
+  // This function has five call sites - symbol selection, a timeframe
+  // click, navigating back to the Trade tab, and two reactive "a
+  // simulation is running" discovery paths - and every one of them used to
+  // unconditionally fall through to a full rebuild below: fresh synthetic
+  // placeholder history, simulationStartTime and the whole candle array
+  // wiped, waiting on a brand new baseline-sync tick. While a simulation
+  // was already running and fully synced for the symbol already on
+  // screen, that meant an admin doing something as ordinary as clicking a
+  // timeframe button or switching tabs and back mid-test would silently
+  // discard every simulated candle rendered so far and restart the entire
+  // handoff from zero - repeatedly, on every such interaction. That
+  // restart cycle, not any one rendering bug, is what kept reading as the
+  // chart "becoming unordered" after a simulation starts. Nothing here
+  // actually needs a rebuild unless the symbol or its simulated/live
+  // status has genuinely changed.
+  const alreadySimulatingThisSymbol =
+    tradeChartState.isSimulated && tradeChartState.simulationBaselineSynced && activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
+  if (alreadySimulatingThisSymbol) {
+    if (tradeChartState.timeframe !== "1M") {
+      setActiveTimeframeControl("1M");
+      tradeChartState.timeframe = "1M";
+      tradeChartState.customRange = null;
+    }
+    document.querySelector("#tradePriceStatsRow")?.classList.remove("is-hidden");
+    document.querySelector(".timeframes")?.classList.remove("is-hidden");
+    // Needed even though nothing about the simulation itself changed - this
+    // runs on "navigating back to the Trade tab" too, where the canvas may
+    // currently be hidden behind the TradingView widget (e.g. the admin
+    // left the Trade page entirely and came back, or switched to a
+    // non-simulated symbol and back) and needs to be shown again.
+    showSimulationChart();
+    renderTradeCandles();
+    return;
+  }
+
   tradeChartState.liveBid = null;
   tradeChartState.liveAsk = null;
   tradeChartState.slideAnim = null;
