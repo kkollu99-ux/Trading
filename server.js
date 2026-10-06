@@ -2698,7 +2698,16 @@ app.post("/api/client-error", (request, response) => {
   response.status(204).end();
 });
 
-app.use(express.static(rootDir));
+// Explicit allowlist, not express.static(rootDir): the project root this
+// runs from also holds server.js, package.json, package-lock.json, and
+// db/schema.sql alongside the actual public frontend files - a blanket
+// static mount served every one of those to anyone who asked, including
+// the full backend source (with the seeded admin credentials baked into
+// seedDefaults) and the database schema. These three are the entire public
+// surface (confirmed against what index.html/app.js/styles.css actually
+// reference) - /uploads already has its own dedicated static mount above.
+app.get("/app.js", (_request, response) => response.sendFile(path.join(rootDir, "app.js")));
+app.get("/styles.css", (_request, response) => response.sendFile(path.join(rootDir, "styles.css")));
 app.get("*", (_request, response) => {
   response.sendFile(path.join(rootDir, "index.html"));
 });
