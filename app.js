@@ -2986,7 +2986,7 @@ async function loadRealCandles(symbol, range, customRange, externalToken) {
     const payload = await response.json().catch(() => ({}));
     if (token !== candleRequestToken) return false;
     if (!response.ok || !payload.candles?.length) return false;
-    tradeChartState.candles = payload.candles.map((candle) => ({
+    const candles = payload.candles.map((candle) => ({
       time: candle.time,
       open: Number(candle.open),
       high: Number(candle.high),
@@ -2994,6 +2994,28 @@ async function loadRealCandles(symbol, range, customRange, externalToken) {
       close: Number(candle.close),
       volume: Number(candle.volume || 0),
     }));
+    // This fetch is kicked off without waiting for it (see
+    // loadChartForCurrentSymbol), so a simulation's first tick can land and
+    // start appending real simulated candles onto the synthetic placeholder
+    // history (see applyLiveTick's baseline-sync block) before it resolves.
+    // Overwriting tradeChartState.candles wholesale in that case would throw
+    // away every simulated candle rendered since AND orphan
+    // simulationStartTime - it would no longer match any candle's time,
+    // silently disabling the divider line and the scale-to-simulation
+    // logic in renderTradeCandles for the rest of the simulation's life.
+    // That orphaning, not the rendering logic itself, is why the simulated
+    // portion of the chart kept rendering flat/tiny next to real history
+    // no matter how that rendering logic was changed. Splice the real
+    // history in underneath the already-simulated tail instead of
+    // replacing it.
+    if (tradeChartState.isSimulated && tradeChartState.simulationBaselineSynced) {
+      const markerIndex = tradeChartState.candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
+      const simulatedTail = markerIndex >= 0 ? tradeChartState.candles.slice(markerIndex) : tradeChartState.candles.slice(-1);
+      anchorCandlesEndToPrice(candles, simulatedTail[0]?.open);
+      tradeChartState.candles = [...candles, ...simulatedTail];
+    } else {
+      tradeChartState.candles = candles;
+    }
     return true;
   } catch {
     return false;
@@ -3108,14 +3130,17 @@ async function loadChartForCurrentSymbol() {
     // every tick this chart has actually shown) over the priceAtRequestTime
     // snapshot above means a tick or two landing while this fetch was in
     // flight doesn't make the swap itself rewind the price back a step.
-    anchorCandlesEndToPrice(tradeChartState.candles, tradeChartState.lastKnownPrice ?? priceAtRequestTime);
-    // Skipped once the simulation's own first tick has already narrowed the
-    // view to its tight default (see applyLiveTick) - this fetch racing
-    // with that tick and resolving after it would otherwise reset the view
-    // back to the wide default, pulling a swath of real history back
+    // Both skipped once the simulation's own first tick has already synced
+    // the baseline (see applyLiveTick) - loadRealCandles has already spliced
+    // the real history in underneath the simulated tail in that case (using
+    // the baseline candle's own price to anchor it, not this snapshot's),
+    // and resetting the view here would pull a swath of real history back
     // alongside a simulated move that's often a very different scale (the
     // exact "chart stopped respecting the tight view" symptom reported).
-    if (!tradeChartState.simulationBaselineSynced) resetTradeChartView();
+    if (!tradeChartState.simulationBaselineSynced) {
+      anchorCandlesEndToPrice(tradeChartState.candles, tradeChartState.lastKnownPrice ?? priceAtRequestTime);
+      resetTradeChartView();
+    }
     renderTradeCandles();
   });
 }
