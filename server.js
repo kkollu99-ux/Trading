@@ -1901,6 +1901,13 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     targetPrice: resolvedTargetPrice,
     totalTicksEstimate,
     ticksElapsed: 0,
+    // Current "how busy does the market feel" multiplier on noise intensity
+    // - see the tick loop, where it does a slow random walk of its own. A
+    // fixed noise width every tick makes every candle statistically the
+    // same size (which is what "candles are all the same length" was
+    // pointing at); real markets alternate between calm and busy stretches,
+    // which is what this reproduces.
+    volatilityLevel: 1,
     // Whether this run is time-bounded: when it is, reaching targetPrice
     // early (a lucky run of noise) does NOT end the run - it keeps gliding/
     // hovering near the target for whatever time is left, and the duration
@@ -2016,8 +2023,16 @@ setInterval(() => {
     // DISPLAYED price wiggles around a plan that still lands exactly where
     // it's supposed to. Clamped so one outlier historical bar can't
     // dominate a single tick.
+    // Slow mean-reverting random walk on the intensity itself (±9%/tick,
+    // bounded to 0.25x-3.5x) - this is what turns "every candle drawn from
+    // the same fixed-width distribution" (statistically same-sized, however
+    // random each individual draw is) into visible stretches of calm
+    // followed by bursts of bigger moves, the way a real chart actually
+    // looks.
+    simulation.volatilityLevel = Math.max(0.25, Math.min(3.5, simulation.volatilityLevel * (1 + (Math.random() - 0.5) * 0.18)));
+
     const template = simulation.volatilityTemplate;
-    const noiseIntensity = Math.max(simulation.stepPercent * 3.5, 0.03);
+    const noiseIntensity = Math.max(simulation.stepPercent * 3.5, 0.03) * simulation.volatilityLevel;
     const rawNoisePercent = template && template.length
       ? template[Math.floor(Math.random() * template.length)] * noiseIntensity
       : (Math.random() * 2 - 1) * noiseIntensity;
