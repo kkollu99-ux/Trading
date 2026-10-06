@@ -1170,17 +1170,17 @@ navItems.forEach((item) => item.addEventListener("click", () => {
 let marketsInstruments = [];
 
 const marketsRowContainers = {
+  commodities: "#marketsCommoditiesRows",
   forex: "#marketsForexRows",
   crypto: "#marketsCryptoRows",
   stocks: "#marketsStocksRows",
-  commodities: "#marketsCommoditiesRows",
 };
 
 const marketsCountEls = {
+  commodities: "#marketsCommoditiesCount",
   forex: "#marketsForexCount",
   crypto: "#marketsCryptoCount",
   stocks: "#marketsStocksCount",
-  commodities: "#marketsCommoditiesCount",
 };
 
 function renderMarketInstrumentRow(instrument, quotes) {
@@ -1196,7 +1196,7 @@ function renderMarketInstrumentRow(instrument, quotes) {
 }
 
 function renderMarketsList(instruments, quotes = {}) {
-  const groups = { forex: [], crypto: [], stocks: [], commodities: [] };
+  const groups = { commodities: [], forex: [], crypto: [], stocks: [] };
   instruments.forEach((instrument) => {
     const group = categoryFilter(instrument.category);
     (groups[group] || groups.commodities).push(instrument);

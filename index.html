@@ -102,10 +102,10 @@
             <p>Access hundreds of instruments across multiple asset classes from one powerful platform.</p>
           </div>
           <div class="market-grid">
+            <article><span>🥇</span><h3>Commodities</h3><strong>20+ Markets</strong><p>Diversify with Gold, Silver, Oil and agricultural commodity CFDs.</p><button type="button">Trade Now ›</button></article>
             <article><span>💱</span><h3>Forex</h3><strong>60+ Pairs</strong><p>Trade major, minor and exotic currency pairs with tight spreads and deep liquidity.</p><button type="button">Trade Now ›</button></article>
             <article><span>₿</span><h3>Cryptocurrencies</h3><strong>30+ Coins</strong><p>Access Bitcoin, Ethereum and top altcoins with leverage up to 1:10.</p><button type="button">Trade Now ›</button></article>
             <article><span>📈</span><h3>Stocks</h3><strong>300+ Equities</strong><p>Trade shares of leading global companies from US, EU and Asian markets.</p><button type="button">Trade Now ›</button></article>
-            <article><span>🥇</span><h3>Commodities</h3><strong>20+ Markets</strong><p>Diversify with Gold, Silver, Oil and agricultural commodity CFDs.</p><button type="button">Trade Now ›</button></article>
           </div>
         </div>
       </section>
@@ -176,7 +176,7 @@
             <small>A Broker On Your Side</small>
             <p>FXCC CAPITALS is a leading Forex and CFD broker offering competitive trading conditions to retail and professional clients worldwide.</p>
           </div>
-          <div><h3>Trading</h3><a href="#homeMarkets">Forex</a><a href="#homeMarkets">Cryptocurrencies</a><a href="#homeMarkets">Stocks</a><a href="#homeMarkets">Commodities</a></div>
+          <div><h3>Trading</h3><a href="#homeMarkets">Commodities</a><a href="#homeMarkets">Forex</a><a href="#homeMarkets">Cryptocurrencies</a><a href="#homeMarkets">Stocks</a></div>
           <div><h3>Company</h3><a href="#homeWhy">About Us</a><a href="#homeWhy">Legal Documents</a><a href="#homeWhy">Privacy Policy</a><a href="#homeContact">Contact</a></div>
           <div><h3>Support</h3><a href="#homeContact">FAQ</a><a href="#homePlatforms">Trading Conditions</a><a href="#homeContact">Account Types</a><a href="#homeContact">Deposit Methods</a></div>
         </div>
@@ -482,15 +482,23 @@
 
             <div class="market-filter-tabs" aria-label="Market filters">
               <button class="is-active" type="button" data-filter="all">All</button>
-              <button type="button" data-filter="forex">◎ Forex <small>Main</small></button>
+              <button type="button" data-filter="commodities">◈ Commodities <small>Main</small></button>
+              <button type="button" data-filter="forex">◎ Forex</button>
               <button type="button" data-filter="crypto">₿ Crypto</button>
               <button type="button" data-filter="stocks">▥ Stocks</button>
-              <button type="button" data-filter="commodities">◈ Commodities</button>
             </div>
 
-            <section class="instrument-group" data-market-group="forex">
-              <h3>◎ Forex <span id="marketsForexCount">0</span><small>Featured</small></h3>
+            <section class="instrument-group" data-market-group="commodities">
+              <h3>◈ Commodities <span id="marketsCommoditiesCount">0</span><small>Featured</small></h3>
               <div class="instrument-table">
+                <div class="instrument-head"><span>Symbol</span><span>Price&nbsp;&nbsp;24h</span></div>
+                <div id="marketsCommoditiesRows"></div>
+              </div>
+            </section>
+
+            <section class="instrument-group" data-market-group="forex">
+              <h3>◎ Forex <span id="marketsForexCount">0</span></h3>
+              <div class="instrument-table compact">
                 <div class="instrument-head"><span>Symbol</span><span>Price&nbsp;&nbsp;24h</span></div>
                 <div id="marketsForexRows"></div>
               </div>
@@ -511,14 +519,6 @@
                 <div id="marketsStocksRows"></div>
               </div>
             </section>
-
-            <section class="instrument-group" data-market-group="commodities">
-              <h3>◈ Commodities <span id="marketsCommoditiesCount">0</span></h3>
-              <div class="instrument-table compact">
-                <div class="instrument-head"><span>Symbol</span><span>Price&nbsp;&nbsp;24h</span></div>
-                <div id="marketsCommoditiesRows"></div>
-              </div>
-            </section>
           </div>
         </section>
 
@@ -536,10 +536,10 @@
               </div>
               <div class="watch-tabs" aria-label="Watchlist filters">
                 <button class="is-active" type="button" data-watch-filter="all">All</button>
+                <button type="button" data-watch-filter="commodities">Commodities</button>
                 <button type="button" data-watch-filter="forex">Forex</button>
                 <button type="button" data-watch-filter="crypto">Crypto</button>
                 <button type="button" data-watch-filter="stocks">Stocks</button>
-                <button type="button" data-watch-filter="commodities">Commodities</button>
               </div>
               <div id="tradeWatchTable" class="watch-table">
                 <div class="watch-head"><span>Symbol</span><span>Bid</span><span>Chg%</span></div>
@@ -786,9 +786,9 @@
             </header>
             <div class="watch-tabs product-filter-tabs" aria-label="Product category filters">
               <button class="is-active" type="button" data-product-filter="all">All</button>
+              <button type="button" data-product-filter="commodities">Commodities</button>
               <button type="button" data-product-filter="forex">Forex</button>
               <button type="button" data-product-filter="crypto">Crypto</button>
-              <button type="button" data-product-filter="commodities">Commodities</button>
               <button type="button" data-product-filter="stocks">Stocks</button>
             </div>
             <div class="management-grid products-grid">
