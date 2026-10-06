@@ -1186,6 +1186,10 @@ select:focus {
   font-weight: 900;
 }
 
+.client-ticker em.is-up {
+  color: var(--green);
+}
+
 .client-update {
   color: var(--muted);
 }
