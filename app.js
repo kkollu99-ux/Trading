@@ -3035,6 +3035,33 @@ async function loadRealCandles(symbol, range, customRange, externalToken) {
       const markerIndex = tradeChartState.candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
       const simulatedTail = markerIndex >= 0 ? tradeChartState.candles.slice(markerIndex) : tradeChartState.candles.slice(-1);
       anchorCandlesEndToPrice(candles, simulatedTail[0]?.open);
+      // The simulated tail's own candle times were set relative to whatever
+      // synthetic placeholder history was on screen when its first tick
+      // arrived (see applyLiveTick) - if this fetch hadn't resolved yet by
+      // then, that placeholder's times had no relation to this real
+      // history's actual timestamps, which is what just got spliced in
+      // below it. Left alone, the divider's two sides agree on price but
+      // not on time - the exact "x-axis jumps hours at the divider" bug,
+      // just from this fetch losing the race instead of #107's array-wipe
+      // race. Re-anchor every already-rendered simulated candle to
+      // continue from THIS real history's own last candle instead (the
+      // same reference a non-racing baseline sync would have used from the
+      // start), and carry the same shift forward via
+      // simulationTimeOffsetMs so every candle still to come keeps
+      // agreeing with it.
+      const realHistoryLastMs = parseChartTimeMs(candles.at(-1)?.time);
+      const tailFirstMs = parseChartTimeMs(simulatedTail[0]?.time);
+      if (Number.isFinite(realHistoryLastMs) && Number.isFinite(tailFirstMs)) {
+        const continuedStartMs = realHistoryLastMs + simulationCandleBucketMs;
+        const retroactiveDeltaMs = continuedStartMs - tailFirstMs;
+        if (retroactiveDeltaMs) {
+          simulatedTail.forEach((candle) => {
+            candle.time = new Date(parseChartTimeMs(candle.time) + retroactiveDeltaMs).toISOString();
+          });
+          tradeChartState.simulationStartTime = simulatedTail[0].time;
+          tradeChartState.simulationTimeOffsetMs = (tradeChartState.simulationTimeOffsetMs || 0) + retroactiveDeltaMs;
+        }
+      }
       tradeChartState.candles = [...candles, ...simulatedTail];
     } else {
       tradeChartState.candles = candles;
