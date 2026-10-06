@@ -2685,8 +2685,23 @@ function renderTradeCandles() {
   const chart = tradeChartMargins;
   const width = rect.width - chart.left - chart.right;
   const height = rect.height - chart.top - chart.bottom;
-  const highs = candles.map((candle) => candle.high);
-  const lows = candles.map((candle) => candle.low);
+  let highs = candles.map((candle) => candle.high);
+  let lows = candles.map((candle) => candle.low);
+  // While a simulation is running, scale to just its OWN candles once it has
+  // produced enough of them (see simulationStartTime) - a deliberately large
+  // simulated move sharing one scale with real pre-simulation history (whose
+  // natural range is usually much smaller) forces the simulated candles'
+  // own detail down to fit the real ones in too, which is exactly backwards
+  // from what's actually worth watching closely. Falls back to the full
+  // visible range until there are enough simulated candles to scale to
+  // sensibly, and for ordinary (non-simulated) history as always.
+  if (tradeChartState.isSimulated && tradeChartState.simulationStartTime) {
+    const markerIndex = candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
+    if (markerIndex >= 0 && candles.length - markerIndex >= 5) {
+      highs = highs.slice(markerIndex);
+      lows = lows.slice(markerIndex);
+    }
+  }
   // Auto-scale by default (fits the visible candles' high/low), but a manual
   // drag/scroll on the price axis (see setupPriceAxisInteractions) overrides
   // this with a fixed range until the user double-clicks it or the view resets.
@@ -2760,17 +2775,29 @@ function renderTradeCandles() {
     // top of everything else already changing.
     const bodyColor = isUp ? "#089981" : "#f23645";
     const wickColor = isUp ? "#1a5a54" : "#7f312f";
-    const bodyTop = yFor(Math.max(candle.open, candle.close));
-    const bodyBottom = yFor(Math.min(candle.open, candle.close));
-    const bodyHeight = Math.max(2, bodyBottom - bodyTop);
-    // Floored the same way the body is above: a real candle whose actual
+    const bodyTopRaw = yFor(Math.max(candle.open, candle.close));
+    const bodyBottomRaw = yFor(Math.min(candle.open, candle.close));
+    // Floored the same way as the clamp below: a real candle whose actual
     // high/low barely clears its open/close (common for quiet pre-simulation
     // history sitting on the same scale as a much bigger simulated move)
     // would otherwise draw a wick shorter than a pixel - at a glance
     // indistinguishable from no wick at all. This keeps a sliver visible
     // without changing which candles have one or how big a real wick reads.
-    const wickTop = Math.min(yFor(candle.high), bodyTop - 1);
-    const wickBottom = Math.max(yFor(candle.low), bodyBottom + 1);
+    const wickTopRaw = Math.min(yFor(candle.high), bodyTopRaw - 1);
+    const wickBottomRaw = Math.max(yFor(candle.low), bodyBottomRaw + 1);
+    // While scaled to just a running simulation's own range (see highs/lows
+    // above), a real pre-simulation candle whose price sits outside that
+    // range would otherwise land outside the plot area entirely - overlapping
+    // the volume bars or axis labels below/above it instead of just being
+    // off the currently chosen scale. Clamping every edge to the plot bounds
+    // keeps it a harmless sliver pinned to the edge, same as any chart
+    // showing "there's real data here, just off this view's range."
+    const clampY = (y) => Math.max(chart.top, Math.min(chart.top + height, y));
+    const bodyTop = clampY(bodyTopRaw);
+    const bodyBottom = clampY(bodyBottomRaw);
+    const bodyHeight = Math.max(2, bodyBottom - bodyTop);
+    const wickTop = clampY(wickTopRaw);
+    const wickBottom = clampY(wickBottomRaw);
 
     ctx.strokeStyle = wickColor;
     ctx.beginPath();
