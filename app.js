@@ -3162,8 +3162,24 @@ async function loadChartForCurrentSymbol() {
   // chart "becoming unordered" after a simulation starts. Nothing here
   // actually needs a rebuild unless the symbol or its simulated/live
   // status has genuinely changed.
+  // simulationBaselineSynced alone is not enough here - it's also true for
+  // an ordinary non-simulated symbol (set to mean "nothing to sync"), so a
+  // page load that briefly shows the non-simulated view before the first
+  // tick for an already-running simulation arrives (e.g. right after a
+  // refresh, while the real apiSymbol is still being restored - see
+  // selectTradeSymbol) leaves that same flag true for the wrong reason.
+  // Without also requiring simulationStartTime - only ever set by a real
+  // baseline sync, and cleared on every full rebuild - that stale true
+  // read as "already set up" and skipped the rebuild a genuinely new
+  // simulation still needed: the synthetic placeholder, the real-candle
+  // fetch, and the baseline sync that establishes the divider. The chart
+  // was left stuck on leftover synthetic data with no divider and no real
+  // history ever loaded - reported as "not syncing with old data".
   const alreadySimulatingThisSymbol =
-    tradeChartState.isSimulated && tradeChartState.simulationBaselineSynced && activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
+    tradeChartState.isSimulated &&
+    tradeChartState.simulationBaselineSynced &&
+    tradeChartState.simulationStartTime &&
+    activeSimulationsBySymbol.has(tradeChartState.apiSymbol);
   if (alreadySimulatingThisSymbol) {
     if (tradeChartState.timeframe !== "1M") {
       setActiveTimeframeControl("1M");
