@@ -1417,6 +1417,7 @@ async function pollLiveQuotesOnce() {
       quoteStore.set(symbol, { data: quote, at: Date.now() });
       const price = Number(quote.close ?? quote.price);
       if (Number.isFinite(price)) {
+        recordStreamCandleTick(symbol, price, Date.now());
         broadcast({ type: "price-tick", symbol, price, source: "poll", timestamp: new Date().toISOString() });
       }
     }
@@ -1544,6 +1545,57 @@ function recordStreamCandleTick(symbol, price, atMs) {
     if (history.length > streamCandleMaxBars) history.shift();
   }
   streamCandleHistory.set(symbol, history);
+}
+
+// Seeds streamCandleHistory from a real REST time_series response (1-minute
+// bars only - see the interval check at the call site) so there's genuine
+// historical shape to build a simulation's volatility template from right
+// away, instead of waiting for the live stream to accumulate its own bars
+// from a cold start/restart. Skipped once the stream buffer already has a
+// healthy amount of its own real data, so this never clobbers fresher ticks.
+function seedStreamCandleHistoryFromRest(symbol, candles) {
+  if (!Array.isArray(candles) || candles.length < 5) return;
+  const existing = streamCandleHistory.get(symbol);
+  if (existing && existing.length >= 20) return;
+  const mapped = candles.slice(-streamCandleMaxBars).map((candle) => ({
+    bucketStart: new Date(candle.time).getTime(),
+    time: candle.time,
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close,
+    volume: candle.volume || 0,
+  }));
+  streamCandleHistory.set(symbol, mapped);
+}
+
+// The "earlier data" a simulation replays as noise: the real %-change from
+// one stored 1-minute bar's close to the next, across whatever real history
+// is on hand (stream-built or REST-seeded - see above). Sampling from this
+// instead of a flat/synthetic random range means a simulated run inherits
+// the instrument's own actual recent volatility shape - its mix of small
+// drifts and occasional bigger moves - rather than inventing one.
+function buildVolatilityTemplate(symbol) {
+  const history = streamCandleHistory.get(symbol);
+  if (!history || history.length < 5) return null;
+  const changes = [];
+  for (let i = 1; i < history.length; i += 1) {
+    const prevClose = history[i - 1].close;
+    if (!Number.isFinite(prevClose) || prevClose <= 0) continue;
+    const change = ((history[i].close - prevClose) / prevClose) * 100;
+    if (Number.isFinite(change)) changes.push(change);
+  }
+  if (!changes.length) return null;
+  // Normalized to unit average magnitude rather than returned as raw %
+  // changes: a real bar is 1 minute while a simulation tick is 1.5s, so the
+  // instrument's own absolute volatility is the wrong scale to replay
+  // directly (it would barely move the price at all). What's worth keeping
+  // from real data is the *shape* - the relative mix of small and large
+  // moves, and how often one goes against the last - which this preserves;
+  // the tick loop below rescales it to the admin's chosen stepPercent.
+  const meanAbs = changes.reduce((sum, change) => sum + Math.abs(change), 0) / changes.length;
+  if (!(meanAbs > 0)) return null;
+  return changes.map((change) => change / meanAbs);
 }
 
 // True push-based streaming: Twelve Data's WebSocket relays ticks the instant they
@@ -1713,12 +1765,39 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
   const basePrice = getCurrentPrice(symbol);
   const clampedDurationMs = Number.isFinite(durationMs) && durationMs > 0 ? Math.min(durationMs, priceSimulationMaxDurationMs) : null;
   const expiresAt = clampedDurationMs ? new Date(Date.now() + clampedDurationMs).toISOString() : null;
+  const resolvedStepPercent = Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent;
+  const resolvedTargetPrice = Number.isFinite(targetPrice) && targetPrice > 0 ? targetPrice : null;
+
+  // How many ticks this run is expected to take, used below to spread the
+  // move toward targetPrice/duration evenly across that many ticks instead
+  // of compounding stepPercent of the current (ever-growing) price every
+  // tick, which blows up exponentially on any longer-running simulation -
+  // that's what was turning a "nudge the price up" demo into a 20%+ move
+  // and wildly inflated floating/realized P&L. A target price paces off
+  // stepPercent-sized ticks to cover the distance; otherwise a duration
+  // paces the same stepPercent-per-tick drift across however many ticks
+  // that duration holds.
+  let totalTicksEstimate = null;
+  if (resolvedTargetPrice != null) {
+    const totalPercent = Math.abs(((resolvedTargetPrice - basePrice) / basePrice) * 100);
+    totalTicksEstimate = Math.max(10, Math.round(totalPercent / resolvedStepPercent));
+  } else if (clampedDurationMs) {
+    totalTicksEstimate = Math.max(10, Math.round(clampedDurationMs / priceSimulationTickMs));
+  }
 
   const simulation = {
     direction,
-    stepPercent: Number.isFinite(stepPercent) && stepPercent > 0 ? stepPercent : priceSimulationDefaultStepPercent,
+    stepPercent: resolvedStepPercent,
     price: basePrice,
-    targetPrice: Number.isFinite(targetPrice) && targetPrice > 0 ? targetPrice : null,
+    basePrice,
+    targetPrice: resolvedTargetPrice,
+    totalTicksEstimate,
+    // A snapshot of this symbol's real recent %-change-per-bar shape (see
+    // buildVolatilityTemplate) - replayed as noise on top of the steady
+    // drift below so the simulated candles vary in size and occasionally
+    // move against the trend, like real candles, instead of a perfectly
+    // uniform one-directional staircase.
+    volatilityTemplate: buildVolatilityTemplate(symbol),
     startedBy,
     startedAt: new Date().toISOString(),
     expiresAt,
@@ -1791,7 +1870,36 @@ function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO,
 
 setInterval(() => {
   for (const [symbol, simulation] of priceSimulations) {
-    const delta = simulation.price * (simulation.stepPercent / 100) * (simulation.direction === "up" ? 1 : -1);
+    const dirSign = simulation.direction === "up" ? 1 : -1;
+
+    // Steady drift toward the goal, expressed as a % of the ORIGINAL base
+    // price (arithmetic) rather than the current, ever-moving price
+    // (compounding) - keeps a long-running simulation's total move bounded
+    // and predictable instead of exploding exponentially the way repeatedly
+    // compounding stepPercent of the current price did.
+    const driftPercent =
+      simulation.targetPrice != null && simulation.totalTicksEstimate
+        ? (((simulation.targetPrice - simulation.basePrice) / simulation.basePrice) * 100) / simulation.totalTicksEstimate
+        : simulation.stepPercent * dirSign;
+
+    // Natural-looking noise, shaped by this symbol's own recent real
+    // volatility (or a flat random fallback when none is stored yet) and
+    // scaled to be comparable to - and sometimes bigger than - the steady
+    // drift above, so ticks occasionally go against the overall trend. This
+    // is what turns the move from a flat staircase into something that
+    // actually looks like a market chart: varying candle sizes, real
+    // pullbacks, not just a smaller/bigger step every time in the same
+    // direction. Clamped so one outlier historical bar can't dominate a
+    // single tick.
+    const template = simulation.volatilityTemplate;
+    const noiseIntensity = Math.max(simulation.stepPercent * 1.4, 0.05);
+    const rawNoisePercent = template && template.length
+      ? template[Math.floor(Math.random() * template.length)] * noiseIntensity
+      : (Math.random() * 2 - 1) * noiseIntensity;
+    const noiseCap = noiseIntensity * 4;
+    const noisePercent = Math.max(-noiseCap, Math.min(noiseCap, rawNoisePercent));
+
+    const delta = simulation.basePrice * ((driftPercent + noisePercent) / 100);
     simulation.price = Math.max(0.00001, Number((simulation.price + delta).toFixed(6)));
 
     // A target clamps the final tick to land exactly on it (rather than
@@ -2334,6 +2442,10 @@ app.get("/api/markets/candles", async (request, response) => {
       .reverse();
 
     candleCache.set(cacheKey, { candles, at: Date.now() });
+    // Only 1-minute bars match streamCandleHistory's own bucket size - seeding
+    // from a coarser range (1H/1D/etc.) would feed hourly/daily-sized swings
+    // into a simulation's per-tick noise, producing wild single-tick jumps.
+    if (rangeSpec.interval === "1min") seedStreamCandleHistoryFromRest(symbol, candles);
     return response.json({ symbol, range, candles });
   } catch (error) {
     if (cached) return response.json({ symbol, range, candles: cached.candles, stale: true });
