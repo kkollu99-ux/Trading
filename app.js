@@ -4346,6 +4346,18 @@ function setManagedMessage(message, type = "") {
   element.classList.toggle("is-error", type === "error");
 }
 
+// setManagedMessage's target (#managedUserMessage) lives up in the Users
+// tab's Create Account form - nowhere near the Products page's simulation
+// controls, so a rejected Up/Down click (e.g. a From/To window that's
+// already in the past) reported only there was invisible to anyone
+// actually looking at the product card. This writes the same message right
+// under that card's own simulation controls instead/as well.
+function setSimCardError(symbol, message) {
+  const element = document.querySelector(`[data-sim-error="${CSS.escape(symbol)}"]`);
+  if (!element) return;
+  element.textContent = message || "";
+}
+
 async function adminFetch(path, options = {}) {
   if (!canManageUsers() || !currentSession?.token) throw new Error("Admin access required");
   const response = await fetch(`${apiBase}${path}`, {
@@ -4497,6 +4509,7 @@ function renderManagedInstruments() {
               ${scheduled ? `<button type="button" class="sim-stop-btn" data-schedule-cancel="${escapeHtml(instrument.symbol)}">Cancel</button>` : ""}
               ${simulation ? `<button type="button" class="sim-stop-btn" data-simulate-stop="${escapeHtml(instrument.symbol)}">Stop</button>` : ""}
             </div>
+            <p class="sim-error-message" data-sim-error="${escapeHtml(instrument.symbol)}" role="status"></p>
           </div>`
         : "";
 
@@ -5207,6 +5220,8 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
   const actionButton = stopButton || scheduleButton || scheduleCancelButton;
   if (!actionButton) return;
   if (!canManageUsers()) return;
+  const symbol = stopButton?.dataset.simulateStop || scheduleButton?.dataset.schedule || scheduleCancelButton?.dataset.scheduleCancel;
+  setSimCardError(symbol, "");
   // Disabling synchronously (before the first await) stops a second click on
   // the same button from firing a second request while the first is still in
   // flight - without this, a couple of impatient clicks on e.g. Cancel could
@@ -5255,7 +5270,9 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
           }),
         });
       } else if (!from || !to) {
-        setManagedMessage("Pick both a From and To time, or leave both blank to start now.", "error");
+        const message = "Pick both a From and To time, or leave both blank to start now.";
+        setManagedMessage(message, "error");
+        setSimCardError(symbol, message);
         return;
       } else {
         await adminFetch("/api/admin/price-simulation/schedule", {
@@ -5277,6 +5294,7 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
     }
   } catch (error) {
     setManagedMessage(error.message, "error");
+    setSimCardError(symbol, error.message);
   } finally {
     actionButton.disabled = false;
   }

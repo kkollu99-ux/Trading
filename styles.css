@@ -3528,6 +3528,17 @@ canvas {
   cursor: pointer;
 }
 
+.sim-error-message {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--red);
+}
+
+.sim-error-message:empty {
+  display: none;
+}
+
 .sim-up-btn:hover {
   border-color: rgba(37, 177, 95, 0.5);
   color: var(--green);
