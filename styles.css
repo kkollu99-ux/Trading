@@ -1838,7 +1838,15 @@ select:focus {
 
   .watch-panel,
   .order-ticket {
-    transition: opacity 0.2s ease, border-color 0.28s ease;
+    /* opacity deliberately NOT transitioned (snaps instantly) - animating
+       it over the same window as .trade-terminal's grid-template-columns
+       shrink let the panel sit semi-transparent while also still
+       partway-collapsed, so its text visibly double-exposed over the
+       chart expanding into the same space underneath it (user-reported
+       via screenshot, mid-transition). Instantly hiding the content while
+       the grid track alone animates its width keeps the same smooth
+       sliding motion without any transparency overlap to cause that. */
+    transition: border-color 0.28s ease;
   }
 
   .trade-terminal.is-watch-collapsed {
