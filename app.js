@@ -4477,7 +4477,11 @@ function renderManagedInstruments() {
                 </div>
               </div>
               <div class="sim-control-group">
-                <span class="sim-control-label">Target (optional)</span>
+                <span class="sim-control-label">Start price (optional)</span>
+                <input type="number" step="any" min="0" class="sim-target-input" data-schedule-start-price="${escapeHtml(instrument.symbol)}" placeholder="e.g. 150" title="Open the simulation at this exact price instead of continuing from the current price" />
+              </div>
+              <div class="sim-control-group">
+                <span class="sim-control-label">Target price (optional)</span>
                 <div class="sim-target-pair">
                   <input type="number" step="any" min="0" class="sim-target-input" data-schedule-target="${escapeHtml(instrument.symbol)}" placeholder="e.g. 2" title="Stop automatically once the price reaches this target" />
                   <select class="sim-target-unit" data-schedule-target-unit="${escapeHtml(instrument.symbol)}" title="Target unit">
@@ -4485,10 +4489,6 @@ function renderManagedInstruments() {
                     <option value="price">$</option>
                   </select>
                 </div>
-              </div>
-              <div class="sim-control-group">
-                <span class="sim-control-label">Start price (optional)</span>
-                <input type="number" step="any" min="0" class="sim-target-input" data-schedule-start-price="${escapeHtml(instrument.symbol)}" placeholder="e.g. 150" title="Open the simulation at this exact price instead of continuing from the current price" />
               </div>
             </div>
             <div class="product-sim-actions">
