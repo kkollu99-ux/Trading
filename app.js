@@ -2248,7 +2248,7 @@ function renderTradeWatchlist(instruments, quotes = {}) {
       // Only a real quote (quoteStore actually has this symbol) can say
       // whether the market is open - a missing/mock quote leaves the symbol
       // tradable by default (see isMarketClosedFor) rather than guessing.
-      if (quote) lastRealQuoteBySymbol.set(instrument.symbol, { price, isMarketOpen: quote.is_market_open });
+      if (quote) lastRealQuoteBySymbol.set(instrument.symbol, { price, changePercent, isMarketOpen: quote.is_market_open });
       const isClosed = quote?.is_market_open === false;
       const trendClass = changePercent >= 0 ? "up" : "down";
       const symbol = compactSymbol(instrument.symbol);
@@ -2285,7 +2285,6 @@ async function loadTradeInstruments() {
 // the chart every time.
 async function refreshTradeWatchPrices() {
   if (!tradeInstruments.length) return;
-  if (!document.querySelector("#trade")?.classList.contains("is-active")) return;
   const quotes = await fetchTradeQuotes(tradeInstruments);
   document.querySelectorAll("#tradeWatchTable .watch-row[data-api-symbol]").forEach((row) => {
     const quote = getQuotePayload(quotes, row.dataset.apiSymbol);
@@ -2293,7 +2292,7 @@ async function refreshTradeWatchPrices() {
     const price = quotePrice(quote, Number(row.dataset.priceUsd));
     const changePercent = quoteChange(quote, 0);
     row.dataset.priceUsd = String(price);
-    lastRealQuoteBySymbol.set(row.dataset.apiSymbol, { price, isMarketOpen: quote.is_market_open });
+    lastRealQuoteBySymbol.set(row.dataset.apiSymbol, { price, changePercent, isMarketOpen: quote.is_market_open });
     const priceElement = row.querySelector("em");
     if (priceElement) priceElement.textContent = formatTradeNumber(price);
     const changeElement = row.querySelector("b");
@@ -2302,6 +2301,27 @@ async function refreshTradeWatchPrices() {
       changeElement.className = changePercent >= 0 ? "up" : "down";
     }
   });
+  updateTopTicker();
+}
+
+// The app bar's ticker follows the product selected on the Trade page and
+// shows the same price the chart and order ticket use: the simulated price
+// (and its move since the simulation began) while one is running, otherwise
+// the latest quote and its change.
+function updateTopTicker() {
+  const symbolElement = document.querySelector("#topTickerSymbol");
+  if (!symbolElement) return;
+  const quote = getRealQuote(tradeChartState.apiSymbol);
+  const price = tradeChartState.isSimulated ? tradeChartState.candles.at(-1)?.close : quote?.price;
+  if (!Number.isFinite(price)) return;
+  const changePercent = tradeChartState.isSimulated
+    ? (tradeChartState.price ? ((price - tradeChartState.price) / tradeChartState.price) * 100 : 0)
+    : quote?.changePercent ?? 0;
+  symbolElement.textContent = tradeChartState.symbol;
+  document.querySelector("#topTickerPrice").textContent = formatTradeNumber(price);
+  const changeElement = document.querySelector("#topTickerChange");
+  changeElement.textContent = `${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%`;
+  changeElement.classList.toggle("is-up", changePercent >= 0);
 }
 
 const timeframeMinutes = {
@@ -2686,6 +2706,7 @@ function syncTradeTerminal(ohlcCandle) {
   setTradeText("#tradeTimeframeLabel", tradeChartState.isSimulated ? "5s" : tradeChartState.timeframe);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", movePercent >= 0);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", movePercent < 0);
+  updateTopTicker();
 }
 
 function renderPriceScale(values, isLog) {
@@ -3542,7 +3563,15 @@ function applyLiveTick(tick) {
         tradeChartState.slideAnim = { startTime: performance.now(), duration: 260 };
       }
     }
-    tradeChartState.simulationStartTime = latestSimulationStart(candles);
+    // The series usually loads just before the simulation's first tick, so
+    // this is where its first simulated candle - and with it the header's
+    // "move since the simulation began" baseline - actually appears.
+    const simulationStart = latestSimulationStart(candles);
+    if (simulationStart !== tradeChartState.simulationStartTime) {
+      tradeChartState.simulationStartTime = simulationStart;
+      const startCandle = candles.find((candle) => candle.time === simulationStart);
+      if (startCandle) tradeChartState.price = startCandle.open;
+    }
     scheduleTradeRender();
     return;
   }
