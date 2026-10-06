@@ -1864,16 +1864,21 @@ select:focus {
     grid-template-columns: 0rem minmax(0, 1fr) 0rem;
   }
 
+  /* Always full-height and flush against the chart, in both the expanded
+     and collapsed states - a short, rounded, vertically-centered pill
+     (the original styling) had nothing visually anchoring it to either
+     panel, so it read as a stray box floating in a seam between them
+     (user-flagged via screenshot) regardless of which state it was in.
+     Full height + no rounding reads as a docked edge-divider instead,
+     the same pattern file-explorer/email-client collapse handles use. */
   .panel-toggle {
     position: absolute;
-    top: 50%;
+    top: 0;
     z-index: 5;
-    transform: translateY(-50%);
+    height: 100%;
     width: 1.3rem;
-    height: 2.75rem;
     border: 1px solid var(--trade-border);
-    border-radius: 0.4rem;
-    background: var(--trade-panel-soft);
+    background: var(--trade-panel);
     color: var(--trade-muted);
     font-size: 0.9rem;
     line-height: 1;
@@ -1885,41 +1890,25 @@ select:focus {
 
   .panel-toggle:hover {
     color: var(--text);
-    background: var(--trade-panel);
+    background: var(--trade-panel-soft);
   }
 
   .panel-toggle-left {
     left: calc(var(--watch-width) - 1.3rem);
+    border-width: 0 1px 0 0;
   }
 
   .panel-toggle-right {
     right: calc(var(--ticket-width) - 1.3rem);
-  }
-
-  /* Collapsing a panel takes its column to 0 width, so the toggle (still
-     positioned at the old panel edge) ends up sitting in open chart space
-     with nothing to visually anchor it to - it reads as a stray box
-     floating over the candles rather than a control for a hidden panel.
-     Stretching it to the terminal's full height and flattening its inner
-     corner turns it into an edge-docked tab instead. */
-  .trade-terminal.is-watch-collapsed .panel-toggle-left,
-  .trade-terminal.is-ticket-collapsed .panel-toggle-right {
-    top: 0;
-    height: 100%;
-    transform: none;
-    background: var(--trade-panel);
+    border-width: 0 0 0 1px;
   }
 
   .trade-terminal.is-watch-collapsed .panel-toggle-left {
     left: 0rem;
-    border-width: 0 1px 0 0;
-    border-radius: 0;
   }
 
   .trade-terminal.is-ticket-collapsed .panel-toggle-right {
     right: 0rem;
-    border-width: 0 0 0 1px;
-    border-radius: 0;
   }
 
   .panel-resize-handle {
