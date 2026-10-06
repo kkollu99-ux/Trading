@@ -2607,7 +2607,15 @@ function syncTradeTerminal(ohlcCandle) {
   const ohlc = ohlcCandle || latest;
   const { bid, ask } = getLiveBidAsk(latest);
   const move = latest.close - tradeChartState.price;
-  const moveText = `${move >= 0 ? "+" : ""}${formatTradeNumber(move)} (${tradeChartState.changePercent >= 0 ? "+" : ""}${tradeChartState.changePercent.toFixed(3)}%)`;
+  // tradeChartState.changePercent is the instrument's own 24h change,
+  // captured once at symbol-select time from the watch-row badge - it never
+  // updates after that and has nothing to do with this move. Pairing it with
+  // a live $ move produced a header that could show, say, "+1644.76
+  // (-21.030%)" - a positive dollar move next to an unrelated negative
+  // percentage that never changed no matter how far price actually moved.
+  // The percent show here needs to be the live move's own percentage.
+  const movePercent = tradeChartState.price ? (move / tradeChartState.price) * 100 : 0;
+  const moveText = `${move >= 0 ? "+" : ""}${formatTradeNumber(move)} (${movePercent >= 0 ? "+" : ""}${movePercent.toFixed(3)}%)`;
 
   setTradeText("#tradeSymbolName", tradeChartState.symbol);
   setTradeText("#tradeSymbolCategory", tradeChartState.category[0] + tradeChartState.category.slice(1).toLowerCase());
@@ -2627,8 +2635,8 @@ function syncTradeTerminal(ohlcCandle) {
   setTradeText("#tradeSpreadValue", formatTradeNumber(ask - bid));
   setTradeText("#tradePriceMarker", formatTradeNumber(latest.close));
   setTradeText("#tradeTimeframeLabel", tradeChartState.timeframe);
-  document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", tradeChartState.changePercent >= 0);
-  document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", tradeChartState.changePercent < 0);
+  document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", movePercent >= 0);
+  document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", movePercent < 0);
 }
 
 function renderPriceScale(values, isLog) {
