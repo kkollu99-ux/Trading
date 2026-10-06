@@ -1682,16 +1682,18 @@ function buildVolatilityTemplate(symbol) {
     if (Number.isFinite(change)) changes.push(change);
   }
   if (!changes.length) return null;
-  // Normalized to unit average magnitude rather than returned as raw %
-  // changes: a real bar is 1 minute while a simulation tick is 1.5s, so the
-  // instrument's own absolute volatility is the wrong scale to replay
-  // directly (it would barely move the price at all). What's worth keeping
-  // from real data is the *shape* - the relative mix of small and large
-  // moves, and how often one goes against the last - which this preserves;
-  // the tick loop below rescales it to the admin's chosen stepPercent.
+  // Normalized to unit average magnitude for the shape array: what's worth
+  // keeping from real data here is the *relative* mix of small and large
+  // moves and how often one goes against the last, not its absolute size -
+  // meanAbsPercent (the real bars' own average |% change|) is returned
+  // alongside it instead, so the tick loop can rescale the shape back to a
+  // size that's actually proportionate to this instrument's real behavior
+  // (see its own comment for why that rescale can't just reuse meanAbsPercent
+  // directly either - a 1-minute real bar and a several-second simulated
+  // tick aren't the same timescale).
   const meanAbs = changes.reduce((sum, change) => sum + Math.abs(change), 0) / changes.length;
   if (!(meanAbs > 0)) return null;
-  return changes.map((change) => change / meanAbs);
+  return { shape: changes.map((change) => change / meanAbs), meanAbsPercent: meanAbs };
 }
 
 // True push-based streaming: Twelve Data's WebSocket relays ticks the instant they
@@ -2048,18 +2050,27 @@ setInterval(() => {
     simulation.volatilityLevel = Math.max(0.25, Math.min(3.5, simulation.volatilityLevel * (1 + (Math.random() - 0.5) * 0.18)));
 
     const template = simulation.volatilityTemplate;
-    // Capped regardless of stepPercent/volatilityLevel - stepPercent is also
-    // the "how fast should the overall trend move" dial (bigger for a large
-    // target reached quickly), and reusing it uncapped to size per-tick
-    // noise too meant an aggressive target/short duration produced
-    // individual candles many times the size of anything in real market
-    // data next to them, not just a faster-moving but still natural-looking
-    // chart. 0.4% keeps candles reading as normal market noise - varied,
-    // with visible calm/busy stretches from volatilityLevel - however fast
-    // the underlying trend itself is moving.
-    const noiseIntensity = Math.min(Math.max(simulation.stepPercent * 3.5, 0.03) * simulation.volatilityLevel, 0.4);
-    const rawNoisePercent = template && template.length
-      ? template[Math.floor(Math.random() * template.length)] * noiseIntensity
+    // Sized from the instrument's own real volatility (template.meanAbsPercent
+    // - the real 1-minute bars' average |% change|), scaled down by
+    // sqrt(tick duration / 60s) for a fair fraction of that over one tick
+    // (variance scales with time for a random walk, so standard deviation -
+    // and therefore a representative move size - scales with its square
+    // root) - not from stepPercent, which is also the "how fast should the
+    // overall trend move" dial (bigger for a large target reached quickly).
+    // Reusing stepPercent uncapped to size per-tick noise too (tried
+    // previously, then capped at a flat 0.4% - still arbitrary) meant
+    // candles came out a size with no relationship to how this specific
+    // instrument's real history actually moves, however that cap was tuned -
+    // reported as simulated candles still looking oversized next to real
+    // ones despite the cap. Falls back to the old stepPercent-based sizing
+    // (now genuinely a last resort, capped at 0.4%) only when there's no
+    // real history to scale from at all.
+    const realTickFraction = Math.sqrt(priceSimulationTickMs / 60000);
+    const noiseIntensity = template
+      ? Math.max(template.meanAbsPercent * realTickFraction, 0.003) * simulation.volatilityLevel
+      : Math.min(Math.max(simulation.stepPercent * 3.5, 0.03) * simulation.volatilityLevel, 0.4);
+    const rawNoisePercent = template
+      ? template.shape[Math.floor(Math.random() * template.shape.length)] * noiseIntensity
       : (Math.random() * 2 - 1) * noiseIntensity;
     const noiseCap = noiseIntensity * 3;
     const noisePercent = Math.max(-noiseCap, Math.min(noiseCap, rawNoisePercent));
