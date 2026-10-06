@@ -1357,12 +1357,12 @@ function gaussian() {
 
 // Where a symbol's series starts the first time this process uses it: the
 // last price persisted before a restart (see persistSeriesSnapshots) when it
-// sits in a plausible band around the reference level, otherwise the
-// reference level. The band check discards snapshots saved back when symbols
-// had no reference level and were priced off a hash of their name.
+// was saved in the current snapshot format and sits in a plausible band
+// around the reference level, otherwise the reference level.
 function seedBasisPrice(symbol) {
   const reference = referencePrices[symbol];
-  const persisted = Number(candleSnapshotStore.get(symbol)?.candles?.at(-1)?.close);
+  const saved = candleSnapshotStore.get(symbol)?.candles;
+  const persisted = Number(saved?.version === seriesSnapshotVersion ? saved.candles?.at(-1)?.close : NaN);
   if (Number.isFinite(persisted) && persisted > 0 && (!reference || (persisted > reference / 3 && persisted < reference * 3))) {
     return persisted;
   }
@@ -1606,8 +1606,12 @@ const fxRateFallbacks = {
 // candles) so a restart or redeploy resumes every product at the price it
 // was at, rather than jumping back to its reference level - see
 // seedBasisPrice. candleSnapshotStore is the in-memory copy of what's saved.
-const candleSnapshotStore = new Map(); // symbol -> { candles, updatedAt }
+const candleSnapshotStore = new Map(); // symbol -> { candles: { version, candles }, updatedAt }
 const seriesPersistIntervalMs = 2 * 60 * 1000;
+// Bumped whenever saved prices can't be trusted as a starting point anymore.
+// Version 2: prices saved before then include levels derived from a hash of
+// the product's name (e.g. Silver ~$156) rather than its reference level.
+const seriesSnapshotVersion = 2;
 
 async function loadCandleSnapshotsFromDb() {
   if (!pool) return;
@@ -1622,12 +1626,13 @@ async function loadCandleSnapshotsFromDb() {
 }
 
 async function saveCandleSnapshot(symbol, candles) {
-  candleSnapshotStore.set(symbol, { candles, updatedAt: new Date().toISOString() });
+  const snapshot = { version: seriesSnapshotVersion, candles };
+  candleSnapshotStore.set(symbol, { candles: snapshot, updatedAt: new Date().toISOString() });
   if (!pool) return;
   await query(
     `INSERT INTO candle_snapshots (symbol, candles, updated_at) VALUES ($1, $2::jsonb, NOW())
      ON CONFLICT (symbol) DO UPDATE SET candles = EXCLUDED.candles, updated_at = NOW()`,
-    [symbol, JSON.stringify(candles)],
+    [symbol, JSON.stringify(snapshot)],
   );
 }
 
