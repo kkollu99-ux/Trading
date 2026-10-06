@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   kyc_status TEXT NOT NULL DEFAULT 'pending',
   balance NUMERIC(14, 2) NOT NULL DEFAULT 0,
   margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  preferences JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

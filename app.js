@@ -8,6 +8,40 @@ const sections = [...document.querySelectorAll(".view-section")];
 const apiBase = "";
 let currentSession = null;
 
+// Persists a UI preference (display currency, sidebar collapsed state) to
+// the signed-in account server-side, in addition to the localStorage write
+// each caller already does for an instant same-browser reflect. Best-effort
+// and fire-and-forget: a demo/offline session (no token) has nothing to
+// sync to, and a failed request just leaves the setting local-only for now
+// rather than blocking the UI change that triggered it.
+function saveServerPreference(key, value) {
+  if (!currentSession?.token) return;
+  fetch(`${apiBase}/api/me/preferences`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${currentSession.token}` },
+    body: JSON.stringify({ [key]: value }),
+  }).catch(() => {});
+}
+
+// Applied right after a session (login, or a refresh restoring one from
+// localStorage) becomes current - pulls this account's server-stored
+// preferences in over whatever this browser's own localStorage already had,
+// so switching devices or logging in fresh on a shared machine picks up the
+// account's own settings instead of staying on whatever that browser last
+// had locally.
+function applyServerPreferences(user) {
+  const prefs = user?.preferences;
+  if (!prefs) return;
+  if (typeof prefs.displayCurrency === "string" && prefs.displayCurrency !== displayCurrency) {
+    displayCurrency = prefs.displayCurrency;
+    localStorage.setItem("fxccDisplayCurrency", displayCurrency);
+  }
+  if (typeof prefs.sidebarCollapsed === "boolean") {
+    applySidebarCollapsed(prefs.sidebarCollapsed);
+    localStorage.setItem("fxccSidebarCollapsed", String(prefs.sidebarCollapsed));
+  }
+}
+
 // Display currency (USD/INR toggle, see #displayCurrencySelect below): a
 // pure display-layer conversion. Everything is still stored and computed in
 // USD throughout the app (balances, margin, P&L, instrument prices) - only
@@ -61,6 +95,7 @@ function initDisplayCurrency() {
 document.querySelector("#displayCurrencySelect")?.addEventListener("change", async (event) => {
   displayCurrency = event.target.value;
   localStorage.setItem("fxccDisplayCurrency", displayCurrency);
+  saveServerPreference("displayCurrency", displayCurrency);
   await refreshDisplayCurrencyRate();
   refreshCurrencyDependentUI();
 });
@@ -79,6 +114,7 @@ document.querySelector("#sidebarCollapseToggle")?.addEventListener("click", () =
   const collapsed = !document.querySelector(".sidebar")?.classList.contains("is-collapsed");
   applySidebarCollapsed(collapsed);
   localStorage.setItem("fxccSidebarCollapsed", String(collapsed));
+  saveServerPreference("sidebarCollapsed", collapsed);
 });
 
 applySidebarCollapsed(localStorage.getItem("fxccSidebarCollapsed") === "true");
@@ -639,6 +675,7 @@ function showHomeView() {
 function enterWorkspace(session = null) {
   if (session) saveSession(session);
   else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital", balance: 10000 } });
+  applyServerPreferences(currentSession?.user);
   homeView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
