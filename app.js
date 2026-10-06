@@ -3454,11 +3454,27 @@ function applyLiveTick(tick) {
   // by the "simulation-status" broadcast, which reliably arrives before the
   // first price tick ever does, so checking it here would always read true
   // and this would never run.
+  const tickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
+  const bucketMs = isSimulationTick
+    ? Math.floor(tickMs / simulationCandleBucketMs) * simulationCandleBucketMs
+    : bucketStartMs(tickMs, tradeChartState.timeframe);
+
   if (isSimulationTick && !tradeChartState.simulationBaselineSynced) {
     last.open = price;
     last.high = price;
     last.low = price;
     last.close = price;
+    // The candle being flattened into the simulation's starting point can be
+    // a real historical candle (whenever loadRealCandles' fetch has already
+    // resolved by the time the first tick arrives, rather than racing it)
+    // carrying whatever stale timestamp its snapshot was taken at - hours
+    // earlier in the day. Left alone, every candle the simulation appends
+    // after this one is bucketed off the actual current time, so the x-axis
+    // jumps straight from that stale label to "now" right at the divider -
+    // unrelated to the simulation's own countdown ("4:15 left" etc). The
+    // simulation starts now, so its starting candle's time should say so
+    // too, bucketed the same way every candle after it will be.
+    last.time = new Date(bucketMs).toISOString();
     tradeChartState.simulationBaselineSynced = true;
     tradeChartState.simulationStartTime = last.time;
     // Defaults to a tight window right as the simulation takes over, so by
@@ -3480,10 +3496,6 @@ function applyLiveTick(tick) {
     tradeChartState.manualPriceRange = null;
   }
 
-  const tickMs = tick.timestamp ? new Date(tick.timestamp).getTime() : Date.now();
-  const bucketMs = isSimulationTick
-    ? Math.floor(tickMs / simulationCandleBucketMs) * simulationCandleBucketMs
-    : bucketStartMs(tickMs, tradeChartState.timeframe);
   const lastBucketMs = isSimulationTick
     ? Math.floor(new Date(last.time).getTime() / simulationCandleBucketMs) * simulationCandleBucketMs
     : bucketStartMs(new Date(last.time).getTime(), tradeChartState.timeframe);
