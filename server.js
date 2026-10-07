@@ -1628,7 +1628,7 @@ const realPriceSourceErrors = new Map();
 const realPriceRescaleThreshold = 0.02;
 
 function applyRealPrice(symbol, price, source) {
-  if (!Number.isFinite(price) || price <= 0) return;
+  if (!Number.isFinite(price) || price <= 0) throw new Error(`no price returned for ${symbol}`);
   realPrices.set(symbol, { price, source, at: Date.now() });
   // A running simulation owns the price until it ends (see stopPriceSimulation).
   if (priceSimulations.has(symbol)) return;
@@ -1706,24 +1706,26 @@ const realPriceFetchers = {
     });
   },
   async finnhub() {
-    if (!finnhubApiKey) return;
+    if (!finnhubApiKey) throw new Error("FINNHUB_API_KEY is not set");
     await eachInstrument(await instrumentsInCategories(["stocks"]), async (instrument) => {
       const payload = await fetchJson(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(instrument.symbol)}&token=${finnhubApiKey}`);
       applyRealPrice(instrument.symbol, Number(payload?.c), "finnhub");
     });
   },
   async twelvedata() {
-    if (!twelveDataApiKey) return;
+    if (!twelveDataApiKey) throw new Error("MARKET_DATA_API_KEY is not set");
     const instruments = (await instrumentsInCategories(["metals", "commodities"])).filter((instrument) => twelveDataSymbols[instrument.symbol]);
     if (!instruments.length) return;
     const providerSymbols = instruments.map((instrument) => twelveDataSymbols[instrument.symbol]);
     const payload = await fetchJson(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(providerSymbols.join(","))}&apikey=${twelveDataApiKey}`);
     if (payload?.status === "error") throw new Error(payload.message || "Twelve Data error");
-    for (const instrument of instruments) {
-      // A single-symbol request returns { price }; a batch returns { SYMBOL: { price } }.
+    // A single-symbol request returns { price }; a batch returns
+    // { SYMBOL: { price } }, where one symbol can fail on its own.
+    await eachInstrument(instruments, async (instrument) => {
       const entry = providerSymbols.length === 1 ? payload : payload?.[twelveDataSymbols[instrument.symbol]];
+      if (entry?.status === "error") throw new Error(entry.message || "Twelve Data error");
       applyRealPrice(instrument.symbol, Number(entry?.price), "twelvedata");
-    }
+    });
   },
   async frankfurter() {
     const instruments = await instrumentsInCategories(["forex"]);
@@ -1733,6 +1735,7 @@ const realPriceFetchers = {
     for (const instrument of instruments) {
       const [base, quote] = instrument.symbol.split("/");
       if (perUsd[base] && perUsd[quote]) applyRealPrice(instrument.symbol, perUsd[quote] / perUsd[base], "frankfurter");
+      else console.warn(`No ECB rate for ${instrument.symbol}; it keeps its generated price.`);
     }
   },
 };
