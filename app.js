@@ -1385,8 +1385,10 @@ function renderOrdersPanels() {
   updateOrdersTabSummary();
 }
 
+let ordersLoadGeneration = 0;
 async function loadOrders() {
   if (!currentSession?.token) return;
+  ordersLoadGeneration += 1;
   try {
     const [openResult, closedResult] = await Promise.all([
       authRequest("/api/orders?status=open"),
@@ -1400,6 +1402,36 @@ async function loadOrders() {
   }
   renderOrdersPanels();
   if (document.querySelector("#dashboardEquity")) renderAccountSummary();
+}
+
+// Open positions only get repriced when something re-fetches them, so while
+// the Orders page or Home is on screen with trades open, refresh them every
+// few seconds - floating P&L and equity then follow the market (or a running
+// simulation) instead of freezing at whatever they were when the page opened.
+let livePositionsRefreshInFlight = false;
+async function refreshLivePositions() {
+  if (!currentSession?.token || !openPositions.length || livePositionsRefreshInFlight) return;
+  if (document.visibilityState === "hidden") return;
+  const onOrders = document.querySelector("#orders")?.classList.contains("is-active");
+  const onDashboard = document.querySelector("#dashboard")?.classList.contains("is-active");
+  if (!onOrders && !onDashboard) return;
+  // Re-rendering the rows mid-close would put a fresh, clickable Close button back.
+  if (document.querySelector("[data-close-order]:disabled")) return;
+  livePositionsRefreshInFlight = true;
+  const generation = ordersLoadGeneration;
+  try {
+    // A failed refresh keeps the last good list rather than blanking it.
+    const result = await authRequest("/api/orders?status=open");
+    // A full reload (e.g. after a close) ran meanwhile - its list is newer.
+    if (generation !== ordersLoadGeneration) return;
+    openPositions = result.orders || [];
+    renderOrdersPanels();
+    if (document.querySelector("#dashboardEquity")) renderAccountSummary();
+  } catch {
+    // Next tick retries.
+  } finally {
+    livePositionsRefreshInFlight = false;
+  }
 }
 
 function setOrdersMessage(message, type = "") {
@@ -5454,6 +5486,7 @@ loadOrders();
 setInterval(tickMarkets, 1500);
 setInterval(refreshMarketsQuotes, 7000);
 setInterval(refreshTradeWatchPrices, 5000);
+setInterval(refreshLivePositions, 3000);
 setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);
 startVersionCheck();
