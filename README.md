@@ -86,4 +86,11 @@ DATABASE_URL=<Railway Postgres URL>
 ALLOWED_SYMBOLS=XAU/USD,XAG/USD,BTC/USD,EUR/USD,GBP/USD,USOIL
 ```
 
-No external market-data provider is required - quotes, candle history, and FX conversion are all generated locally (see `server.js`).
+Charts are generated locally; only each product's latest real price is fetched, and the server steers that product's chart onto it:
+
+- Crypto: Coinbase public spot prices (no key)
+- Stocks: Finnhub - set `FINNHUB_API_KEY`
+- Gold, silver, oil: Twelve Data - set `MARKET_DATA_API_KEY`
+- Forex: ECB reference rates via Frankfurter (no key, daily)
+
+Without a key (or if a source is down) that product keeps its generated price.

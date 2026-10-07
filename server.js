@@ -1316,17 +1316,17 @@ const quoteLiveSymbols = (process.env.MARKET_DATA_LIVE_SYMBOLS || "XAU/USD")
   .map((symbol) => symbol.trim().toUpperCase())
   .filter(Boolean);
 
-// Approximate real-world price levels (demo only, never refreshed) so each
-// product's synthetic price starts somewhere recognizable.
+// Fallback price levels (October 2026), used only until - or if ever - a
+// product's real price can't be fetched (see the real price anchors below).
 const referencePrices = {
-  "XAU/USD": 4521.75, "XAG/USD": 52.4, "BTC/USD": 112000, "ETH/USD": 4200, "XRP/USD": 2.75,
-  "SOL/USDC": 210, "BNB/USD": 1050, "EUR/USD": 1.165, "GBP/USD": 1.338, "AUD/USD": 0.655,
-  "NZD/USD": 0.577, "USD/JPY": 148.5, "USD/CHF": 0.798, "USD/CAD": 1.392, "AUD/JPY": 97.3,
-  "AUD/CAD": 0.912, "EUR/JPY": 173, "AUD/NZD": 1.135, "AUD/CHF": 0.523, "GBP/JPY": 198.7,
-  "EUR/AUD": 1.779, "CAD/JPY": 106.7, "EUR/CAD": 1.622, "GBP/AUD": 2.043, "CHF/JPY": 186.1,
-  "EUR/CHF": 0.93, "GBP/CAD": 1.862, "NZD/CHF": 0.46, "GBP/NZD": 2.319, "EUR/GBP": 0.871,
-  "NZD/JPY": 85.7, "GBP/CHF": 1.068, "CAD/CHF": 0.573, "EUR/NZD": 2.019, USOIL: 62.4,
-  UKOIL: 66.1, NATGAS: 3.3, AAPL: 256, TSLA: 438, GOOGL: 246, MSFT: 517,
+  "XAU/USD": 4521.75, "XAG/USD": 52.4, "BTC/USD": 84308, "ETH/USD": 2620, "XRP/USD": 1.47,
+  "SOL/USDC": 118.6, "BNB/USD": 769.4, "EUR/USD": 1.1269, "GBP/USD": 1.3276, "AUD/USD": 0.69823,
+  "NZD/USD": 0.56173, "USD/JPY": 158.09, "USD/CHF": 0.83051, "USD/CAD": 1.425, "AUD/JPY": 110.38,
+  "AUD/CAD": 0.99497, "EUR/JPY": 178.15, "AUD/NZD": 1.243, "AUD/CHF": 0.57988, "GBP/JPY": 209.89,
+  "EUR/AUD": 1.6139, "CAD/JPY": 110.94, "EUR/CAD": 1.6058, "GBP/AUD": 1.9014, "CHF/JPY": 190.35,
+  "EUR/CHF": 0.9359, "GBP/CAD": 1.8919, "NZD/CHF": 0.46653, "GBP/NZD": 2.3635, "EUR/GBP": 0.8488,
+  "NZD/JPY": 88.805, "GBP/CHF": 1.1026, "CAD/CHF": 0.58281, "EUR/NZD": 2.0061, USOIL: 62.4,
+  UKOIL: 66.1, NATGAS: 3.3, AAPL: 333.63, TSLA: 380.68, GOOGL: 347.68, MSFT: 529.3,
 };
 
 // Typical size of one 5-second move as a fraction of price, by category.
@@ -1355,11 +1355,14 @@ function gaussian() {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
 }
 
-// Where a symbol's series starts the first time this process uses it: the
-// last price persisted before a restart (see persistSeriesSnapshots) when it
-// was saved in the current snapshot format and sits in a plausible band
-// around the reference level, otherwise the reference level.
+// Where a symbol's series starts the first time this process uses it: its
+// real price if one has been fetched already, otherwise the last price
+// persisted before a restart (see persistSeriesSnapshots) when it was saved
+// in the current snapshot format and sits in a plausible band around the
+// reference level, otherwise the reference level.
 function seedBasisPrice(symbol) {
+  const real = realPrices.get(symbol)?.price;
+  if (real) return real;
   const reference = referencePrices[symbol];
   const saved = candleSnapshotStore.get(symbol)?.candles;
   const persisted = Number(saved?.version === seriesSnapshotVersion ? saved.candles?.at(-1)?.close : NaN);
@@ -1428,8 +1431,20 @@ function matchHistoryVolatility(series, targetPercent) {
   const recent = bars.slice(-seriesMatchFullBars).filter((bar) => !bar.simulated);
   if (recent.length < 10 || !(targetPercent > 0)) return;
   const meanAbsPercent = (recent.reduce((sum, bar) => sum + Math.abs(bar.close / bar.open - 1), 0) / recent.length) * 100;
-  if (!(meanAbsPercent > 0) || meanAbsPercent >= targetPercent * 0.5) return;
-  const factor = Math.min(seriesMatchMaxFactor, targetPercent / meanAbsPercent);
+  if (meanAbsPercent >= targetPercent * 0.5) return;
+  // Flat history (a stock held still while its market was closed) has no
+  // moves to scale up, so it gets fresh ones of the target size instead.
+  const flat = meanAbsPercent < targetPercent * 0.001;
+  if (flat) {
+    for (const bar of bars.slice(-(seriesMatchFullBars + seriesMatchRampBars))) {
+      if (bar.simulated) continue;
+      const move = (gaussian() * targetPercent) / 100;
+      bar.close = bar.open * (1 + move);
+      bar.high = Math.max(bar.open, bar.close) * (1 + (Math.abs(gaussian()) * targetPercent * 0.4) / 100);
+      bar.low = Math.min(bar.open, bar.close) * (1 - (Math.abs(gaussian()) * targetPercent * 0.4) / 100);
+    }
+  }
+  const factor = flat ? 1 : Math.min(seriesMatchMaxFactor, targetPercent / meanAbsPercent);
   let close = bars.at(-1).close;
   for (let index = bars.length - 1; index >= 0; index -= 1) {
     const bar = bars[index];
@@ -1487,12 +1502,13 @@ function advanceSeries(symbol, series, nowMs = Date.now()) {
   const missing = Math.floor((currentBucket - series.bars.at(-1).t) / seriesBucketMs) - 1;
   if (missing <= 0) return;
   const simulating = priceSimulations.has(symbol);
+  const held = !simulating && isPriceHeld(symbol);
   const fill = Math.min(missing, seriesMaxBars);
   for (let t = currentBucket - fill * seriesBucketMs; t < currentBucket; t += seriesBucketMs) {
     const lastClose = series.bars.at(-1).close;
     series.bars.push(
-      simulating
-        ? { t, open: lastClose, high: lastClose, low: lastClose, close: lastClose, volume: 0, simulated: true }
+      simulating || held
+        ? { t, open: lastClose, high: lastClose, low: lastClose, close: lastClose, volume: 0, simulated: simulating }
         : generatedBar(series, t, lastClose),
     );
   }
@@ -1578,6 +1594,154 @@ function tickSyntheticQuotes() {
       marketStatusBySymbol.set(symbol, true);
       broadcast({ type: "market-status", symbol, isOpen: true });
     }
+  }
+}
+
+// ---------- Real price anchors ----------
+// Every product's movement is still generated locally (see above). These only
+// fetch each product's latest real price - never history or candles - and
+// steer that product's series onto it, so quotes, order fills and the price a
+// simulation starts from sit at the real market level. One source per
+// category: crypto from Coinbase's public spot prices (no key), stocks from
+// Finnhub (FINNHUB_API_KEY), metals and oil from Twelve Data
+// (MARKET_DATA_API_KEY), forex from Frankfurter's daily ECB reference rates
+// (no key). A product with no source (e.g. natural gas) keeps its generated
+// price.
+const finnhubApiKey = process.env.FINNHUB_API_KEY || "";
+const twelveDataApiKey = process.env.TWELVE_DATA_API_KEY || process.env.MARKET_DATA_API_KEY || "";
+const twelveDataSymbols = { "XAU/USD": "XAU/USD", "XAG/USD": "XAG/USD", USOIL: "WTI/USD", UKOIL: "XBR/USD" };
+const realPriceSchedules = {
+  coinbase: 60 * 1000,
+  finnhub: 60 * 1000,
+  // 4 symbols per call against an 800-credit daily allowance.
+  twelvedata: 15 * 60 * 1000,
+  // ECB reference rates are published once a day.
+  frankfurter: 6 * 60 * 60 * 1000,
+};
+const realPriceSourceNames = { coinbase: "Coinbase", finnhub: "Finnhub", twelvedata: "Twelve Data", frankfurter: "ECB (Frankfurter)" };
+const realPrices = new Map(); // symbol -> { price, source, at }
+const realPriceSourceErrors = new Map();
+
+// A gap this large is moved in one step (rescaling the history, as a start
+// price does); a smaller one is closed gradually by the generator's pull
+// toward its anchor, so routine updates never show up as a jump.
+const realPriceRescaleThreshold = 0.02;
+
+function applyRealPrice(symbol, price, source) {
+  if (!Number.isFinite(price) || price <= 0) return;
+  realPrices.set(symbol, { price, source, at: Date.now() });
+  // A running simulation owns the price until it ends (see stopPriceSimulation).
+  if (priceSimulations.has(symbol)) return;
+  const series = getSeries(symbol);
+  advanceSeries(symbol, series);
+  const lastClose = series.bars.at(-1).close;
+  if (!series.realAnchored || Math.abs(price / lastClose - 1) > realPriceRescaleThreshold) {
+    scaleSeries(series, price / lastClose);
+    series.realAnchored = true;
+  }
+  series.anchor = price;
+}
+
+function noteRealPriceSource(source, error) {
+  const previous = realPriceSourceErrors.get(source);
+  if (error) {
+    if (previous !== error.message) console.warn(`Real prices from ${realPriceSourceNames[source]} failed:`, error.message);
+    realPriceSourceErrors.set(source, error.message);
+  } else if (previous) {
+    console.log(`Real prices from ${realPriceSourceNames[source]} recovered.`);
+    realPriceSourceErrors.delete(source);
+  }
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+// US stock exchanges: 9:30-16:00 New York time, Monday to Friday (holidays
+// aren't modeled). Outside those hours a stock's price holds still at its
+// last real price instead of the generator inventing movement.
+function usStockMarketOpen(now = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })
+      .formatToParts(now)
+      .map((part) => [part.type, part.value]),
+  );
+  if (parts.weekday === "Sat" || parts.weekday === "Sun") return false;
+  const minutes = (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+  return minutes >= 570 && minutes < 960;
+}
+
+function isPriceHeld(symbol) {
+  return instrumentCategoryBySymbol.get(symbol) === "stocks" && !usStockMarketOpen();
+}
+
+async function instrumentsInCategories(categories) {
+  const instruments = await listInstruments({ includeDisabled: true });
+  for (const instrument of instruments) instrumentCategoryBySymbol.set(instrument.symbol, instrument.category);
+  return instruments.filter((instrument) => categories.includes(instrument.category));
+}
+
+// One product failing (e.g. a pair the source doesn't list) doesn't stop the
+// rest; the first failure is still reported once the others are done.
+async function eachInstrument(instruments, fetchOne) {
+  let firstError = null;
+  for (const instrument of instruments) {
+    try {
+      await fetchOne(instrument);
+    } catch (error) {
+      firstError ??= new Error(`${instrument.symbol}: ${error.message}`);
+    }
+  }
+  if (firstError) throw firstError;
+}
+
+const realPriceFetchers = {
+  async coinbase() {
+    await eachInstrument(await instrumentsInCategories(["crypto"]), async (instrument) => {
+      const pair = `${instrument.symbol.split("/")[0]}-USD`;
+      const payload = await fetchJson(`https://api.coinbase.com/v2/prices/${pair}/spot`);
+      applyRealPrice(instrument.symbol, Number(payload?.data?.amount), "coinbase");
+    });
+  },
+  async finnhub() {
+    if (!finnhubApiKey) return;
+    await eachInstrument(await instrumentsInCategories(["stocks"]), async (instrument) => {
+      const payload = await fetchJson(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(instrument.symbol)}&token=${finnhubApiKey}`);
+      applyRealPrice(instrument.symbol, Number(payload?.c), "finnhub");
+    });
+  },
+  async twelvedata() {
+    if (!twelveDataApiKey) return;
+    const instruments = (await instrumentsInCategories(["metals", "commodities"])).filter((instrument) => twelveDataSymbols[instrument.symbol]);
+    if (!instruments.length) return;
+    const providerSymbols = instruments.map((instrument) => twelveDataSymbols[instrument.symbol]);
+    const payload = await fetchJson(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(providerSymbols.join(","))}&apikey=${twelveDataApiKey}`);
+    if (payload?.status === "error") throw new Error(payload.message || "Twelve Data error");
+    for (const instrument of instruments) {
+      // A single-symbol request returns { price }; a batch returns { SYMBOL: { price } }.
+      const entry = providerSymbols.length === 1 ? payload : payload?.[twelveDataSymbols[instrument.symbol]];
+      applyRealPrice(instrument.symbol, Number(entry?.price), "twelvedata");
+    }
+  },
+  async frankfurter() {
+    const instruments = await instrumentsInCategories(["forex"]);
+    if (!instruments.length) return;
+    const payload = await fetchJson("https://api.frankfurter.dev/v1/latest?base=USD");
+    const perUsd = { ...payload?.rates, USD: 1 };
+    for (const instrument of instruments) {
+      const [base, quote] = instrument.symbol.split("/");
+      if (perUsd[base] && perUsd[quote]) applyRealPrice(instrument.symbol, perUsd[quote] / perUsd[base], "frankfurter");
+    }
+  },
+};
+
+function startRealPriceFetching() {
+  for (const [source, fetcher] of Object.entries(realPriceFetchers)) {
+    const run = () => fetcher().then(() => noteRealPriceSource(source, null), (error) => noteRealPriceSource(source, error));
+    run();
+    setInterval(run, realPriceSchedules[source]);
   }
 }
 
@@ -1856,6 +2020,9 @@ function stopPriceSimulation(symbol) {
   if (existing?.timer) clearTimeout(existing.timer);
   const existed = priceSimulations.delete(symbol);
   if (existed) broadcast({ type: "simulation-status", symbol, active: false });
+  // Back to the real market once the simulation is over.
+  const real = realPrices.get(symbol);
+  if (existed && real) applyRealPrice(symbol, real.price, real.source);
   return existed;
 }
 
@@ -2406,10 +2573,29 @@ app.get("/api/markets/quotes", async (request, response) => {
       percent_change: Number((((price - firstClose) / firstClose) * 100).toFixed(2)),
       is_market_open: true,
       simulated: priceSimulations.has(symbol),
+      source: realPrices.get(symbol)?.source || "synthetic",
       timestamp,
     };
   }
   response.json({ provider: "synthetic", symbols, data });
+});
+
+// Every product's current price for the admin Products page, whether or not
+// it's tradable, with where it came from and when the real price was last
+// fetched.
+app.get("/api/admin/prices", requireAuth, attachUser, requireRole("admin"), async (_request, response) => {
+  const prices = {};
+  for (const instrument of await listInstruments({ includeDisabled: true })) {
+    const real = realPrices.get(instrument.symbol);
+    prices[instrument.symbol] = {
+      price: roundPrice(getCurrentPrice(instrument.symbol)),
+      source: real ? realPriceSourceNames[real.source] : null,
+      realPriceAt: real ? new Date(real.at).toISOString() : null,
+      simulated: priceSimulations.has(instrument.symbol),
+      held: isPriceHeld(instrument.symbol),
+    };
+  }
+  response.json({ prices });
 });
 
 // Backs the display-currency picker - a pure USD-to-<currency> conversion
@@ -2617,6 +2803,7 @@ seedDefaults()
     server.listen(port, () => {
       console.log(`FXCC platform running on http://127.0.0.1:${port}`);
     });
+    startRealPriceFetching();
     tickSyntheticQuotes();
     setInterval(tickSyntheticQuotes, syntheticQuoteTickIntervalMs);
     setInterval(() => {
