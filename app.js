@@ -1758,6 +1758,9 @@ function applySimulationStatus(payload) {
   else activeSimulationsBySymbol.delete(payload.symbol);
 
   if (payload.symbol === tradeChartState.apiSymbol) {
+    // A fresh run replaced the product's whole history on the server - drop
+    // the candles on screen (an earlier run's among them) and load anew.
+    if (payload.active && payload.reset) tradeChartState.seriesSymbol = null;
     // Reload fresh rather than just flipping the flag - loadChartForCurrentSymbol
     // re-derives isSimulated from activeSimulationsBySymbol (just updated above)
     // and is the one place that decides TradingView-widget vs. the simulated
@@ -4453,7 +4456,8 @@ function renderManagedInstruments() {
       const symbol = compactSymbol(instrument.symbol);
       const categoryKey = categoryFilter(instrument.category);
       const form = simFormFor(instrument.symbol);
-      const startValue = form.startEdited ? form.start : priceInputValue(managedLivePrices.get(instrument.symbol)?.price);
+      const live = managedLivePrices.get(instrument.symbol);
+      const startValue = form.startEdited ? form.start : priceInputValue(live?.startPrice ?? live?.price);
       const simulation = activeSimulationsBySymbol.get(instrument.symbol);
       const simStartPrefix = simulation?.startPrice ? `${formatCurrency(simulation.startPrice)} ` : "";
       const simTargetSuffix = simulation?.targetPrice ? ` → ${formatCurrency(simulation.targetPrice)}` : "";
@@ -5223,7 +5227,8 @@ document.querySelector("#managedInstrumentList")?.addEventListener("input", (eve
   }
 });
 
-// Keeps each product card's live price - and the Start price field, unless
+// Keeps each product card's live price - and the Start price field (where a
+// new simulation opens: the market price, see simulationResetPrice), unless
 // the admin has typed their own - current, in place, without re-rendering.
 async function refreshManagedPrices({ force = false } = {}) {
   if (!canManageUsers()) return;
@@ -5240,7 +5245,7 @@ async function refreshManagedPrices({ force = false } = {}) {
     if (label) label.textContent = livePriceText(symbol);
     const startInput = document.querySelector(`[data-schedule-start-price="${CSS.escape(symbol)}"]`);
     if (startInput && !simFormFor(symbol).startEdited && document.activeElement !== startInput) {
-      startInput.value = priceInputValue(live.price);
+      startInput.value = priceInputValue(live.startPrice ?? live.price);
     }
   }
 }
