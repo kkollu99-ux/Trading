@@ -138,6 +138,16 @@ CREATE TABLE IF NOT EXISTS candle_snapshots (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Running ('active') and pending ('scheduled') admin price simulations, so a
+-- restart resumes them instead of dropping them.
+CREATE TABLE IF NOT EXISTS price_simulation_state (
+  symbol TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  state JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (symbol, kind)
+);
+
 CREATE INDEX IF NOT EXISTS idx_service_requests_user_id ON service_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_request_id ON chat_messages(request_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);

@@ -3607,6 +3607,28 @@ function applyLiveTick(tick) {
 }
 
 let priceStreamSocket = null;
+let priceStreamConnectedBefore = false;
+
+// The live connection drops whenever the server restarts (every deploy). While
+// it was down this page may have missed a simulation starting, ending or
+// being resumed by the restarted server, so ask instead of trusting what it
+// last heard - otherwise a chart can sit on a simulation that no longer runs.
+async function resyncSimulationStatus() {
+  const symbol = tradeChartState.apiSymbol;
+  if (currentSession?.token && symbol) {
+    try {
+      const status = await authFetch(`/api/price-simulation-status?symbol=${encodeURIComponent(symbol)}`);
+      if (status?.active) {
+        applySimulationStatus({ symbol, active: true, direction: status.direction, expiresAt: status.expiresAt, targetPrice: status.targetPrice, startPrice: status.startPrice });
+      } else if (status && activeSimulationsBySymbol.has(symbol)) {
+        applySimulationStatus({ symbol, active: false });
+      }
+    } catch {
+      // The next reconnect or tick will try again.
+    }
+  }
+  if (canManageUsers()) loadManagedInstruments();
+}
 let priceStreamReconnectMs = 2000;
 const priceStreamMaxReconnectMs = 20000;
 
@@ -3621,6 +3643,8 @@ function connectPriceStream() {
 
   priceStreamSocket.addEventListener("open", () => {
     priceStreamReconnectMs = 2000;
+    if (priceStreamConnectedBefore) resyncSimulationStatus();
+    priceStreamConnectedBefore = true;
   });
 
   priceStreamSocket.addEventListener("message", (event) => {
