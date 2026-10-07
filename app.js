@@ -4107,13 +4107,9 @@ function openOrderConfirmModal(direction) {
   const multiplier = getSelectedMultiplier();
   const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
   const price = getTradePrice();
-  const notional = lots * orderUnitsPerLot * price;
-  const margin = multiplier > 0 ? notional / multiplier : 0;
-  const fee = margin * orderFeeRate;
   const stopLoss = readRiskThreshold("loss");
   const takeProfit = readRiskThreshold("profit");
 
-  const currencyPrefix = displayCurrency === "USD" ? "" : currencySymbols[displayCurrency] || "";
   document.querySelector("#orderConfirmTitle").textContent = `Confirm ${direction === "buy" ? "Buy" : "Sell"}`;
   document.querySelector("#orderConfirmSymbol").textContent = compactSymbol(symbol);
   const priceEl = document.querySelector("#orderConfirmPrice");
@@ -4125,8 +4121,7 @@ function openOrderConfirmModal(direction) {
   priceEl.classList.remove("tick-up", "tick-down");
   document.querySelector("#orderConfirmLots").textContent = lots.toFixed(2);
   document.querySelector("#orderConfirmMultiplier").textContent = String(multiplier);
-  document.querySelector("#orderConfirmMargin").textContent = `${currencyPrefix}${(margin * displayCurrencyRate).toFixed(6)}`;
-  document.querySelector("#orderConfirmFee").textContent = `${currencyPrefix}${(fee * displayCurrencyRate).toFixed(6)}`;
+  renderOrderConfirmAmounts(price);
   const riskRow = document.querySelector("#orderConfirmRiskRow");
   const riskParts = [];
   if (stopLoss) riskParts.push(`SL -${formatCurrency(stopLoss)}`);
@@ -4150,17 +4145,34 @@ function closeOrderConfirmModal() {
 // Called from applyLiveTick for every price update while this modal is open,
 // so the trader sees the same up-tick/down-tick they'd see on the chart
 // candle before committing to the trade.
-function updateOrderConfirmLivePrice(symbol, price) {
+// Margin and fee are a preview at the price shown - the server recomputes
+// both at the price the order actually fills at.
+function renderOrderConfirmAmounts(price) {
+  const lots = Number(document.querySelector("#ticketLotsValue")?.value) || 0;
+  const multiplier = getSelectedMultiplier();
+  const margin = multiplier > 0 ? (lots * orderUnitsPerLot * price) / multiplier : 0;
+  const fee = margin * orderFeeRate;
+  const currencyPrefix = displayCurrency === "USD" ? "" : currencySymbols[displayCurrency] || "";
+  document.querySelector("#orderConfirmMargin").textContent = `${currencyPrefix}${(margin * displayCurrencyRate).toFixed(6)}`;
+  document.querySelector("#orderConfirmFee").textContent = `${currencyPrefix}${(fee * displayCurrencyRate).toFixed(6)}`;
+}
+
+function updateOrderConfirmLivePrice(symbol, tickPrice) {
   const modal = document.querySelector("#orderConfirmModal");
   if (!modal || modal.classList.contains("is-hidden")) return;
   if (symbol !== tradeChartState.apiSymbol) return;
   const priceEl = document.querySelector("#orderConfirmPrice");
   if (!priceEl) return;
+  // Outside a simulation the chart's candles are only an animated
+  // placeholder, so show the product's fetched price - the one the order
+  // would fill at - rather than whichever price was passed in.
+  const price = tradeChartState.isSimulated ? tickPrice : getRealQuote(symbol)?.price ?? tickPrice;
   const previous = Number(priceEl.dataset.rawPrice) || price;
   priceEl.textContent = formatTradeNumber(price);
   priceEl.dataset.rawPrice = String(price);
   priceEl.classList.toggle("tick-up", price > previous);
   priceEl.classList.toggle("tick-down", price < previous);
+  renderOrderConfirmAmounts(price);
 }
 
 document.querySelector("#buyOrderButton")?.addEventListener("click", () => openOrderConfirmModal("buy"));
