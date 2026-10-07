@@ -1381,7 +1381,7 @@ function seedBasisPrice(symbol) {
 function syntheticStep(series, price, fraction = 1) {
   series.volLevel = Math.max(0.5, Math.min(2.2, series.volLevel * (1 + (Math.random() - 0.5) * 0.12)));
   series.anchor = Math.max(0.00001, series.anchor * (1 + series.sigma * 0.25 * gaussian() * Math.sqrt(fraction)));
-  const pull = (series.anchor - price) * 0.015 * fraction;
+  const pull = (series.anchor - price) * (series.pullPerBar || 0.015) * fraction;
   const shock = price * series.sigma * series.volLevel * gaussian() * Math.sqrt(fraction);
   return Math.max(0.00001, price + pull + shock);
 }
@@ -1640,8 +1640,8 @@ const realPrices = new Map(); // symbol -> { price, source, at }
 const realPriceSourceErrors = new Map();
 
 // A gap this large is moved in one step (rescaling the history, as a start
-// price does); a smaller one is closed gradually by the generator's pull
-// toward its anchor, so routine updates never show up as a jump.
+// price does); a smaller one - or any gap left by a simulation that just
+// ended - is closed gradually by the generator's pull toward its anchor.
 const realPriceRescaleThreshold = 0.02;
 
 function applyRealPrice(symbol, price, source) {
@@ -1652,10 +1652,17 @@ function applyRealPrice(symbol, price, source) {
   const series = getSeries(symbol);
   advanceSeries(symbol, series);
   const lastClose = series.bars.at(-1).close;
-  if (!series.realAnchored || Math.abs(price / lastClose - 1) > realPriceRescaleThreshold) {
+  // Right after a simulation the price drifts back to the market (the
+  // generator's pull toward its anchor), however far the simulation took it,
+  // rather than snapping back by rescaling the chart.
+  const returningFromSimulation = series.bars.slice(-seriesMatchFullBars).some((bar) => bar.simulated);
+  if (!returningFromSimulation && (!series.realAnchored || Math.abs(price / lastClose - 1) > realPriceRescaleThreshold)) {
     scaleSeries(series, price / lastClose);
-    series.realAnchored = true;
   }
+  // A firmer pull while returning: roughly 95% of the way back within 5
+  // minutes (60 five-second bars), instead of the gentle everyday pull.
+  series.pullPerBar = returningFromSimulation ? 0.05 : 0.015;
+  series.realAnchored = true;
   series.anchor = price;
 }
 
