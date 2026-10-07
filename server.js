@@ -1684,17 +1684,17 @@ async function instrumentsInCategories(categories) {
 }
 
 // One product failing (e.g. a pair the source doesn't list) doesn't stop the
-// rest; the first failure is still reported once the others are done.
+// rest; every failure is reported together once the others are done.
 async function eachInstrument(instruments, fetchOne) {
-  let firstError = null;
+  const failures = [];
   for (const instrument of instruments) {
     try {
       await fetchOne(instrument);
     } catch (error) {
-      firstError ??= new Error(`${instrument.symbol}: ${error.message}`);
+      failures.push(`${instrument.symbol}: ${error.message}`);
     }
   }
-  if (firstError) throw firstError;
+  if (failures.length) throw new Error(failures.join(" | "));
 }
 
 const realPriceFetchers = {
