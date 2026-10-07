@@ -1470,10 +1470,27 @@ function trimSeries(series) {
 function getSeries(symbol) {
   const existing = priceSeries.get(symbol);
   if (existing) return existing;
+  const sigma = seriesVolatilityByCategory[instrumentCategoryBySymbol.get(symbol)] || 0.0001;
+  const saved = candleSnapshotStore.get(symbol)?.candles;
+  if (saved?.version === seriesSnapshotVersion && saved.bucketMs === seriesBucketMs && saved.candles?.length >= 10) {
+    // Exact 5-second candles saved mid-simulation (see persistSeriesSnapshots).
+    const bars = saved.candles.map((candle) => ({
+      t: Date.parse(candle.time),
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      volume: candle.volume,
+      simulated: Boolean(candle.simulated),
+    }));
+    const restored = { bars, sigma, volLevel: 1, anchor: bars.at(-1).close };
+    priceSeries.set(symbol, restored);
+    return restored;
+  }
   const basis = seedBasisPrice(symbol);
   const series = {
     bars: [],
-    sigma: seriesVolatilityByCategory[instrumentCategoryBySymbol.get(symbol)] || 0.0001,
+    sigma,
     volLevel: 1,
     anchor: basis,
   };
@@ -1792,8 +1809,8 @@ async function loadCandleSnapshotsFromDb() {
   }
 }
 
-async function saveCandleSnapshot(symbol, candles) {
-  const snapshot = { version: seriesSnapshotVersion, candles };
+async function saveCandleSnapshot(symbol, candles, bucketMs = 60000) {
+  const snapshot = { version: seriesSnapshotVersion, bucketMs, candles };
   candleSnapshotStore.set(symbol, { candles: snapshot, updatedAt: new Date().toISOString() });
   if (!pool) return;
   await query(
@@ -1803,10 +1820,19 @@ async function saveCandleSnapshot(symbol, candles) {
   );
 }
 
+// A product with a running (or just-finished) simulation keeps its exact
+// 5-second candles, so a restart mid-run restores the chart as it was;
+// everything else is saved as 1-minute candles, which only need to carry the
+// price across.
 async function persistSeriesSnapshots() {
   for (const [symbol, series] of priceSeries) {
     try {
-      await saveCandleSnapshot(symbol, resampleBars(series.bars, 60000).slice(-240));
+      const recent = series.bars.slice(-seriesChartBars);
+      if (priceSimulations.has(symbol) || recent.some((bar) => bar.simulated)) {
+        await saveCandleSnapshot(symbol, serializeBars(recent), seriesBucketMs);
+      } else {
+        await saveCandleSnapshot(symbol, resampleBars(series.bars, 60000).slice(-240));
+      }
     } catch (error) {
       console.warn(`Saving price history failed for ${symbol}:`, error.message);
     }
@@ -1908,6 +1934,95 @@ function validateSimulationTarget(symbol, direction, targetPrice, basePriceOverr
 // opens at (e.g. seeding a product that has no realistic price yet, or
 // deliberately gapping it to a specific level) instead of always continuing
 // from whatever getCurrentPrice(symbol) happens to be right now.
+// ---------- Simulation persistence ----------
+// Running and scheduled simulations live in memory, and every deploy restarts
+// the server - so each one is also saved here and restored on boot (see
+// restoreSimulations) instead of silently vanishing mid-run.
+function persistSimulation(symbol, kind, state) {
+  if (!pool) return;
+  query(
+    `INSERT INTO price_simulation_state (symbol, kind, state, updated_at) VALUES ($1, $2, $3::jsonb, NOW())
+     ON CONFLICT (symbol, kind) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()`,
+    [symbol, kind, JSON.stringify(state)],
+  ).catch((error) => console.warn(`Saving ${kind} simulation for ${symbol} failed:`, error.message));
+}
+
+function forgetSimulation(symbol, kind) {
+  if (!pool) return;
+  query("DELETE FROM price_simulation_state WHERE symbol = $1 AND kind = $2", [symbol, kind]).catch((error) =>
+    console.warn(`Clearing ${kind} simulation for ${symbol} failed:`, error.message),
+  );
+}
+
+function armSimulationExpiry(symbol, simulation, ms) {
+  simulation.timer = setTimeout(() => {
+    stopPriceSimulation(symbol);
+    logEvent({
+      category: "chart",
+      action: "simulation.expired",
+      actorLabel: "system (duration elapsed)",
+      targetLabel: symbol,
+      details: { direction: simulation.direction, price: simulation.price },
+    });
+  }, ms);
+}
+
+// A restored run carries on from the product's saved price and re-plans its
+// glide path from the time already elapsed, so it still reaches its target
+// when it was due to.
+function restoreActiveSimulation(symbol, state) {
+  const remainingMs = state.expiresAt ? Date.parse(state.expiresAt) - Date.now() : null;
+  if (remainingMs !== null && remainingMs <= 0) return forgetSimulation(symbol, "active");
+  const series = getSeries(symbol);
+  const price = series.bars.at(-1).close;
+  const elapsedTicks = Math.floor((Date.now() - Date.parse(state.startedAt)) / priceSimulationTickMs);
+  const simulation = {
+    direction: state.direction,
+    stepPercent: state.stepPercent,
+    price,
+    trendPrice: price,
+    basePrice: state.basePrice,
+    targetPrice: state.targetPrice,
+    totalTicksEstimate: state.totalTicksEstimate,
+    ticksElapsed: state.totalTicksEstimate ? Math.min(elapsedTicks, state.totalTicksEstimate - 1) : elapsedTicks,
+    volatilityLevel: 1,
+    hasDuration: state.hasDuration,
+    volatilityTemplate: buildVolatilityTemplate(symbol),
+    startedBy: state.startedBy,
+    startedAt: state.startedAt,
+    expiresAt: state.expiresAt,
+    timer: null,
+  };
+  if (remainingMs !== null) armSimulationExpiry(symbol, simulation, remainingMs);
+  priceSimulations.set(symbol, simulation);
+  // Registered first, so the restart's downtime is carried flat as part of
+  // the run rather than filled with ordinary generated candles.
+  advanceSeries(symbol, series);
+  console.log(`Resumed simulation on ${symbol}${state.expiresAt ? ` until ${state.expiresAt}` : ""}.`);
+}
+
+async function restoreSimulations() {
+  if (!pool) return;
+  let rows;
+  try {
+    rows = await query("SELECT symbol, kind, state FROM price_simulation_state");
+  } catch (error) {
+    console.warn("Loading saved simulations failed:", error.message);
+    return;
+  }
+  for (const { symbol, kind, state } of rows) {
+    try {
+      if (kind === "active") restoreActiveSimulation(symbol, state);
+      else if (kind === "scheduled" && Date.parse(state.toISO) > Date.now()) {
+        schedulePriceSimulation(symbol, state.direction, state.stepPercent, state.fromISO, state.toISO, state.startedBy, state.targetPrice, state.startPrice);
+        console.log(`Restored scheduled simulation on ${symbol} (${state.fromISO} to ${state.toISO}).`);
+      } else forgetSimulation(symbol, kind);
+    } catch (error) {
+      console.warn(`Restoring ${kind} simulation for ${symbol} failed:`, error.message);
+    }
+  }
+}
+
 function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs, targetPrice = null, startPrice = null) {
   const existing = priceSimulations.get(symbol);
   if (existing?.timer) clearTimeout(existing.timer);
@@ -2002,19 +2117,19 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     expiresAt,
     timer: null,
   };
-  if (clampedDurationMs) {
-    simulation.timer = setTimeout(() => {
-      stopPriceSimulation(symbol);
-      logEvent({
-        category: "chart",
-        action: "simulation.expired",
-        actorLabel: "system (duration elapsed)",
-        targetLabel: symbol,
-        details: { direction, price: simulation.price },
-      });
-    }, clampedDurationMs);
-  }
+  if (clampedDurationMs) armSimulationExpiry(symbol, simulation, clampedDurationMs);
   priceSimulations.set(symbol, simulation);
+  persistSimulation(symbol, "active", {
+    direction,
+    stepPercent: resolvedStepPercent,
+    basePrice,
+    targetPrice: resolvedTargetPrice,
+    totalTicksEstimate,
+    hasDuration: simulation.hasDuration,
+    startedBy,
+    startedAt: simulation.startedAt,
+    expiresAt,
+  });
   broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt, targetPrice: simulation.targetPrice, startPrice: simulation.basePrice });
 }
 
@@ -2022,7 +2137,10 @@ function stopPriceSimulation(symbol) {
   const existing = priceSimulations.get(symbol);
   if (existing?.timer) clearTimeout(existing.timer);
   const existed = priceSimulations.delete(symbol);
-  if (existed) broadcast({ type: "simulation-status", symbol, active: false });
+  if (existed) {
+    broadcast({ type: "simulation-status", symbol, active: false });
+    forgetSimulation(symbol, "active");
+  }
   // Back to the real market once the simulation is over.
   const real = realPrices.get(symbol);
   if (existed && real) applyRealPrice(symbol, real.price, real.source);
@@ -2043,7 +2161,10 @@ function cancelScheduledSimulation(symbol) {
   const scheduled = scheduledSimulations.get(symbol);
   if (scheduled?.startTimer) clearTimeout(scheduled.startTimer);
   const existed = scheduledSimulations.delete(symbol);
-  if (existed) broadcast({ type: "simulation-scheduled", symbol, active: false });
+  if (existed) {
+    broadcast({ type: "simulation-scheduled", symbol, active: false });
+    forgetSimulation(symbol, "scheduled");
+  }
   return existed;
 }
 
@@ -2062,10 +2183,12 @@ function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO,
 
   const startTimer = setTimeout(() => {
     scheduledSimulations.delete(symbol);
+    forgetSimulation(symbol, "scheduled");
     startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - Date.now(), targetPrice, startPrice);
   }, fromMs - now);
 
   scheduledSimulations.set(symbol, { direction, stepPercent, fromISO, toISO, startedBy, startTimer, targetPrice, startPrice });
+  persistSimulation(symbol, "scheduled", { direction, stepPercent, fromISO, toISO, startedBy, targetPrice, startPrice });
   broadcast({ type: "simulation-scheduled", symbol, active: true, direction, fromISO, toISO, targetPrice, startPrice });
   return { scheduled: true, active: false };
 }
@@ -2806,6 +2929,7 @@ seedDefaults()
     server.listen(port, () => {
       console.log(`FXCC platform running on http://127.0.0.1:${port}`);
     });
+    await restoreSimulations();
     startRealPriceFetching();
     tickSyntheticQuotes();
     setInterval(tickSyntheticQuotes, syntheticQuoteTickIntervalMs);
@@ -2817,3 +2941,10 @@ seedDefaults()
     console.error("Failed to start FXCC platform", error);
     process.exit(1);
   });
+
+// A deploy stops this process with SIGTERM: save every product's latest price
+// first, so the next process resumes exactly where this one left off.
+process.on("SIGTERM", () => {
+  setTimeout(() => process.exit(0), 5000).unref();
+  persistSeriesSnapshots().finally(() => process.exit(0));
+});
