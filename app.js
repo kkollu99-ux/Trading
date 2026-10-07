@@ -2674,8 +2674,12 @@ function syncTradeTerminal(ohlcCandle) {
   const latest = tradeChartState.candles.at(-1);
   if (!latest) return;
   const ohlc = ohlcCandle || latest;
-  const { bid, ask } = getLiveBidAsk(latest);
-  const move = latest.close - tradeChartState.price;
+  // Without a simulation the chart area is TradingView and these candles are
+  // only a placeholder, so the price, bid/ask and order ticket show the
+  // product's fetched price instead.
+  const livePrice = tradeChartState.isSimulated ? latest.close : getRealQuote(tradeChartState.apiSymbol)?.price ?? latest.close;
+  const { bid, ask } = getLiveBidAsk({ close: livePrice });
+  const move = livePrice - tradeChartState.price;
   // tradeChartState.changePercent is the instrument's own 24h change,
   // captured once at symbol-select time from the watch-row badge - it never
   // updates after that and has nothing to do with this move. Pairing it with
@@ -2688,10 +2692,10 @@ function syncTradeTerminal(ohlcCandle) {
 
   setTradeText("#tradeSymbolName", tradeChartState.symbol);
   setTradeText("#tradeSymbolCategory", tradeChartState.category[0] + tradeChartState.category.slice(1).toLowerCase());
-  setTradeText("#tradeSymbolPrice", formatTradeNumber(latest.close));
+  setTradeText("#tradeSymbolPrice", formatTradeNumber(livePrice));
   setTradeText("#tradeSymbolChange", moveText);
   setTradeText("#ticketSymbolName", tradeChartState.symbol);
-  setTradeText("#ticketSymbolPrice", formatTradeNumber(latest.close));
+  setTradeText("#ticketSymbolPrice", formatTradeNumber(livePrice));
   // The O/H/L/C readout follows whatever candle is under the cursor (hover
   // inspection); everything else (price, bid/ask, spread) always reflects the
   // true live candle regardless of what's being hovered.
@@ -2702,7 +2706,7 @@ function syncTradeTerminal(ohlcCandle) {
   setTradeText("#tradeBidValue", formatTradeNumber(bid));
   setTradeText("#tradeAskValue", formatTradeNumber(ask));
   setTradeText("#tradeSpreadValue", formatTradeNumber(ask - bid));
-  setTradeText("#tradePriceMarker", formatTradeNumber(latest.close));
+  setTradeText("#tradePriceMarker", formatTradeNumber(livePrice));
   setTradeText("#tradeTimeframeLabel", tradeChartState.isSimulated ? "5s" : tradeChartState.timeframe);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", movePercent >= 0);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", movePercent < 0);
@@ -4334,6 +4338,38 @@ function renderManagedUsers() {
   }).join("");
 }
 
+// What an admin has typed into each product's simulation controls. The cards
+// are re-rendered on every simulation broadcast, which would otherwise wipe
+// half-filled inputs; render restores them from here.
+const simFormState = new Map(); // symbol -> { from, to, start, target, unit, startEdited }
+// Latest price per product from /api/admin/prices (see refreshManagedPrices).
+const managedLivePrices = new Map(); // symbol -> { price, source, realPriceAt, simulated, held }
+
+function simFormFor(symbol) {
+  if (!simFormState.has(symbol)) simFormState.set(symbol, { from: "", to: "", start: "", target: "", unit: "percent", startEdited: false });
+  return simFormState.get(symbol);
+}
+
+// Plain USD number for the Start price input (the simulation API takes USD).
+function priceInputValue(price) {
+  if (!Number.isFinite(price)) return "";
+  return String(Number(price.toFixed(price >= 1000 ? 2 : price >= 1 ? 4 : 6)));
+}
+
+function livePriceText(symbol) {
+  const live = managedLivePrices.get(symbol);
+  if (!live) return "Price loading…";
+  const parts = [formatTradeNumber(live.price)];
+  if (live.simulated) parts.push("simulated");
+  else if (live.source) {
+    const ageSeconds = Math.max(0, Math.round((Date.now() - Date.parse(live.realPriceAt)) / 1000));
+    const age = ageSeconds < 90 ? `${ageSeconds}s ago` : ageSeconds < 5400 ? `${Math.round(ageSeconds / 60)}m ago` : `${Math.round(ageSeconds / 3600)}h ago`;
+    parts.push(`${live.source} · ${age}`);
+  } else parts.push("generated");
+  if (live.held) parts.push("market closed");
+  return parts.join(" · ");
+}
+
 function renderManagedInstruments() {
   const list = document.querySelector("#managedInstrumentList");
   if (!list) return;
@@ -4348,6 +4384,8 @@ function renderManagedInstruments() {
       const disabled = canEditManagedUsers() ? "" : "disabled";
       const symbol = compactSymbol(instrument.symbol);
       const categoryKey = categoryFilter(instrument.category);
+      const form = simFormFor(instrument.symbol);
+      const startValue = form.startEdited ? form.start : priceInputValue(managedLivePrices.get(instrument.symbol)?.price);
       const simulation = activeSimulationsBySymbol.get(instrument.symbol);
       const simStartPrefix = simulation?.startPrice ? `${formatCurrency(simulation.startPrice)} ` : "";
       const simTargetSuffix = simulation?.targetPrice ? ` → ${formatCurrency(simulation.targetPrice)}` : "";
@@ -4374,22 +4412,22 @@ function renderManagedInstruments() {
               <div class="sim-control-group">
                 <span class="sim-control-label">From / To time (optional)</span>
                 <div class="sim-time-pair">
-                  <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" title="From: start time (today) - leave blank with To to start immediately" />
+                  <input type="time" class="sim-time-input" data-schedule-from="${escapeHtml(instrument.symbol)}" value="${escapeHtml(form.from)}" title="From: start time (today) - leave blank with To to start immediately" />
                   <span class="sim-time-sep">–</span>
-                  <input type="time" class="sim-time-input" data-schedule-to="${escapeHtml(instrument.symbol)}" title="To: end time (today) - auto-reverts to real-time here. Leave blank with From to start immediately for 5 minutes" />
+                  <input type="time" class="sim-time-input" data-schedule-to="${escapeHtml(instrument.symbol)}" value="${escapeHtml(form.to)}" title="To: end time (today) - auto-reverts to real-time here. Leave blank with From to start immediately for 5 minutes" />
                 </div>
               </div>
               <div class="sim-control-group">
                 <span class="sim-control-label">Start price (optional)</span>
-                <input type="number" step="any" min="0" class="sim-target-input" data-schedule-start-price="${escapeHtml(instrument.symbol)}" placeholder="e.g. 150" title="Open the simulation at this exact price instead of continuing from the current price" />
+                <input type="number" step="any" min="0" class="sim-target-input" data-schedule-start-price="${escapeHtml(instrument.symbol)}" value="${escapeHtml(startValue)}" placeholder="e.g. 150" title="Filled in with the live price - change it to open the simulation at a different price" />
               </div>
               <div class="sim-control-group">
                 <span class="sim-control-label">Target price (optional)</span>
                 <div class="sim-target-pair">
-                  <input type="number" step="any" min="0" class="sim-target-input" data-schedule-target="${escapeHtml(instrument.symbol)}" placeholder="e.g. 2" title="Stop automatically once the price reaches this target" />
+                  <input type="number" step="any" min="0" class="sim-target-input" data-schedule-target="${escapeHtml(instrument.symbol)}" value="${escapeHtml(form.target)}" placeholder="e.g. 2" title="Stop automatically once the price reaches this target" />
                   <select class="sim-target-unit" data-schedule-target-unit="${escapeHtml(instrument.symbol)}" title="Target unit">
-                    <option value="percent">%</option>
-                    <option value="price">$</option>
+                    <option value="percent" ${form.unit === "percent" ? "selected" : ""}>%</option>
+                    <option value="price" ${form.unit === "price" ? "selected" : ""}>$</option>
                   </select>
                 </div>
               </div>
@@ -4417,6 +4455,7 @@ function renderManagedInstruments() {
           </label>
         </header>
         <p class="product-card-name">${escapeHtml(instrument.displayName)}</p>
+        ${canManageUsers() ? `<p class="product-live-price" data-live-price="${escapeHtml(instrument.symbol)}">${escapeHtml(livePriceText(instrument.symbol))}</p>` : ""}
         ${simSection}
       </article>`;
     })
@@ -4587,6 +4626,7 @@ async function loadManagedInstruments() {
       // Badges just stay whatever they were locally if this fetch fails - not worth blocking the instrument list over.
     }
     renderManagedInstruments();
+    refreshManagedPrices({ force: true });
   } catch (error) {
     const list = document.querySelector("#managedInstrumentList");
     if (list) list.innerHTML = `<div class="product-card"><span>${escapeHtml(error.message)}</span></div>`;
@@ -5097,6 +5137,47 @@ document.querySelector("#managedInstrumentList")?.addEventListener("change", asy
     setManagedMessage(error.message, "error");
   }
 });
+
+document.querySelector("#managedInstrumentList")?.addEventListener("input", (event) => {
+  const field = event.target;
+  const { scheduleFrom, scheduleTo, scheduleStartPrice, scheduleTarget, scheduleTargetUnit } = field.dataset;
+  const symbol = scheduleFrom || scheduleTo || scheduleStartPrice || scheduleTarget || scheduleTargetUnit;
+  if (!symbol) return;
+  const form = simFormFor(symbol);
+  if (scheduleFrom) form.from = field.value;
+  else if (scheduleTo) form.to = field.value;
+  else if (scheduleTarget) form.target = field.value;
+  else if (scheduleTargetUnit) form.unit = field.value;
+  else {
+    // Clearing it hands Start price back to the live price.
+    form.start = field.value;
+    form.startEdited = field.value !== "";
+  }
+});
+
+// Keeps each product card's live price - and the Start price field, unless
+// the admin has typed their own - current, in place, without re-rendering.
+async function refreshManagedPrices({ force = false } = {}) {
+  if (!canManageUsers()) return;
+  if (!force && !document.querySelector("#products")?.classList.contains("is-active")) return;
+  let data;
+  try {
+    data = await adminFetch("/api/admin/prices");
+  } catch {
+    return;
+  }
+  for (const [symbol, live] of Object.entries(data.prices || {})) {
+    managedLivePrices.set(symbol, live);
+    const label = document.querySelector(`[data-live-price="${CSS.escape(symbol)}"]`);
+    if (label) label.textContent = livePriceText(symbol);
+    const startInput = document.querySelector(`[data-schedule-start-price="${CSS.escape(symbol)}"]`);
+    if (startInput && !simFormFor(symbol).startEdited && document.activeElement !== startInput) {
+      startInput.value = priceInputValue(live.price);
+    }
+  }
+}
+
+setInterval(refreshManagedPrices, 5000);
 
 // Demo price simulation controls (Products page): forces a symbol's price to
 // trend up or down at a steady rate so admin/team can watch margin/floating
