@@ -913,18 +913,47 @@ async function loadBankDetails() {
   renderBankAccountSummary(result?.account || null);
 }
 
+// On a phone the account modal is two screens: the menu list first, then the
+// chosen page full-screen with a Back button (see the max-width: 680px rules
+// in styles.css). The is-pane-open class says which one shows; desktop
+// ignores it and always shows the menu beside the page.
+function showProfileMenu() {
+  document.querySelector(".profile-modal")?.classList.remove("is-pane-open");
+}
+
+function openProfilePane(pane) {
+  switchProfilePane(pane);
+  const label = document.querySelector(`#profileModalMenu [data-profile-pane="${pane}"] span:last-child`)?.textContent;
+  const title = document.querySelector("#profileModalTitle");
+  if (title && label) title.textContent = label;
+  const modal = document.querySelector(".profile-modal");
+  modal?.classList.add("is-pane-open");
+  document.querySelector(".profile-modal-content")?.scrollTo(0, 0);
+}
+
 function openProfileModal() {
   renderAccountSummary();
   loadInvitedFriends();
   loadKycStatus();
   loadBankDetails();
   switchProfilePane("kyc");
+  showProfileMenu();
   document.querySelector("#profileModal")?.classList.remove("is-hidden");
+  document.body.classList.add("profile-modal-open");
 }
 
 function closeProfileModal() {
   document.querySelector("#profileModal")?.classList.add("is-hidden");
+  document.body.classList.remove("profile-modal-open");
 }
+
+document.querySelector("#profileModalBack")?.addEventListener("click", showProfileMenu);
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || document.querySelector("#profileModal")?.classList.contains("is-hidden")) return;
+  const modal = document.querySelector(".profile-modal");
+  if (modal?.classList.contains("is-pane-open") && window.matchMedia("(max-width: 680px)").matches) showProfileMenu();
+  else closeProfileModal();
+});
 
 document.querySelector("#closeProfileModal")?.addEventListener("click", closeProfileModal);
 document.querySelector("#profileModal")?.addEventListener("click", (event) => {
@@ -933,7 +962,7 @@ document.querySelector("#profileModal")?.addEventListener("click", (event) => {
 
 document.querySelector("#profileModalMenu")?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-profile-pane]");
-  if (button) switchProfilePane(button.dataset.profilePane);
+  if (button) openProfilePane(button.dataset.profilePane);
 });
 
 document.querySelector(".profile-modal-content")?.addEventListener("click", (event) => {
