@@ -603,19 +603,17 @@
                   <div><span>Spread</span><strong id="tradeSpreadValue">0.02</strong></div>
                 </div>
                 <div class="timeframes">
+                  <button class="is-active" type="button" data-timeframe="5S">5s</button>
                   <button type="button" data-timeframe="1M">1M</button>
                   <button type="button" data-timeframe="5M">5M</button>
-                  <button class="is-active" type="button" data-timeframe="1H">1H</button>
+                  <button type="button" data-timeframe="1H">1H</button>
                   <select id="tradeTimeframeSelect" aria-label="More timeframes">
                     <option value="" selected disabled>More…</option>
+                    <option value="15M">15M</option>
+                    <option value="4H">4H</option>
                     <option value="1D">1D</option>
-                    <option value="5D">5D</option>
-                    <option value="1MO">1Mo</option>
-                    <option value="5MO">5Mo</option>
-                    <option value="1Y">1Y</option>
-                    <option value="ALL">All</option>
                   </select>
-                  <button id="tradeCalendarToggle" type="button" class="calendar-toggle" aria-label="Choose a custom date range" aria-expanded="false" aria-haspopup="dialog">📅</button>
+                  <button id="tradeCalendarToggle" type="button" class="calendar-toggle is-hidden" aria-label="Choose a custom date range" aria-expanded="false" aria-haspopup="dialog">📅</button>
                 </div>
                 <div id="tradeCalendarPopover" class="calendar-popover is-hidden" role="dialog" aria-label="Custom date range" aria-modal="false">
                   <label>From<input id="tradeCalendarStart" type="date"></label>

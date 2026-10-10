@@ -94,3 +94,10 @@ Charts are generated locally; only each product's latest real price is fetched, 
 - Forex: ECB reference rates via Frankfurter (no key, daily)
 
 Without a key (or if a source is down) that product keeps its generated price.
+
+A simulation chart also shows each product's real last week, in 1-minute candles (5s, 1M, 5M, 15M, 1H, 4H and 1D views), fetched at startup and topped up every 5 minutes, held in memory only:
+
+- Crypto: Coinbase public candles (no key)
+- Everything else: Yahoo Finance chart data (no key, unofficial; commodities use their futures)
+
+If history can't be fetched, that product's chart falls back to a generated hour. Set `MARKET_HISTORY=off` to skip fetching it.
