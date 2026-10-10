@@ -2389,11 +2389,13 @@ function updateTopTicker() {
 }
 
 const timeframeMinutes = {
+  "5S": 5 / 60,
   "1M": 1,
   "5M": 5,
   "15M": 15,
   "30M": 30,
   "1H": 60,
+  "4H": 240,
   "1D": 1440,
   "5D": 60,
   "1MO": 1440,
@@ -2476,11 +2478,13 @@ function ensureTradingViewScript() {
 // codes - there's no exact TradingView equivalent for a couple of our ranges
 // ("5D"/"5MO" are windows, not bar sizes), so those pick the closest bar size.
 const tradingViewIntervalMap = {
+  "5S": "1",
   "1M": "1",
   "5M": "5",
   "15M": "15",
   "30M": "30",
   "1H": "60",
+  "4H": "240",
   "1D": "D",
   "5D": "60",
   "1MO": "D",
@@ -2706,7 +2710,11 @@ function formatChartTime(timeStr, timeframe) {
     return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
   if (tradeChartState.isSimulated) {
-    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    // Hourly candles span the whole week, so they carry the day too.
+    if (timeframe === "1H" || timeframe === "4H") {
+      return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric" });
+    }
+    if (timeframe === "5S") return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
   }
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
@@ -2752,7 +2760,15 @@ function syncTradeTerminal(ohlcCandle) {
   // percentage that never changed no matter how far price actually moved.
   // The percent show here needs to be the live move's own percentage.
   const movePercent = tradeChartState.price ? (move / tradeChartState.price) * 100 : 0;
-  const moveText = `${move >= 0 ? "+" : ""}${formatTradeNumber(move)} (${movePercent >= 0 ? "+" : ""}${movePercent.toFixed(3)}%)`;
+  // Sign first, then the (always positive) amount - formatTradeNumber of a
+  // negative move put the currency symbol before the minus ("₹-223.96") and
+  // picked its decimals as if the number were small.
+  // The move keeps the price's own decimals (2 for a 4-digit price).
+  const shownPrice = Math.abs(livePrice * displayCurrencyRate);
+  const moveDecimals = shownPrice >= 1000 ? 2 : shownPrice >= 10 ? 3 : 5;
+  const moveAmount = (Math.abs(move) * displayCurrencyRate).toFixed(moveDecimals);
+  const movePrefix = displayCurrency === "USD" ? "" : currencySymbols[displayCurrency] || "";
+  const moveText = `${move >= 0 ? "+" : "-"}${movePrefix}${moveAmount} (${movePercent >= 0 ? "+" : ""}${movePercent.toFixed(3)}%)`;
 
   setTradeText("#tradeSymbolName", tradeChartState.symbol);
   setTradeText("#tradeSymbolCategory", tradeChartState.category[0] + tradeChartState.category.slice(1).toLowerCase());
@@ -2771,7 +2787,7 @@ function syncTradeTerminal(ohlcCandle) {
   setTradeText("#tradeAskValue", formatTradeNumber(ask));
   setTradeText("#tradeSpreadValue", formatTradeNumber(ask - bid));
   setTradeText("#tradePriceMarker", formatTradeNumber(livePrice));
-  setTradeText("#tradeTimeframeLabel", tradeChartState.isSimulated ? "5s" : tradeChartState.timeframe);
+  setTradeText("#tradeTimeframeLabel", tradeChartState.timeframe === "5S" ? "5s" : tradeChartState.timeframe);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", movePercent >= 0);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", movePercent < 0);
   updateTopTicker();
@@ -3182,6 +3198,10 @@ function applyMarketStatus(payload) {
 // the same 5-second buckets and the same tick timestamps the server used, so
 // what's drawn live and what a reload returns are the same candles.
 const simulationSeriesBucketMs = 5000;
+// Candle sizes the simulation chart offers (the server's seriesTimeframes):
+// 5s from the live series itself, the rest reaching back over the product's
+// real last week.
+const simulationTimeframes = ["5S", "1M", "5M", "15M", "1H", "4H", "1D"];
 const maxSimulationSeriesCandles = 3000;
 let seriesRequestToken = 0;
 
@@ -3201,10 +3221,11 @@ function clearTradeCanvas() {
 
 async function loadSimulationSeries(symbol, attempt = 1) {
   const token = ++seriesRequestToken;
-  const stillWanted = () => token === seriesRequestToken && tradeChartState.apiSymbol === symbol && tradeChartState.isSimulated;
+  const timeframe = tradeChartState.timeframe;
+  const stillWanted = () => token === seriesRequestToken && tradeChartState.apiSymbol === symbol && tradeChartState.isSimulated && tradeChartState.timeframe === timeframe;
   let payload;
   try {
-    const response = await fetch(`${apiBase}/api/markets/series?symbol=${encodeURIComponent(symbol)}`);
+    const response = await fetch(`${apiBase}/api/markets/series?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(timeframe)}`);
     payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
   } catch {
@@ -3222,13 +3243,15 @@ async function loadSimulationSeries(symbol, attempt = 1) {
     simulated: Boolean(bar.simulated),
   }));
   if (!bars.length) return;
-  const sameSeries = tradeChartState.seriesSymbol === symbol;
+  const seriesKey = `${symbol}|${timeframe}`;
+  const sameSeries = tradeChartState.seriesSymbol === seriesKey;
   // Ticks applied while this request was in flight - keep any that are newer
   // than the last bar the server returned.
   const lastServerMs = Date.parse(bars.at(-1).time);
   const newerLocal = sameSeries ? tradeChartState.candles.filter((candle) => Date.parse(candle.time) > lastServerMs) : [];
   tradeChartState.candles = [...bars, ...newerLocal];
-  tradeChartState.seriesSymbol = symbol;
+  tradeChartState.seriesSymbol = seriesKey;
+  tradeChartState.seriesBucketMs = Number(payload.bucketMs) || simulationSeriesBucketMs;
   tradeChartState.simulationStartTime = latestSimulationStart(tradeChartState.candles);
   // The header's +/- move reads as the change since the simulation began,
   // not since whatever (possibly stale) watchlist price the product was
@@ -3281,15 +3304,17 @@ async function loadChartForCurrentSymbol() {
   document.querySelector("#tradePriceStatsRow")?.classList.remove("is-hidden");
   document.querySelector(".timeframes")?.classList.remove("is-hidden");
   showSimulationChart();
-  if (tradeChartState.timeframe !== "1M") {
-    setActiveTimeframeControl("1M");
-    tradeChartState.timeframe = "1M";
+  // The simulation chart has its own candle sizes (see simulationTimeframes);
+  // anything else - e.g. the TradingView interval it was on - starts at 5s.
+  if (!simulationTimeframes.includes(tradeChartState.timeframe)) {
+    setActiveTimeframeControl("5S");
+    tradeChartState.timeframe = "5S";
     tradeChartState.customRange = null;
   }
   setStreamStatus(null);
   tradeChartState.isLiveChart = false;
 
-  if (tradeChartState.seriesSymbol === tradeChartState.apiSymbol) {
+  if (tradeChartState.seriesSymbol === `${tradeChartState.apiSymbol}|${tradeChartState.timeframe}`) {
     renderTradeCandles();
   } else {
     // Nothing of this product's series is on screen yet - don't leave the
@@ -3598,8 +3623,9 @@ function applyLiveTick(tick) {
   if (isSimulationTick) {
     // Until this product's series has loaded, the server already holds this
     // tick and the load will include it.
-    if (tradeChartState.seriesSymbol !== tick.symbol) return;
-    const bucketMs = Math.floor(tickMs / simulationSeriesBucketMs) * simulationSeriesBucketMs;
+    if (tradeChartState.seriesSymbol !== `${tick.symbol}|${tradeChartState.timeframe}`) return;
+    const stepMs = tradeChartState.seriesBucketMs || simulationSeriesBucketMs;
+    const bucketMs = Math.floor(tickMs / stepMs) * stepMs;
     const lastMs = Date.parse(last.time);
     if (bucketMs < lastMs) return;
     if (bucketMs === lastMs) {
@@ -3611,7 +3637,7 @@ function applyLiveTick(tick) {
     } else {
       // Same rule as the server's series: a bucket with no tick is carried
       // flat at the last price, and a new candle opens at the previous close.
-      for (let t = lastMs + simulationSeriesBucketMs, filled = 0; t < bucketMs && filled < 60; t += simulationSeriesBucketMs, filled += 1) {
+      for (let t = lastMs + stepMs, filled = 0; t < bucketMs && filled < 60; t += stepMs, filled += 1) {
         const previousClose = candles.at(-1).close;
         candles.push({ time: new Date(t).toISOString(), open: previousClose, high: previousClose, low: previousClose, close: previousClose, volume: 0, simulated: true });
       }
