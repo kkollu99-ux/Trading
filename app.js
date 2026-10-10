@@ -913,18 +913,47 @@ async function loadBankDetails() {
   renderBankAccountSummary(result?.account || null);
 }
 
+// On a phone the account modal is two screens: the menu list first, then the
+// chosen page full-screen with a Back button (see the max-width: 680px rules
+// in styles.css). The is-pane-open class says which one shows; desktop
+// ignores it and always shows the menu beside the page.
+function showProfileMenu() {
+  document.querySelector(".profile-modal")?.classList.remove("is-pane-open");
+}
+
+function openProfilePane(pane) {
+  switchProfilePane(pane);
+  const label = document.querySelector(`#profileModalMenu [data-profile-pane="${pane}"] span:last-child`)?.textContent;
+  const title = document.querySelector("#profileModalTitle");
+  if (title && label) title.textContent = label;
+  const modal = document.querySelector(".profile-modal");
+  modal?.classList.add("is-pane-open");
+  document.querySelector(".profile-modal-content")?.scrollTo(0, 0);
+}
+
 function openProfileModal() {
   renderAccountSummary();
   loadInvitedFriends();
   loadKycStatus();
   loadBankDetails();
   switchProfilePane("kyc");
+  showProfileMenu();
   document.querySelector("#profileModal")?.classList.remove("is-hidden");
+  document.body.classList.add("profile-modal-open");
 }
 
 function closeProfileModal() {
   document.querySelector("#profileModal")?.classList.add("is-hidden");
+  document.body.classList.remove("profile-modal-open");
 }
+
+document.querySelector("#profileModalBack")?.addEventListener("click", showProfileMenu);
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || document.querySelector("#profileModal")?.classList.contains("is-hidden")) return;
+  const modal = document.querySelector(".profile-modal");
+  if (modal?.classList.contains("is-pane-open") && window.matchMedia("(max-width: 680px)").matches) showProfileMenu();
+  else closeProfileModal();
+});
 
 document.querySelector("#closeProfileModal")?.addEventListener("click", closeProfileModal);
 document.querySelector("#profileModal")?.addEventListener("click", (event) => {
@@ -933,7 +962,7 @@ document.querySelector("#profileModal")?.addEventListener("click", (event) => {
 
 document.querySelector("#profileModalMenu")?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-profile-pane]");
-  if (button) switchProfilePane(button.dataset.profilePane);
+  if (button) openProfilePane(button.dataset.profilePane);
 });
 
 document.querySelector(".profile-modal-content")?.addEventListener("click", (event) => {
@@ -1385,8 +1414,10 @@ function renderOrdersPanels() {
   updateOrdersTabSummary();
 }
 
+let ordersLoadGeneration = 0;
 async function loadOrders() {
   if (!currentSession?.token) return;
+  ordersLoadGeneration += 1;
   try {
     const [openResult, closedResult] = await Promise.all([
       authRequest("/api/orders?status=open"),
@@ -1400,6 +1431,36 @@ async function loadOrders() {
   }
   renderOrdersPanels();
   if (document.querySelector("#dashboardEquity")) renderAccountSummary();
+}
+
+// Open positions only get repriced when something re-fetches them, so while
+// the Orders page or Home is on screen with trades open, refresh them every
+// few seconds - floating P&L and equity then follow the market (or a running
+// simulation) instead of freezing at whatever they were when the page opened.
+let livePositionsRefreshInFlight = false;
+async function refreshLivePositions() {
+  if (!currentSession?.token || !openPositions.length || livePositionsRefreshInFlight) return;
+  if (document.visibilityState === "hidden") return;
+  const onOrders = document.querySelector("#orders")?.classList.contains("is-active");
+  const onDashboard = document.querySelector("#dashboard")?.classList.contains("is-active");
+  if (!onOrders && !onDashboard) return;
+  // Re-rendering the rows mid-close would put a fresh, clickable Close button back.
+  if (document.querySelector("[data-close-order]:disabled")) return;
+  livePositionsRefreshInFlight = true;
+  const generation = ordersLoadGeneration;
+  try {
+    // A failed refresh keeps the last good list rather than blanking it.
+    const result = await authRequest("/api/orders?status=open");
+    // A full reload (e.g. after a close) ran meanwhile - its list is newer.
+    if (generation !== ordersLoadGeneration) return;
+    openPositions = result.orders || [];
+    renderOrdersPanels();
+    if (document.querySelector("#dashboardEquity")) renderAccountSummary();
+  } catch {
+    // Next tick retries.
+  } finally {
+    livePositionsRefreshInFlight = false;
+  }
 }
 
 function setOrdersMessage(message, type = "") {
@@ -1726,6 +1787,9 @@ function applySimulationStatus(payload) {
   else activeSimulationsBySymbol.delete(payload.symbol);
 
   if (payload.symbol === tradeChartState.apiSymbol) {
+    // A fresh run replaced the product's whole history on the server - drop
+    // the candles on screen (an earlier run's among them) and load anew.
+    if (payload.active && payload.reset) tradeChartState.seriesSymbol = null;
     // Reload fresh rather than just flipping the flag - loadChartForCurrentSymbol
     // re-derives isSimulated from activeSimulationsBySymbol (just updated above)
     // and is the one place that decides TradingView-widget vs. the simulated
@@ -4421,7 +4485,8 @@ function renderManagedInstruments() {
       const symbol = compactSymbol(instrument.symbol);
       const categoryKey = categoryFilter(instrument.category);
       const form = simFormFor(instrument.symbol);
-      const startValue = form.startEdited ? form.start : priceInputValue(managedLivePrices.get(instrument.symbol)?.price);
+      const live = managedLivePrices.get(instrument.symbol);
+      const startValue = form.startEdited ? form.start : priceInputValue(live?.startPrice ?? live?.price);
       const simulation = activeSimulationsBySymbol.get(instrument.symbol);
       const simStartPrefix = simulation?.startPrice ? `${formatCurrency(simulation.startPrice)} ` : "";
       const simTargetSuffix = simulation?.targetPrice ? ` → ${formatCurrency(simulation.targetPrice)}` : "";
@@ -5191,7 +5256,8 @@ document.querySelector("#managedInstrumentList")?.addEventListener("input", (eve
   }
 });
 
-// Keeps each product card's live price - and the Start price field, unless
+// Keeps each product card's live price - and the Start price field (where a
+// new simulation opens: the market price, see simulationResetPrice), unless
 // the admin has typed their own - current, in place, without re-rendering.
 async function refreshManagedPrices({ force = false } = {}) {
   if (!canManageUsers()) return;
@@ -5208,7 +5274,7 @@ async function refreshManagedPrices({ force = false } = {}) {
     if (label) label.textContent = livePriceText(symbol);
     const startInput = document.querySelector(`[data-schedule-start-price="${CSS.escape(symbol)}"]`);
     if (startInput && !simFormFor(symbol).startEdited && document.activeElement !== startInput) {
-      startInput.value = priceInputValue(live.price);
+      startInput.value = priceInputValue(live.startPrice ?? live.price);
     }
   }
 }
@@ -5454,6 +5520,7 @@ loadOrders();
 setInterval(tickMarkets, 1500);
 setInterval(refreshMarketsQuotes, 7000);
 setInterval(refreshTradeWatchPrices, 5000);
+setInterval(refreshLivePositions, 3000);
 setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);
 startVersionCheck();

@@ -1487,25 +1487,42 @@ function getSeries(symbol) {
     priceSeries.set(symbol, restored);
     return restored;
   }
-  const basis = seedBasisPrice(symbol);
-  const series = {
-    bars: [],
-    sigma,
-    volLevel: 1,
-    anchor: basis,
-  };
-  const lastBucket = seriesBucket(Date.now()) - seriesBucketMs;
+  const series = { bars: [], sigma, volLevel: 1, anchor: 0 };
+  seedSeries(series, seedBasisPrice(symbol), seriesBucket(Date.now()) - seriesBucketMs);
+  priceSeries.set(symbol, series);
+  return series;
+}
+
+// Fills a series with a fresh hour of generated history whose last bar sits
+// in lastBucketMs and closes exactly on basis, replacing whatever was there.
+function seedSeries(series, basis, lastBucketMs) {
+  series.bars = [];
+  series.volLevel = 1;
+  series.anchor = basis;
+  delete series.pullPerBar;
   let price = basis;
   for (let index = seriesSeedBars - 1; index >= 0; index -= 1) {
-    const bar = generatedBar(series, lastBucket - index * seriesBucketMs, price);
+    const bar = generatedBar(series, lastBucketMs - index * seriesBucketMs, price);
     series.bars.push(bar);
     price = bar.close;
   }
   // The walk wanders off basis; rescale so the history ends exactly on it.
   scaleSeries(series, basis / price);
   series.anchor = basis;
-  priceSeries.set(symbol, series);
-  return series;
+}
+
+// Where a fresh simulation opens when admin gives no start price: the real
+// market price, or - for a product with no real source - where it stood
+// before simulations moved it (noted when the first one started; a series
+// restored after a restart falls back to the close before its first
+// simulated bar).
+function simulationResetPrice(symbol) {
+  const real = realPrices.get(symbol)?.price;
+  if (real) return real;
+  const series = priceSeries.get(symbol);
+  const firstSimulated = series ? series.bars.findIndex((bar) => bar.simulated) : -1;
+  if (firstSimulated < 0) return getCurrentPrice(symbol);
+  return series.marketPrice ?? series.bars[Math.max(0, firstSimulated - 1)].close;
 }
 
 // Brings a series up to the present: every whole 5-second bucket that went
@@ -2030,7 +2047,7 @@ async function restoreSimulations() {
   }
 }
 
-function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs, targetPrice = null, startPrice = null) {
+function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs, targetPrice = null, startPrice = null, { reset = false } = {}) {
   const existing = priceSimulations.get(symbol);
   if (existing?.timer) clearTimeout(existing.timer);
   cancelScheduledSimulation(symbol); // a manual/auto trigger supersedes any pending scheduled window
@@ -2044,7 +2061,16 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
   // ticks extend that candle instead of a flat filler candle appearing at
   // the handoff.
   advanceSeries(symbol, series, Date.now() + seriesBucketMs);
-  if (Number.isFinite(startPrice) && startPrice > 0) scaleSeries(series, startPrice / series.bars.at(-1).close);
+  const hasStartPrice = Number.isFinite(startPrice) && startPrice > 0;
+  if (reset) {
+    if (!series.bars.some((bar) => bar.simulated)) series.marketPrice = series.bars.at(-1).close;
+    // Starting a simulation from the admin controls begins on a clean chart:
+    // fresh history ending at the start price (or the market price), with
+    // nothing left of an earlier run's move or of the drift back after it.
+    seedSeries(series, hasStartPrice ? startPrice : simulationResetPrice(symbol), seriesBucket(Date.now()));
+  } else if (hasStartPrice) {
+    scaleSeries(series, startPrice / series.bars.at(-1).close);
+  }
   const basePrice = series.bars.at(-1).close;
   const clampedDurationMs = Number.isFinite(durationMs) && durationMs > 0 ? Math.min(durationMs, priceSimulationMaxDurationMs) : null;
   const expiresAt = clampedDurationMs ? new Date(Date.now() + clampedDurationMs).toISOString() : null;
@@ -2137,7 +2163,7 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     startedAt: simulation.startedAt,
     expiresAt,
   });
-  broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt, targetPrice: simulation.targetPrice, startPrice: simulation.basePrice });
+  broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt, targetPrice: simulation.targetPrice, startPrice: simulation.basePrice, reset });
 }
 
 function stopPriceSimulation(symbol) {
@@ -2184,14 +2210,14 @@ function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO,
   if (fromMs <= now) {
     // The window's start has already arrived (e.g. admin picked "from" a
     // minute in the past) - just start right away for whatever's left of it.
-    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - now, targetPrice, startPrice);
+    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - now, targetPrice, startPrice, { reset: true });
     return { scheduled: false, active: true };
   }
 
   const startTimer = setTimeout(() => {
     scheduledSimulations.delete(symbol);
     forgetSimulation(symbol, "scheduled");
-    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - Date.now(), targetPrice, startPrice);
+    startPriceSimulation(symbol, direction, stepPercent, startedBy, toMs - Date.now(), targetPrice, startPrice, { reset: true });
   }, fromMs - now);
 
   scheduledSimulations.set(symbol, { direction, stepPercent, fromISO, toISO, startedBy, startTimer, targetPrice, startPrice });
@@ -2327,16 +2353,18 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
   const stepPercent = Number(request.body.stepPercent);
   const durationSeconds = Number(request.body.durationSeconds);
   const startPriceRaw = Number(request.body.startPrice);
-  const startPrice = Number.isFinite(startPriceRaw) && startPriceRaw > 0 ? startPriceRaw : null;
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
+  // A new run starts fresh (see startPriceSimulation), so with no start price
+  // given it opens at the market price, not wherever a previous run ended.
+  const startPrice = Number.isFinite(startPriceRaw) && startPriceRaw > 0 ? startPriceRaw : simulationResetPrice(symbol);
 
   const targetPrice = resolveSimulationTarget(symbol, direction, request.body, startPrice);
   const targetError = validateSimulationTarget(symbol, direction, targetPrice, startPrice);
   if (targetError) return response.status(400).json({ error: targetError });
 
   const durationMs = Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds * 1000 : null;
-  startPriceSimulation(symbol, direction, stepPercent, request.user.id, durationMs, targetPrice, startPrice);
+  startPriceSimulation(symbol, direction, stepPercent, request.user.id, durationMs, targetPrice, startPrice, { reset: true });
   const simulation = priceSimulations.get(symbol);
   logEvent({
     category: "chart",
@@ -2470,8 +2498,9 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
   if (toMs <= Date.now()) return response.status(400).json({ error: "To time must be in the future" });
   if (toMs - fromMs > priceSimulationMaxDurationMs) return response.status(400).json({ error: "Window can be at most 1 hour" });
 
-  const targetPrice = resolveSimulationTarget(symbol, direction, request.body, startPrice);
-  const targetError = validateSimulationTarget(symbol, direction, targetPrice, startPrice);
+  const opensAt = startPrice ?? simulationResetPrice(symbol);
+  const targetPrice = resolveSimulationTarget(symbol, direction, request.body, opensAt);
+  const targetError = validateSimulationTarget(symbol, direction, targetPrice, opensAt);
   if (targetError) return response.status(400).json({ error: targetError });
 
   const result = schedulePriceSimulation(
@@ -2722,6 +2751,8 @@ app.get("/api/admin/prices", requireAuth, attachUser, requireRole("admin"), asyn
     const real = realPrices.get(instrument.symbol);
     prices[instrument.symbol] = {
       price: roundPrice(getCurrentPrice(instrument.symbol)),
+      // What a new simulation opens at by default (see simulationResetPrice).
+      startPrice: roundPrice(simulationResetPrice(instrument.symbol)),
       source: real ? realPriceSourceNames[real.source] : null,
       realPriceAt: real ? new Date(real.at).toISOString() : null,
       simulated: priceSimulations.has(instrument.symbol),
