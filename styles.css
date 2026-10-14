@@ -1854,18 +1854,23 @@ select:focus {
     transition: border-color 0.28s ease;
   }
 
+  /* A collapsed side keeps a 1.3rem column for its edge button (see
+     .panel-toggle), so the button sits beside the chart instead of on top of
+     the chart's first/last 20px. */
   .trade-terminal.is-watch-collapsed {
-    grid-template-columns: 0rem minmax(0, 1fr) 20rem;
+    grid-template-columns: 1.3rem minmax(0, 1fr) 20rem;
   }
 
   .trade-terminal.is-watch-collapsed .watch-panel {
+    padding: 0;
+    border-right-width: 0;
     opacity: 0;
+    visibility: hidden;
     pointer-events: none;
-    border-right-color: transparent;
   }
 
   .trade-terminal.is-ticket-collapsed {
-    grid-template-columns: 16rem minmax(0, 1fr) 0rem;
+    grid-template-columns: 16rem minmax(0, 1fr) 1.3rem;
   }
 
   .trade-terminal.is-ticket-collapsed .order-ticket {
@@ -1874,7 +1879,7 @@ select:focus {
   }
 
   .trade-terminal.is-watch-collapsed.is-ticket-collapsed {
-    grid-template-columns: 0rem minmax(0, 1fr) 0rem;
+    grid-template-columns: 1.3rem minmax(0, 1fr) 1.3rem;
   }
 
   /* Always full-height and flush against the chart, in both the expanded
