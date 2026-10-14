@@ -945,13 +945,14 @@
           <section class="profile-modal-content">
             <div class="profile-mobile-bar">
               <button id="profileModalBack" type="button" aria-label="Back to account menu">‹ Back</button>
+              <span id="profileModalIcon" class="profile-modal-icon" aria-hidden="true"></span>
               <strong id="profileModalTitle">Account</strong>
             </div>
 
             <div class="profile-pane is-active" data-profile-pane-content="details">
               <h3>Account Details</h3>
               <p class="profile-pane-hint">Your account at a glance. Identity documents are handled separately under KYC Verification.</p>
-              <div id="accountDetailsCard" class="kyc-submission-card"></div>
+              <div id="accountDetailsCard" class="account-details-card"></div>
               <button class="primary-action" type="button" data-profile-goto-pane="kyc">Go to KYC Verification</button>
             </div>
 

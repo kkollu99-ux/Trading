@@ -272,17 +272,23 @@ function renderAccountDetails(user, uid, balance, marginUsed, kyc) {
   const roleLabel = { admin: "Administrator", team: "Team", user: "Trader" }[user?.role] || user?.role || "—";
   const status = user?.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : "Active";
   const since = user?.createdAt ? new Date(user.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+  const row = (label, value, className = "") => `<div class="account-detail-row"><dt>${label}</dt><dd class="${className}">${value}</dd></div>`;
   card.innerHTML = `
-    <dl>
-      <dt>Full Name</dt><dd>${user?.name ? escapeHtml(user.name) : "<em>Not set</em>"}</dd>
-      <dt>Email</dt><dd>${escapeHtml(user?.email || "—")}</dd>
-      <dt>Account ID</dt><dd>${escapeHtml(uid)}</dd>
-      <dt>Account Type</dt><dd>${escapeHtml(roleLabel)}</dd>
-      <dt>Account Status</dt><dd>${escapeHtml(status)}</dd>
-      <dt>Member Since</dt><dd>${escapeHtml(since)}</dd>
-      <dt>Balance</dt><dd>${formatCurrency(balance)}</dd>
-      <dt>Margin In Use</dt><dd>${formatCurrency(marginUsed)}</dd>
-      <dt>Identity Verification</dt><dd class="${kyc.className}">${escapeHtml(kyc.text)}</dd>
+    <div class="account-detail-hero">
+      <span class="account-detail-avatar">${escapeHtml((user?.name || user?.email || "?").charAt(0).toUpperCase())}</span>
+      <div>
+        <strong>${user?.name ? escapeHtml(user.name) : "<em>Name not set</em>"}</strong>
+        <small>${escapeHtml(user?.email || "—")}</small>
+      </div>
+      <span class="status-pill ${user?.kycStatus === "verified" ? "" : user?.kycStatus === "rejected" ? "is-rejected" : "is-pending"}">${escapeHtml(kyc.text)}</span>
+    </div>
+    <dl class="account-detail-list">
+      ${row("Account ID", escapeHtml(uid))}
+      ${row("Account Type", escapeHtml(roleLabel))}
+      ${row("Account Status", escapeHtml(status))}
+      ${row("Member Since", escapeHtml(since))}
+      ${row("Balance", formatCurrency(balance))}
+      ${row("Margin In Use", formatCurrency(marginUsed))}
     </dl>`;
 }
 
@@ -955,13 +961,18 @@ function positionProfileModal() {
   if (!isDesktopLayout() || !profileModalAnchorRect) {
     modal.style.left = "";
     modal.style.top = "";
+    modal.style.removeProperty("--caret-y");
     return;
   }
   const margin = 8;
   const left = Math.min(profileModalAnchorRect.right + 10, window.innerWidth - modal.offsetWidth - margin);
   const top = Math.min(profileModalAnchorRect.top, window.innerHeight - modal.offsetHeight - margin);
+  const placedTop = Math.max(margin, Math.round(top));
   modal.style.left = `${Math.max(margin, Math.round(left))}px`;
-  modal.style.top = `${Math.max(margin, Math.round(top))}px`;
+  modal.style.top = `${placedTop}px`;
+  // The pointer arrow sits level with the Profile item's centre.
+  const pointerY = profileModalAnchorRect.top + profileModalAnchorRect.height / 2 - placedTop;
+  modal.style.setProperty("--caret-y", `${Math.round(Math.max(24, Math.min(pointerY, modal.offsetHeight - 24)))}px`);
 }
 
 function openProfilePane(pane) {
@@ -969,6 +980,9 @@ function openProfilePane(pane) {
   const label = document.querySelector(`#profileModalMenu [data-profile-pane="${pane}"] span:last-child`)?.textContent;
   const title = document.querySelector("#profileModalTitle");
   if (title && label) title.textContent = label;
+  const icon = document.querySelector(`#profileModalMenu [data-profile-pane="${pane}"] span:first-child`)?.textContent;
+  const iconSlot = document.querySelector("#profileModalIcon");
+  if (iconSlot && icon) iconSlot.textContent = icon;
   const modal = document.querySelector(".profile-modal");
   modal?.classList.add("is-pane-open");
   document.querySelector(".profile-modal-content")?.scrollTo(0, 0);
