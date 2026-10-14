@@ -1026,7 +1026,8 @@ select:focus {
   align-items: center;
   gap: 0.9rem;
   width: 100%;
-  min-height: 3.75rem;
+  min-height: 0.75rem;
+  max-height: 2.75rem;
   border: 1px solid transparent;
   border-radius: 0.75rem;
   background: transparent;
