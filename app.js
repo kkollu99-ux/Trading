@@ -259,8 +259,31 @@ function renderAccountSummary() {
   }
   if (document.querySelector("#ticketBalanceValue")) renderTradeTicket();
 
+  renderAccountDetails(user, uid, balance, marginUsed, kyc);
   loadInvitedFriends();
   loadTransactionHistory();
+}
+
+// The profile window's Account Details page: who the account is and where it
+// stands. Identity documents live on the separate KYC Verification page.
+function renderAccountDetails(user, uid, balance, marginUsed, kyc) {
+  const card = document.querySelector("#accountDetailsCard");
+  if (!card) return;
+  const roleLabel = { admin: "Administrator", team: "Team", user: "Trader" }[user?.role] || user?.role || "—";
+  const status = user?.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : "Active";
+  const since = user?.createdAt ? new Date(user.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+  card.innerHTML = `
+    <dl>
+      <dt>Full Name</dt><dd>${user?.name ? escapeHtml(user.name) : "<em>Not set</em>"}</dd>
+      <dt>Email</dt><dd>${escapeHtml(user?.email || "—")}</dd>
+      <dt>Account ID</dt><dd>${escapeHtml(uid)}</dd>
+      <dt>Account Type</dt><dd>${escapeHtml(roleLabel)}</dd>
+      <dt>Account Status</dt><dd>${escapeHtml(status)}</dd>
+      <dt>Member Since</dt><dd>${escapeHtml(since)}</dd>
+      <dt>Balance</dt><dd>${formatCurrency(balance)}</dd>
+      <dt>Margin In Use</dt><dd>${formatCurrency(marginUsed)}</dd>
+      <dt>Identity Verification</dt><dd class="${kyc.className}">${escapeHtml(kyc.text)}</dd>
+    </dl>`;
 }
 
 async function loadInvitedFriends() {
@@ -921,6 +944,26 @@ function showProfileMenu() {
   document.querySelector(".profile-modal")?.classList.remove("is-pane-open");
 }
 
+// Desktop: the account window opens beside the Profile nav item (where the
+// drop-down was), not centred on the screen. profileModalAnchorRect is that
+// item's position when the option was chosen.
+let profileModalAnchorRect = null;
+
+function positionProfileModal() {
+  const modal = document.querySelector(".profile-modal");
+  if (!modal) return;
+  if (!isDesktopLayout() || !profileModalAnchorRect) {
+    modal.style.left = "";
+    modal.style.top = "";
+    return;
+  }
+  const margin = 8;
+  const left = Math.min(profileModalAnchorRect.right + 10, window.innerWidth - modal.offsetWidth - margin);
+  const top = Math.min(profileModalAnchorRect.top, window.innerHeight - modal.offsetHeight - margin);
+  modal.style.left = `${Math.max(margin, Math.round(left))}px`;
+  modal.style.top = `${Math.max(margin, Math.round(top))}px`;
+}
+
 function openProfilePane(pane) {
   switchProfilePane(pane);
   const label = document.querySelector(`#profileModalMenu [data-profile-pane="${pane}"] span:last-child`)?.textContent;
@@ -929,6 +972,7 @@ function openProfilePane(pane) {
   const modal = document.querySelector(".profile-modal");
   modal?.classList.add("is-pane-open");
   document.querySelector(".profile-modal-content")?.scrollTo(0, 0);
+  positionProfileModal();
 }
 
 function openProfileModal() {
@@ -936,19 +980,115 @@ function openProfileModal() {
   loadInvitedFriends();
   loadKycStatus();
   loadBankDetails();
-  switchProfilePane("kyc");
+  switchProfilePane("details");
   showProfileMenu();
   document.querySelector("#profileModal")?.classList.remove("is-hidden");
   document.body.classList.add("profile-modal-open");
 }
 
 function closeProfileModal() {
+  profileModalAnchorRect = null;
   document.querySelector("#profileModal")?.classList.add("is-hidden");
   document.body.classList.remove("profile-modal-open");
 }
 
 document.querySelector("#profileModalBack")?.addEventListener("click", showProfileMenu);
+
+// ---------- Desktop: Profile drop-down ----------
+// The same options as the account screen's list (cloned from #profileModalMenu
+// so they can't drift apart), in a menu beside the sidebar's Profile item.
+// Choosing one opens just that page in the account window, which has no side
+// menu on desktop (see the min-width: 1051px rules in styles.css).
+function isDesktopLayout() {
+  return window.matchMedia("(min-width: 1051px)").matches;
+}
+
+let profileDropdownAnchor = null;
+
+function closeProfileDropdown() {
+  const dropdown = document.querySelector("#profileDropdown");
+  if (!dropdown || dropdown.hidden) return;
+  dropdown.hidden = true;
+  profileDropdownAnchor?.classList.remove("is-menu-open");
+  profileDropdownAnchor?.setAttribute("aria-expanded", "false");
+  profileDropdownAnchor = null;
+}
+
+function openProfileDropdown(anchor) {
+  const dropdown = document.querySelector("#profileDropdown");
+  if (!dropdown) return;
+  renderAccountSummary();
+  const avatar = document.querySelector("#profileModalAvatar")?.textContent || "?";
+  const name = document.querySelector("#profileFullName")?.textContent?.trim() || "";
+  const kycBadge = document.querySelector("#profileKycBadge");
+  const items = [...document.querySelectorAll("#profileModalMenu button")].map((source) => {
+    const logout = source.id === "profileModalSignOut";
+    const pane = source.dataset.profilePane || "";
+    return `${logout ? '<hr class="profile-dropdown-divider" />' : ""}<button type="button" role="menuitem" class="profile-dropdown-item${logout ? " is-logout" : ""}" ${logout ? 'data-profile-logout="1"' : `data-profile-open="${escapeHtml(pane)}"`}>${source.innerHTML}</button>`;
+  });
+  dropdown.innerHTML = `
+    <div class="profile-dropdown-user">
+      <span class="profile-dropdown-avatar">${escapeHtml(avatar)}</span>
+      <div>
+        <strong>${escapeHtml(name)}</strong>
+        <small>${escapeHtml(document.querySelector("#profileEmail")?.textContent || "")}</small>
+      </div>
+      <span class="status-pill ${escapeHtml([...(kycBadge?.classList || [])].filter((c) => c.startsWith("is-")).join(" "))}">${escapeHtml(kycBadge?.textContent || "")}</span>
+    </div>
+    ${items.join("")}`;
+  dropdown.hidden = false;
+  // Beside the Profile item, kept inside the window.
+  const rect = anchor.getBoundingClientRect();
+  const height = dropdown.offsetHeight;
+  dropdown.style.left = `${Math.round(rect.right + 10)}px`;
+  dropdown.style.top = `${Math.round(Math.max(8, Math.min(rect.top, window.innerHeight - height - 8)))}px`;
+  profileDropdownAnchor = anchor;
+  anchor.classList.add("is-menu-open");
+  anchor.setAttribute("aria-haspopup", "menu");
+  anchor.setAttribute("aria-expanded", "true");
+  dropdown.querySelector("[role=menuitem]")?.focus();
+}
+
+function toggleProfileDropdown(anchor) {
+  if (document.querySelector("#profileDropdown")?.hidden === false) closeProfileDropdown();
+  else openProfileDropdown(anchor);
+}
+
+document.querySelector("#profileDropdown")?.addEventListener("click", (event) => {
+  const item = event.target.closest("[role=menuitem]");
+  if (!item) return;
+  profileModalAnchorRect = profileDropdownAnchor?.getBoundingClientRect() || null;
+  closeProfileDropdown();
+  if (item.dataset.profileLogout) {
+    document.querySelector("#profileModalSignOut")?.click();
+    return;
+  }
+  openProfileModal();
+  openProfilePane(item.dataset.profileOpen);
+});
+
+document.querySelector("#profileDropdown")?.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  event.preventDefault();
+  const items = [...document.querySelectorAll("#profileDropdown [role=menuitem]")];
+  const next = items.indexOf(document.activeElement) + (event.key === "ArrowDown" ? 1 : -1);
+  items[(next + items.length) % items.length]?.focus();
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#profileDropdown")) closeProfileDropdown();
+});
+window.addEventListener("resize", () => {
+  closeProfileDropdown();
+  if (!document.querySelector("#profileModal")?.classList.contains("is-hidden")) positionProfileModal();
+});
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.querySelector("#profileDropdown")?.hidden === false) {
+    const anchor = profileDropdownAnchor;
+    closeProfileDropdown();
+    anchor?.focus();
+    return;
+  }
   if (event.key !== "Escape" || document.querySelector("#profileModal")?.classList.contains("is-hidden")) return;
   const modal = document.querySelector(".profile-modal");
   if (modal?.classList.contains("is-pane-open") && window.matchMedia("(max-width: 680px)").matches) showProfileMenu();
@@ -970,6 +1110,11 @@ document.querySelector(".profile-modal-content")?.addEventListener("click", (eve
   if (gotoButton) {
     closeProfileModal();
     moveSection(gotoButton.dataset.profileGoto);
+    return;
+  }
+  const paneButton = event.target.closest("[data-profile-goto-pane]");
+  if (paneButton) {
+    openProfilePane(paneButton.dataset.profileGotoPane);
     return;
   }
   // Deposit/Withdraw buttons already have a generic [data-chat-topic] handler
@@ -1225,9 +1370,14 @@ document.querySelector("#registerForm").addEventListener("submit", async (event)
   }
 });
 
-navItems.forEach((item) => item.addEventListener("click", () => {
+navItems.forEach((item) => item.addEventListener("click", (event) => {
   if (item.dataset.section === "profile") {
-    openProfileModal();
+    // With the left sidebar (desktop) Profile is a drop-down menu; on
+    // tablets and phones it opens the account screen itself.
+    if (isDesktopLayout()) {
+      event.stopPropagation(); // else the outside-click handler closes it again
+      toggleProfileDropdown(item);
+    } else openProfileModal();
     return;
   }
   moveSection(item.dataset.section);

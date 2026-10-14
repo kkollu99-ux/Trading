@@ -6835,3 +6835,186 @@ input[type="checkbox"] {
     font-size: 0.62rem;
   }
 }
+
+/* ---------- Profile on desktop (sidebar layout, 1051px and wider) ----------
+   The Profile nav item opens a drop-down menu (see openProfileDropdown in
+   app.js), and the account window that its options open holds just the
+   chosen page - no side menu. Tablets and phones keep the account screen
+   with its own menu. */
+.profile-dropdown {
+  position: fixed;
+  z-index: 120;
+  width: 17rem;
+  max-height: calc(100vh - 1rem);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--panel);
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.45);
+  padding: 0.4rem;
+}
+
+.profile-dropdown[hidden] {
+  display: none;
+}
+
+.profile-dropdown-user {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.15rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 0.6rem 0.8rem;
+}
+
+.profile-dropdown-avatar {
+  display: grid;
+  grid-row: span 2;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  background: var(--blue);
+  color: #fff;
+  font-weight: 900;
+}
+
+.profile-dropdown-user strong,
+.profile-dropdown-user small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-dropdown-user strong {
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.profile-dropdown-user small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.profile-dropdown-user .status-pill {
+  grid-column: 2;
+  justify-self: start;
+}
+
+.profile-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text);
+  padding: 0.55rem 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-dropdown-item > span:first-child {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 0.4rem;
+  background: var(--panel-2);
+  font-size: 0.85rem;
+}
+
+.profile-dropdown-item:hover,
+.profile-dropdown-item:focus-visible {
+  background: rgba(0, 115, 255, 0.16);
+  color: var(--blue);
+  outline: 0;
+}
+
+.profile-dropdown-item.is-logout {
+  color: var(--red);
+}
+
+.profile-dropdown-item.is-logout:hover,
+.profile-dropdown-item.is-logout:focus-visible {
+  background: rgba(232, 61, 48, 0.14);
+  color: var(--red);
+}
+
+.profile-dropdown-divider {
+  margin: 0.3rem 0.4rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.nav-item.is-menu-open {
+  border-color: rgba(0, 115, 255, 0.75);
+  background: rgba(0, 115, 255, 0.18);
+  color: var(--blue);
+}
+
+@media (min-width: 1051px) {
+  /* The window opens beside the Profile nav item (positioned by
+     positionProfileModal in app.js), so there's no dimmed full-screen
+     backdrop - it only catches clicks outside the window to close it. */
+  #profileModal {
+    display: block;
+    background: transparent;
+    padding: 0;
+  }
+
+  #profileModal.is-hidden {
+    display: none;
+  }
+
+  #profileModal .profile-modal {
+    position: absolute;
+    top: 4rem;
+    left: 15rem;
+    flex-direction: column;
+    width: min(32rem, calc(100vw - 16rem));
+    height: auto;
+    min-height: 14rem;
+    max-height: calc(100vh - 1rem);
+  }
+
+  #profileModal .profile-modal-side {
+    display: none;
+  }
+
+  #profileModal .profile-modal-content {
+    padding-top: 1.5rem;
+  }
+
+  /* Title bar over the page: its name and the close button. */
+  #profileModal .profile-mobile-bar {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    min-height: 3.5rem;
+    margin: -1.5rem -1.6rem 1.2rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    padding: 0 3.4rem 0 1.6rem;
+  }
+
+  #profileModal .profile-mobile-bar strong {
+    color: var(--text);
+    font-size: 1.05rem;
+  }
+
+  #profileModal #profileModalBack,
+  #profileModal .profile-pane h3 {
+    display: none;
+  }
+
+  #profileModal .profile-pane {
+    padding-top: 0.5rem;
+  }
+}
