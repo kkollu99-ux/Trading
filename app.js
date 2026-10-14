@@ -1,6 +1,7 @@
 const homeView = document.querySelector("#homeView");
 const loginView = document.querySelector("#loginView");
 const registerView = document.querySelector("#registerView");
+const forgotView = document.querySelector("#forgotView");
 const appView = document.querySelector("#appView");
 const sectionTitle = document.querySelector("#sectionTitle");
 const navItems = [...document.querySelectorAll(".nav-item")];
@@ -190,6 +191,9 @@ function renderDashboardGreeting() {
 
 function renderAccountSummary() {
   const user = currentSession?.user;
+  // Demo accounts hide everything money- and identity-related (see the
+  // body.is-demo rules in styles.css).
+  document.body.classList.toggle("is-demo", Boolean(user?.isDemo));
   const balance = Number(user?.balance || 0);
   const uid = user?.referralCode || user?.id || "—";
   const name = currentDisplayName();
@@ -251,6 +255,11 @@ function renderAccountSummary() {
     kycBadgeValue.classList.toggle("is-rejected", user?.kycStatus === "rejected");
   }
 
+  if (user?.isDemo && kycBadgeValue) {
+    kycBadgeValue.textContent = "Demo";
+    kycBadgeValue.classList.remove("is-pending", "is-rejected");
+  }
+
   const avatarInitial = document.querySelector("#profileModalAvatar");
   if (avatarInitial) avatarInitial.textContent = name.charAt(0).toUpperCase() || "?";
 
@@ -267,20 +276,25 @@ function renderAccountSummary() {
 // The profile window's Account Details page: who the account is and where it
 // stands. Identity documents live on the separate KYC Verification page.
 function renderAccountDetails(user, uid, balance, marginUsed, kyc) {
+  kyc = { ...kyc };
   const card = document.querySelector("#accountDetailsCard");
   if (!card) return;
-  const roleLabel = { admin: "Administrator", team: "Team", user: "Trader" }[user?.role] || user?.role || "—";
+  let roleLabel = { admin: "Administrator", team: "Team", user: "Trader" }[user?.role] || user?.role || "—";
   const status = user?.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : "Active";
   const since = user?.createdAt ? new Date(user.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+  if (user?.isDemo) {
+    kyc = { text: "Demo", className: "" };
+    roleLabel = "Demo (virtual funds)";
+  }
   const row = (label, value, className = "") => `<div class="account-detail-row"><dt>${label}</dt><dd class="${className}">${value}</dd></div>`;
   card.innerHTML = `
     <div class="account-detail-hero">
       <span class="account-detail-avatar">${escapeHtml((user?.name || user?.email || "?").charAt(0).toUpperCase())}</span>
       <div>
         <strong>${user?.name ? escapeHtml(user.name) : "<em>Name not set</em>"}</strong>
-        <small>${escapeHtml(user?.email || "—")}</small>
+        <small>${escapeHtml(user?.isDemo ? "Practice account" : user?.email || "—")}</small>
       </div>
-      <span class="status-pill ${user?.kycStatus === "verified" ? "" : user?.kycStatus === "rejected" ? "is-rejected" : "is-pending"}">${escapeHtml(kyc.text)}</span>
+      <span class="status-pill ${user?.isDemo || user?.kycStatus === "verified" ? "" : user?.kycStatus === "rejected" ? "is-rejected" : "is-pending"}">${escapeHtml(kyc.text)}</span>
     </div>
     <dl class="account-detail-list">
       ${row("Account ID", escapeHtml(uid))}
@@ -697,6 +711,7 @@ function showAuthView(view) {
   appView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
+  forgotView.classList.add("is-hidden");
   view.classList.remove("is-hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -705,6 +720,7 @@ function showHomeView() {
   appView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
+  forgotView.classList.add("is-hidden");
   homeView.classList.remove("is-hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -716,6 +732,7 @@ function enterWorkspace(session = null) {
   homeView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
+  forgotView.classList.add("is-hidden");
   appView.classList.remove("is-hidden");
   updateRoleAccess();
   drawCharts();
@@ -735,6 +752,8 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
   const data = Object.fromEntries(new FormData(event.target).entries());
   const error = document.querySelector("#loginError");
   if (error) error.textContent = "";
+  const notice = document.querySelector("#loginNotice");
+  if (notice) notice.textContent = "";
   try {
     const response = await fetch(`${apiBase}/api/auth/login`, {
       method: "POST",
@@ -758,8 +777,42 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
   }
 });
 
-document.querySelector("#demoAccountButton")?.addEventListener("click", () => {
-  enterWorkspace({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital", balance: 10000 } });
+// "Try Demo": a real practice account on the server (pre-funded with 10,000
+// virtual USD, no deposit/withdraw/KYC), so orders work like any client's.
+let demoStarting = false;
+async function startDemoAccount(button) {
+  if (demoStarting) return;
+  demoStarting = true;
+  const label = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Setting up your demo…";
+  }
+  const error = document.querySelector("#loginError");
+  try {
+    const response = await fetch(`${apiBase}/api/auth/demo`, { method: "POST" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Could not start a demo account right now.");
+    enterWorkspace(result);
+  } catch (demoError) {
+    showAuthView(loginView);
+    if (error) error.textContent = demoError.message;
+  } finally {
+    demoStarting = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
+}
+
+document.querySelectorAll("#demoAccountButton, #heroDemo, #ctaDemo").forEach((button) => {
+  button.addEventListener("click", () => startDemoAccount(button));
+});
+
+document.querySelector("#demoCreateAccount")?.addEventListener("click", () => {
+  clearSession();
+  showAuthView(registerView);
 });
 
 document.querySelector("#signOut").addEventListener("click", () => {
@@ -1147,10 +1200,6 @@ document.querySelectorAll("#homeOpenAccount, #heroStart, #trustOpen, #ctaCreate,
   button.addEventListener("click", () => showAuthView(registerView));
 });
 
-document.querySelectorAll("#heroDemo, #ctaDemo").forEach((button) => {
-  button.addEventListener("click", () => enterWorkspace());
-});
-
 document.querySelectorAll(".ghost-icon").forEach((button) => {
   button.addEventListener("click", () => {
     const input = button.closest(".password-line")?.querySelector("input");
@@ -1159,6 +1208,110 @@ document.querySelectorAll(".ghost-icon").forEach((button) => {
     button.setAttribute("aria-label", input.type === "password" ? "Show password" : "Hide password");
   });
 });
+
+// ---------- Forgot password ----------
+// Email -> 6-digit code -> new password, all on one screen.
+(function setupForgotPassword() {
+  const form = document.querySelector("#forgotForm");
+  if (!form) return;
+  const emailInput = form.querySelector('input[name="email"]');
+  const otpInput = form.querySelector("#forgotOtpInput");
+  const sendButton = form.querySelector("#forgotSendButton");
+  const statusEl = form.querySelector("#forgotStatus");
+  const errorEl = form.querySelector("#forgotError");
+  let cooldownTimer = null;
+
+  function setStatus(message, kind) {
+    statusEl.textContent = message || "";
+    statusEl.classList.toggle("is-error", kind === "error");
+    statusEl.classList.toggle("is-success", kind === "success");
+  }
+
+  function startCooldown(seconds = 60) {
+    window.clearInterval(cooldownTimer);
+    sendButton.disabled = true;
+    sendButton.textContent = `Resend (${seconds}s)`;
+    cooldownTimer = window.setInterval(() => {
+      seconds -= 1;
+      if (seconds <= 0) {
+        window.clearInterval(cooldownTimer);
+        sendButton.textContent = "Send";
+        sendButton.disabled = false;
+      } else sendButton.textContent = `Resend (${seconds}s)`;
+    }, 1000);
+  }
+
+  document.querySelector("#openForgot")?.addEventListener("click", () => {
+    const typed = document.querySelector('#loginForm input[name="email"]')?.value.trim();
+    form.reset();
+    window.clearInterval(cooldownTimer);
+    sendButton.textContent = "Send";
+    sendButton.disabled = false;
+    setStatus("");
+    errorEl.textContent = "";
+    if (typed) emailInput.value = typed;
+    showAuthView(forgotView);
+  });
+
+  document.querySelector("#forgotBackToLogin")?.addEventListener("click", () => showAuthView(loginView));
+
+  sendButton.addEventListener("click", async () => {
+    const email = emailInput.value.trim();
+    if (!email) return setStatus("Enter your email address first.", "error");
+    sendButton.disabled = true;
+    setStatus("Sending code…");
+    try {
+      const response = await fetch(`${apiBase}/api/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Could not send a reset code");
+      // The same message whether or not the address has an account.
+      setStatus(result.devOtp ? `Dev mode — code: ${result.devOtp}` : "If that email has an account, a code is on its way. It expires in 10 minutes.", "success");
+      otpInput.focus();
+      startCooldown();
+    } catch (error) {
+      setStatus(error.message, "error");
+      sendButton.disabled = false;
+    }
+  });
+
+  otpInput.addEventListener("input", () => {
+    otpInput.value = otpInput.value.replace(/\D/g, "").slice(0, 6);
+  });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    errorEl.textContent = "";
+    const data = new FormData(form);
+    const password = String(data.get("password") || "");
+    if (password !== data.get("confirmPassword")) {
+      errorEl.textContent = "Passwords do not match. Please re-enter them.";
+      return;
+    }
+    try {
+      const response = await fetch(`${apiBase}/api/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: String(data.get("email") || "").trim(), otp: String(data.get("otp") || "").trim(), password }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Could not reset the password");
+      const loginEmail = document.querySelector('#loginForm input[name="email"]');
+      if (loginEmail) loginEmail.value = String(data.get("email") || "").trim();
+      const loginPassword = document.querySelector('#loginForm input[name="password"]');
+      if (loginPassword) loginPassword.value = "";
+      const notice = document.querySelector("#loginNotice");
+      if (notice) notice.textContent = "Password updated — sign in with your new password.";
+      form.reset();
+      showAuthView(loginView);
+    } catch (error) {
+      errorEl.textContent = error.message;
+    }
+  });
+})();
 
 // Email OTP verification, gating the Register button until the code the
 // user typed is confirmed against the one just emailed to them.
@@ -1212,7 +1365,7 @@ document.querySelectorAll(".ghost-icon").forEach((button) => {
       if (!response.ok) throw new Error(result.error || "Could not send verification code");
       setStatus(result.devOtp ? `Dev mode — OTP: ${result.devOtp}` : "Code sent — check your email.", "success");
       otpInput.focus();
-      let seconds = 30;
+      let seconds = 60;
       sendButton.textContent = `Resend (${seconds}s)`;
       cooldownTimer = window.setInterval(() => {
         seconds -= 1;

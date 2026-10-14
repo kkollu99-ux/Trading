@@ -229,7 +229,8 @@
               <button class="ghost-icon" type="button" aria-label="Show password">◎</button>
             </span>
           </label>
-          <button class="forgot-link" type="button">Forgot Password?</button>
+          <button id="openForgot" class="forgot-link" type="button">Forgot Password?</button>
+          <p id="loginNotice" class="otp-status is-success" aria-live="polite"></p>
           <p id="loginError" class="form-error" aria-live="polite"></p>
           <button class="primary-action" type="submit">Sign In</button>
           <div class="account-row">
@@ -240,6 +241,65 @@
           <button id="demoAccountButton" class="demo-action" type="button">Try Demo Account — $10,000 Free</button>
           <p class="demo-note">No registration required. Virtual funds only — practice risk-free.</p>
           <button id="loginBackHome" class="back-link" type="button">← Back to Home</button>
+        </form>
+      </section>
+    </main>
+
+    <main id="forgotView" class="login-shell is-hidden">
+      <section class="brand-panel" aria-label="FXCC Capitals">
+        <div class="brand-mark">
+          <span>FXCC</span>
+          <small>A Broker On Your Side</small>
+        </div>
+        <div class="welcome-copy">
+          <h1>Forgot your <strong>password?</strong></h1>
+          <p>
+            Enter the email on your account and we'll send you a one-time code
+            to choose a new password.
+          </p>
+        </div>
+        <p class="copyright">© 2026 FXCC CAPITALS. A Broker On Your Side.</p>
+      </section>
+
+      <section class="signin-panel" aria-label="Reset password form">
+        <form id="forgotForm" class="signin-card">
+          <div class="auth-form-logo brand-mark">
+            <span>FXCC</span>
+            <small>A Broker On Your Side</small>
+          </div>
+          <div>
+            <h2>Reset Password</h2>
+            <p>We'll email you a 6-digit code</p>
+          </div>
+          <label>
+            Email Address
+            <input name="email" type="email" placeholder="you@example.com" autocomplete="email" required />
+          </label>
+          <label>
+            Email Code
+            <span class="password-line">
+              <input id="forgotOtpInput" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Enter 6-digit code" required />
+              <button id="forgotSendButton" class="otp-send-button" type="button">Send</button>
+            </span>
+          </label>
+          <p id="forgotStatus" class="otp-status" aria-live="polite"></p>
+          <label>
+            New Password
+            <span class="password-line">
+              <input name="password" type="password" placeholder="Minimum 6 characters" minlength="6" autocomplete="new-password" required />
+              <button class="ghost-icon" type="button" aria-label="Show password">◎</button>
+            </span>
+          </label>
+          <label>
+            Confirm New Password
+            <span class="password-line">
+              <input name="confirmPassword" type="password" placeholder="Re-enter your new password" minlength="6" autocomplete="new-password" required />
+              <button class="ghost-icon" type="button" aria-label="Show password">◎</button>
+            </span>
+          </label>
+          <p id="forgotError" class="form-error" aria-live="polite"></p>
+          <button class="primary-action" type="submit">Reset Password</button>
+          <button id="forgotBackToLogin" class="back-link" type="button">← Back to Sign In</button>
         </form>
       </section>
     </main>
@@ -340,6 +400,7 @@
           </div>
         </div>
         <div class="topbar-actions client-actions">
+          <span class="demo-badge" title="Practice account - virtual money only">DEMO</span>
           <input id="globalSearch" class="visually-hidden" type="search" aria-label="Search" />
           <select id="displayCurrencySelect" class="currency-select" aria-label="Display currency">
             <option value="USD">USD</option>
@@ -408,6 +469,11 @@
               <button class="client-avatar" id="dashboardAvatar" type="button" aria-label="Client profile">G</button>
             </div>
 
+            <div class="demo-banner" role="note">
+              <span><strong>Demo account</strong> — you're trading with virtual USD. No deposits, withdrawals or verification needed.</span>
+              <button id="demoCreateAccount" type="button">Open a real account</button>
+            </div>
+
             <article class="balance-panel">
               <span class="balance-label">▣ Account Balance</span>
               <strong id="dashboardBalance">$0.00</strong>
@@ -422,7 +488,7 @@
               </div>
             </article>
 
-            <section class="dashboard-block">
+            <section class="dashboard-block quick-access-block">
               <h3 class="block-title">⌁ Quick Access</h3>
               <div class="quick-grid">
                 <button class="quick-card deposit" type="button" data-chat-topic="deposit"><span>↓</span><strong>Deposit</strong><small>Add funds</small></button>

@@ -146,6 +146,7 @@ function normalizeUser(row) {
     referralCode: row.referral_code || row.referralCode,
     referredBy: row.referred_by || row.referredBy,
     kycStatus: row.kyc_status || row.kycStatus,
+    isDemo: Boolean(row.is_demo ?? row.isDemo),
     balance: Number(row.balance || 0),
     marginUsed: Number(row.margin_used ?? row.marginUsed ?? 0),
     preferences: row.preferences || {},
@@ -190,15 +191,15 @@ async function findUserById(id) {
   return memory.users.find((user) => user.id === id) || null;
 }
 
-async function createUser({ email, password, name, role = "user", referredBy = null, kycStatus = "pending", balance = 0, status = "active" }) {
+async function createUser({ email, password, name, role = "user", referredBy = null, kycStatus = "pending", balance = 0, status = "active", isDemo = false }) {
   const passwordHash = await bcrypt.hash(password, 12);
   const referralCode = crypto.randomBytes(4).toString("hex").toUpperCase();
   if (pool) {
     const rows = await query(
-      `INSERT INTO users (email, password_hash, name, role, status, referral_code, referred_by, kyc_status, balance)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO users (email, password_hash, name, role, status, referral_code, referred_by, kyc_status, balance, is_demo)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [email, passwordHash, name, role, status, referralCode, referredBy, kycStatus, balance],
+      [email, passwordHash, name, role, status, referralCode, referredBy, kycStatus, balance, isDemo],
     );
     return normalizeUser(rows[0]);
   }
@@ -213,6 +214,7 @@ async function createUser({ email, password, name, role = "user", referredBy = n
     referralCode,
     referredBy,
     kycStatus,
+    isDemo,
     balance,
     marginUsed: 0,
     preferences: {},
@@ -825,6 +827,8 @@ async function seedDefaults() {
     await query(fs.readFileSync(schemaPath, "utf8"));
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0`);
+    // Practice accounts started from "Try Demo" - see POST /api/auth/demo.
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
     // Per-account UI preferences (display currency, sidebar collapsed state,
     // etc.) - a single JSONB blob rather than one column per setting, so a
     // new preference never needs its own migration. Previously only
@@ -882,8 +886,46 @@ app.get("/api/health", (_request, response) => {
 // pending one on a redeploy just means the user asks for a fresh one, same
 // as it expiring naturally.
 const otpStore = new Map(); // email -> { code, expiresAt, attempts, verified }
+const resetStore = new Map(); // email -> { code, expiresAt, attempts } for password resets
 const otpExpiryMs = 10 * 60 * 1000;
 const otpMaxAttempts = 5;
+
+// A deployed server (Railway sets RAILWAY_ENVIRONMENT) must never hand a
+// verification code back to the browser: whoever received it could "verify"
+// any address, or take over an account through the password-reset flow.
+// Without a mail provider it refuses instead; only local development, with
+// nothing configured, still returns the code so the flow can be tried.
+const isProduction = process.env.NODE_ENV === "production" || Boolean(process.env.RAILWAY_ENVIRONMENT);
+if (isProduction) app.set("trust proxy", 1); // one proxy hop, so request.ip is the visitor, not the proxy
+
+// Fixed-window counters kept in memory, used to stop the code, reset and demo
+// forms being turned on someone's inbox or the database.
+const rateBuckets = new Map(); // key -> { count, resetAt }
+function rateLimited(key, max, windowMs) {
+  const now = Date.now();
+  const entry = rateBuckets.get(key);
+  if (!entry || now > entry.resetAt) {
+    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > max;
+}
+function clientIp(request) {
+  return request.ip || request.socket?.remoteAddress || "unknown";
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateBuckets) if (now > entry.resetAt) rateBuckets.delete(key);
+  for (const store of [otpStore, resetStore]) for (const [key, entry] of store) if (now > entry.expiresAt + otpExpiryMs) store.delete(key);
+}, 10 * 60 * 1000).unref();
+
+const generateOtp = () => String(crypto.randomInt(100000, 1000000));
+function otpMatches(input, expected) {
+  const a = Buffer.from(String(input));
+  const b = Buffer.from(String(expected));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 // Railway (and most PaaS free/hobby tiers) block outbound SMTP entirely to
 // prevent spam abuse - see https://docs.railway.com/networking/outbound-networking.
@@ -896,6 +938,7 @@ const resendApiKey = process.env.RESEND_API_KEY || "";
 const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || "";
 
 const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
 const mailTransport = smtpConfigured
   ? nodemailer.createTransport({
       host: process.env.SMTP_HOST,
@@ -926,9 +969,19 @@ async function sendEmailViaResend({ to, subject, text, html }) {
 // Gmail's own clipping/sanitizing especially) don't reliably support
 // external/embedded <style> blocks, flexbox, grid, or CSS variables, so this
 // deliberately doesn't reuse the app's own stylesheet or brand-mark markup.
-function otpEmailTemplate(code) {
-  const subject = "Your FXCC Capitals verification code";
-  const text = `Your FXCC Capitals verification code is ${code}. It expires in 10 minutes. If you didn't request this, you can safely ignore this email.`;
+function otpEmailTemplate(code, purpose = "register") {
+  const reset = purpose === "reset";
+  const subject = reset ? "Reset your FXCC Capitals password" : "Your FXCC Capitals verification code";
+  const heading = reset ? "Reset your password" : "Verify your email address";
+  const intro = reset
+    ? "Enter this code to choose a new password for your FXCC Capitals account. It expires in 10 minutes."
+    : "Enter this code to finish creating your FXCC Capitals account. It expires in 10 minutes.";
+  const footerNote = reset
+    ? "If you didn't ask to reset your password, you can safely ignore this email — your password will not change."
+    : "If you didn't request this code, you can safely ignore this email — no account will be created without it.";
+  const text = reset
+    ? `Your FXCC Capitals password reset code is ${code}. It expires in 10 minutes. If you didn't ask for this, ignore this email - your password will not change.`
+    : `Your FXCC Capitals verification code is ${code}. It expires in 10 minutes. If you didn't request this, you can safely ignore this email.`;
   const html = `<!doctype html>
 <html>
   <body style="margin:0; padding:0; background:#05080f; font-family:Arial, Helvetica, sans-serif;">
@@ -944,12 +997,12 @@ function otpEmailTemplate(code) {
             </tr>
             <tr>
               <td style="padding:28px 32px 8px; color:#e4e9f1; font-size:16px; font-weight:700;">
-                Verify your email address
+                ${heading}
               </td>
             </tr>
             <tr>
               <td style="padding:0 32px 24px; color:#a7b0c0; font-size:14px; line-height:1.6;">
-                Enter this code to finish creating your FXCC Capitals account. It expires in 10 minutes.
+                ${intro}
               </td>
             </tr>
             <tr>
@@ -961,7 +1014,7 @@ function otpEmailTemplate(code) {
             </tr>
             <tr>
               <td style="padding:0 32px 28px; color:#7b879d; font-size:12px; line-height:1.6; border-top:1px solid #1c2434; padding-top:20px;">
-                If you didn't request this code, you can safely ignore this email — no account will be created without it.
+                ${footerNote}
               </td>
             </tr>
             <tr>
@@ -978,8 +1031,12 @@ function otpEmailTemplate(code) {
   return { subject, text, html };
 }
 
-async function sendOtpEmail(email, code) {
-  const { subject, text, html } = otpEmailTemplate(code);
+const emailDeliveryAvailable = () => Boolean(resendApiKey || mailTransport) || !isProduction;
+const emailUnavailable = (response) =>
+  response.status(503).json({ error: "Email isn't set up on this server yet, so codes can't be sent. Please contact support." });
+
+async function sendOtpEmail(email, code, purpose = "register") {
+  const { subject, text, html } = otpEmailTemplate(code, purpose);
   if (resendApiKey) {
     await sendEmailViaResend({ to: email, subject, text, html });
     return {};
@@ -988,20 +1045,29 @@ async function sendOtpEmail(email, code) {
     await mailTransport.sendMail({ from: emailFrom, to: email, subject, text, html });
     return {};
   }
-  console.log(`[dev] OTP for ${email}: ${code}`);
+  if (isProduction) throw new Error("No email provider is configured");
+  console.log(`[dev] ${purpose} code for ${email}: ${code}`);
   return { devOtp: code };
+}
+
+// One code per address per minute, and a ceiling per visitor, per purpose.
+function otpRateLimited(request, email, purpose) {
+  if (rateLimited(`otp:${purpose}:${email}`, 1, 60 * 1000)) return true;
+  return rateLimited(`otp-ip:${clientIp(request)}`, 12, 60 * 60 * 1000);
 }
 
 app.post("/api/auth/send-otp", async (request, response) => {
   const email = String(request.body.email || "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return response.status(400).json({ error: "Enter a valid email address" });
+  if (!emailDeliveryAvailable()) return emailUnavailable(response);
+  if (otpRateLimited(request, email, "register")) return response.status(429).json({ error: "Please wait a minute before asking for another code." });
   if (await findUserByEmail(email)) return response.status(409).json({ error: "Email already registered" });
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const code = generateOtp();
   otpStore.set(email, { code, expiresAt: Date.now() + otpExpiryMs, attempts: 0, verified: false });
 
   try {
-    const extra = await sendOtpEmail(email, code);
+    const extra = await sendOtpEmail(email, code, "register");
     response.json({ sent: true, ...extra });
   } catch (error) {
     otpStore.delete(email);
@@ -1024,14 +1090,66 @@ app.post("/api/auth/verify-otp", (request, response) => {
     return response.status(429).json({ error: "Too many attempts — request a new code" });
   }
   entry.attempts += 1;
-  if (code !== entry.code) return response.status(400).json({ error: "Incorrect code" });
+  if (!otpMatches(code, entry.code)) return response.status(400).json({ error: "Incorrect code" });
   entry.verified = true;
   response.json({ verified: true });
+});
+
+// Forgot password: a code is emailed, then exchanged (with a new password) for
+// a reset. The reply to the first step is the same whether or not the address
+// has an account, so the form can't be used to find out who is registered.
+app.post("/api/auth/forgot-password", async (request, response) => {
+  const email = String(request.body.email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return response.status(400).json({ error: "Enter a valid email address" });
+  if (!emailDeliveryAvailable()) return emailUnavailable(response);
+  if (otpRateLimited(request, email, "reset")) return response.status(429).json({ error: "Please wait a minute before asking for another code." });
+
+  const user = await findUserByEmail(email);
+  if (!user || user.isDemo || user.status === "suspended") return response.json({ sent: true });
+  const code = generateOtp();
+  resetStore.set(email, { code, expiresAt: Date.now() + otpExpiryMs, attempts: 0 });
+  try {
+    const extra = await sendOtpEmail(email, code, "reset");
+    response.json({ sent: true, ...extra });
+  } catch (error) {
+    resetStore.delete(email);
+    console.warn("Failed to send password reset email:", error.message);
+    response.json({ sent: true });
+  }
+});
+
+app.post("/api/auth/reset-password", async (request, response) => {
+  const email = String(request.body.email || "").trim().toLowerCase();
+  const code = String(request.body.otp || "").trim();
+  const password = String(request.body.password || "");
+  if (rateLimited(`reset-ip:${clientIp(request)}`, 30, 60 * 60 * 1000)) return response.status(429).json({ error: "Too many attempts - try again later." });
+  if (password.length < 6) return response.status(400).json({ error: "New password must be at least 6 characters" });
+  const entry = resetStore.get(email);
+  if (!entry) return response.status(400).json({ error: "Request a reset code first" });
+  if (Date.now() > entry.expiresAt) {
+    resetStore.delete(email);
+    return response.status(400).json({ error: "Code expired — request a new one" });
+  }
+  if (entry.attempts >= otpMaxAttempts) {
+    resetStore.delete(email);
+    return response.status(429).json({ error: "Too many attempts — request a new code" });
+  }
+  entry.attempts += 1;
+  if (!otpMatches(code, entry.code)) return response.status(400).json({ error: "Incorrect code" });
+  const user = await findUserByEmail(email);
+  if (!user) {
+    resetStore.delete(email);
+    return response.status(400).json({ error: "Request a reset code first" });
+  }
+  await setUserPassword(user.id, await bcrypt.hash(password, 12));
+  resetStore.delete(email);
+  response.json({ ok: true });
 });
 
 app.post("/api/auth/register", async (request, response) => {
   const { email, password, name, referralCode } = request.body;
   if (!email || !password) return response.status(400).json({ error: "Email and password are required" });
+  if (String(password).length < 6) return response.status(400).json({ error: "Password must be at least 6 characters" });
   if (await findUserByEmail(email)) return response.status(409).json({ error: "Email already registered" });
   const otpEntry = otpStore.get(String(email).trim().toLowerCase());
   if (!otpEntry?.verified) return response.status(400).json({ error: "Please verify your email before registering" });
@@ -1039,6 +1157,58 @@ app.post("/api/auth/register", async (request, response) => {
   otpStore.delete(String(email).trim().toLowerCase());
   response.status(201).json({ token: signToken(user), user: publicUser(user) });
 });
+
+// "Try Demo": a real, server-side practice account - a normal trading login
+// pre-funded with virtual USD, with no deposit, withdrawal, KYC or bank steps
+// (those routes refuse demo accounts, see rejectDemo). Accounts are created on
+// demand, never listed with clients, and cleared after a couple of weeks.
+const demoStartingBalance = 10000;
+const demoRetentionDays = 14;
+
+function rejectDemo(request, response, what) {
+  if (!request.user?.isDemo) return false;
+  response.status(403).json({ error: `Demo accounts can't ${what}.` });
+  return true;
+}
+
+app.post("/api/auth/demo", async (request, response) => {
+  if (rateLimited(`demo-ip:${clientIp(request)}`, 10, 60 * 60 * 1000)) {
+    return response.status(429).json({ error: "Too many demo accounts were started from this network. Try again in a while." });
+  }
+  const user = await createUser({
+    email: `demo-${crypto.randomBytes(5).toString("hex")}@demo.invalid`,
+    password: crypto.randomBytes(24).toString("hex"), // never used: a demo login is its token
+    name: "Demo Trader",
+    kycStatus: "verified",
+    balance: demoStartingBalance,
+    isDemo: true,
+  });
+  await insertLedgerEntry({ userId: user.id, type: "deposit", amount: demoStartingBalance, balanceBefore: 0, balanceAfter: demoStartingBalance });
+  response.status(201).json({ token: signToken(user), user: publicUser(user) });
+});
+
+async function removeExpiredDemoAccounts() {
+  if (!pool) {
+    const cutoff = Date.now() - demoRetentionDays * 86400000;
+    memory.users = memory.users.filter((user) => !(user.isDemo && Date.parse(user.createdAt) < cutoff));
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const old = `(SELECT id FROM users WHERE is_demo AND created_at < NOW() - make_interval(days => ${demoRetentionDays}))`;
+    for (const [table, column] of [["audit_logs", "actor_id"], ["ledger", "user_id"], ["orders", "user_id"], ["chat_messages", "sender_id"], ["service_requests", "user_id"], ["kyc_submissions", "user_id"], ["bank_accounts", "user_id"]]) {
+      await client.query(`DELETE FROM ${table} WHERE ${column} IN ${old}`);
+    }
+    await client.query(`DELETE FROM users WHERE id IN ${old}`);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.warn("Clearing old demo accounts failed:", error.message);
+  } finally {
+    client.release();
+  }
+}
 
 app.post("/api/auth/login", async (request, response) => {
   const { email, password } = request.body;
@@ -1068,7 +1238,8 @@ app.patch("/api/me/preferences", requireAuth, attachUser, async (request, respon
 });
 
 app.get("/api/admin/users", requireAuth, attachUser, requireRole("admin"), async (_request, response) => {
-  const users = await listUsers();
+  // Demo accounts are disposable practice logins, not clients.
+  const users = (await listUsers()).filter((user) => !user.isDemo);
   response.json({ users: users.map(publicUser) });
 });
 
@@ -1179,6 +1350,7 @@ app.get("/api/admin/users/:id/ledger", requireAuth, attachUser, requireRole("adm
 const kycDocumentTypes = ["passport", "id_card", "drivers_license"];
 
 app.post("/api/kyc/submit", requireAuth, attachUser, upload.single("document"), async (request, response) => {
+  if (rejectDemo(request, response, "submit identity documents")) return;
   const documentType = String(request.body.documentType || "").toLowerCase();
   const fullName = String(request.body.fullName || "").trim();
   const documentNumber = String(request.body.documentNumber || "").trim();
@@ -1206,6 +1378,7 @@ app.get("/api/admin/users/:id/kyc", requireAuth, attachUser, requireRole("admin"
 });
 
 app.post("/api/bank-details", requireAuth, attachUser, async (request, response) => {
+  if (rejectDemo(request, response, "link a bank account")) return;
   const bankName = String(request.body.bankName || "").trim();
   const accountHolder = String(request.body.accountHolder || "").trim();
   const accountNumber = String(request.body.accountNumber || "").trim();
@@ -1237,20 +1410,24 @@ app.get("/api/admin/users/:id/orders", requireAuth, attachUser, requireRole("adm
   response.json({ orders: enriched });
 });
 
+async function setUserPassword(userId, passwordHash) {
+  if (pool) {
+    await query("UPDATE users SET password_hash = $2 WHERE id = $1", [userId, passwordHash]);
+    return;
+  }
+  const user = memory.users.find((item) => item.id === userId);
+  if (user) user.passwordHash = passwordHash;
+}
+
 app.post("/api/auth/change-password", requireAuth, attachUser, async (request, response) => {
+  if (rejectDemo(request, response, "change a password")) return;
   const currentPassword = String(request.body.currentPassword || "");
   const newPassword = String(request.body.newPassword || "");
   if (newPassword.length < 6) return response.status(400).json({ error: "New password must be at least 6 characters" });
   if (!(await bcrypt.compare(currentPassword, request.user.passwordHash))) {
     return response.status(401).json({ error: "Current password is incorrect" });
   }
-  const passwordHash = await bcrypt.hash(newPassword, 12);
-  if (pool) {
-    await query("UPDATE users SET password_hash = $2 WHERE id = $1", [request.user.id, passwordHash]);
-  } else {
-    const user = memory.users.find((item) => item.id === request.user.id);
-    if (user) user.passwordHash = passwordHash;
-  }
+  await setUserPassword(request.user.id, await bcrypt.hash(newPassword, 12));
   response.json({ ok: true });
 });
 
@@ -3083,6 +3260,7 @@ app.get("/api/markets/series", async (request, response) => {
 app.post("/api/service-requests", requireAuth, attachUser, upload.single("attachment"), async (request, response) => {
   const { type, amount, note } = request.body;
   if (!["deposit", "withdrawal", "kyc", "support"].includes(type)) return response.status(400).json({ error: "Invalid request type" });
+  if (type !== "support" && rejectDemo(request, response, "make deposits, withdrawals or verification requests")) return;
   const attachmentUrl = request.file ? `/uploads/${request.file.filename}` : null;
   const serviceRequest = await createServiceRequest({ userId: request.user.id, type, amount, note, attachmentUrl });
   response.status(201).json({ serviceRequest });
@@ -3210,6 +3388,11 @@ seedDefaults()
     await restoreSimulations();
     startRealPriceFetching();
     startMarketHistoryFetching();
+    if (isProduction && !emailDeliveryAvailable()) {
+      console.warn("No email provider configured (set RESEND_API_KEY and EMAIL_FROM): sign-up and password-reset codes can't be sent.");
+    }
+    removeExpiredDemoAccounts().catch((error) => console.warn("Clearing old demo accounts failed:", error.message));
+    setInterval(() => removeExpiredDemoAccounts().catch(() => {}), 6 * 60 * 60 * 1000).unref();
     tickSyntheticQuotes();
     setInterval(tickSyntheticQuotes, syntheticQuoteTickIntervalMs);
     setInterval(() => {

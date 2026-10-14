@@ -6977,3 +6977,112 @@ input[type="checkbox"] {
     font-size: 1.3rem;
   }
 }
+
+
+/* ---------- Demo accounts ----------
+   A demo login trades with virtual money only: no deposit, withdrawal, KYC,
+   bank, password or referral screens. */
+.demo-badge,
+.demo-banner {
+  display: none;
+}
+
+body.is-demo .demo-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 176, 0, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 176, 0, 0.14);
+  color: var(--gold, #ffb000);
+  padding: 0.25rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+body.is-demo .demo-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  border: 1px solid rgba(255, 176, 0, 0.4);
+  border-radius: 0.75rem;
+  background: rgba(255, 176, 0, 0.1);
+  color: var(--text);
+  padding: 0.75rem 1rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+body.is-demo .demo-banner button {
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--blue);
+  color: #fff;
+  padding: 0.5rem 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+body.is-demo [data-chat-topic="deposit"],
+body.is-demo [data-chat-topic="withdrawal"],
+body.is-demo [data-chat-topic="verification"],
+body.is-demo [data-profile-pane="kyc"],
+body.is-demo [data-profile-pane="bank"],
+body.is-demo [data-profile-pane="deposit"],
+body.is-demo [data-profile-pane="withdraw"],
+body.is-demo [data-profile-pane="password"],
+body.is-demo [data-profile-pane="referrals"],
+body.is-demo [data-profile-goto-pane="kyc"] {
+  display: none !important;
+}
+
+/* The Quick Access block only holds Deposit / Withdrawal / KYC. */
+body.is-demo .quick-access-block {
+  display: none;
+}
+
+/* On a phone the header is full, so the DEMO tag moves under the FXCC logo. */
+@media (max-width: 680px) {
+  body.is-demo .demo-badge {
+    display: none;
+  }
+
+  body.is-demo .client-topbar .app-logo small {
+    display: block;
+    font-size: 0;
+    letter-spacing: 0;
+  }
+
+  body.is-demo .client-topbar .app-logo small::after {
+    content: "DEMO";
+    color: var(--gold, #ffb000);
+    font-size: 0.56rem;
+    font-weight: 900;
+    letter-spacing: 0.24em;
+  }
+
+  /* A long balance ($10,000.00 and up) must not push the buttons over the
+     logo: the row may shrink, the hidden search box takes no room, the wallet
+     text is a little smaller and the currency picker keeps a readable width. */
+  .client-topbar .client-actions {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .client-topbar #globalSearch {
+    display: none;
+  }
+
+  .client-topbar .wallet-button {
+    padding-inline: 0.55rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  .client-topbar .currency-select {
+    min-width: 4.4rem;
+  }
+}
