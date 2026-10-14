@@ -6837,185 +6837,138 @@ input[type="checkbox"] {
   }
 }
 
-/* ---------- Profile on desktop (sidebar layout, 1051px and wider) ----------
-   The Profile nav item opens a drop-down menu (see openProfileDropdown in
-   app.js), and the account window that its options open holds just the
-   chosen page - no side menu. Tablets and phones keep the account screen
-   with its own menu. */
-.profile-dropdown {
-  position: fixed;
-  z-index: 120;
-  width: 17rem;
-  max-height: calc(100vh - 1rem);
-  overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: 0.75rem;
-  background: var(--panel);
-  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.45);
-  padding: 0.4rem;
+/* Account Details page (all sizes). */
+.account-details-card {
+  margin-bottom: 1.1rem;
 }
 
-.profile-dropdown[hidden] {
-  display: none;
-}
-
-.profile-dropdown-user {
+.account-detail-hero {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.15rem 0.7rem;
-  border-bottom: 1px solid var(--line);
-  padding: 0.6rem 0.6rem 0.8rem;
+  gap: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: var(--panel-2);
+  padding: 0.9rem 1rem;
 }
 
-.profile-dropdown-avatar {
+.account-detail-avatar {
   display: grid;
-  grid-row: span 2;
   place-items: center;
-  width: 2.6rem;
-  height: 2.6rem;
+  width: 2.8rem;
+  height: 2.8rem;
   border-radius: 50%;
   background: var(--blue);
   color: #fff;
+  font-size: 1.1rem;
   font-weight: 900;
 }
 
-.profile-dropdown-user strong,
-.profile-dropdown-user small {
+.account-detail-hero strong,
+.account-detail-hero small {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.profile-dropdown-user strong {
+.account-detail-hero strong {
   color: var(--text);
-  font-size: 0.88rem;
+  font-size: 0.95rem;
 }
 
-.profile-dropdown-user small {
+.account-detail-hero small {
+  margin-top: 0.1rem;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.78rem;
 }
 
-.profile-dropdown-user .status-pill {
-  grid-column: 2;
-  justify-self: start;
+.account-detail-list {
+  margin: 0.4rem 0 0;
 }
 
-.profile-dropdown-item {
+.account-detail-row {
   display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  width: 100%;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--text);
-  padding: 0.55rem 0.6rem;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.75rem 0.15rem;
   font-size: 0.85rem;
+}
+
+.account-detail-row:last-child {
+  border-bottom: 0;
+}
+
+.account-detail-row dt {
+  color: var(--muted);
   font-weight: 700;
-  text-align: left;
-  cursor: pointer;
 }
 
-.profile-dropdown-item > span:first-child {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 0.4rem;
-  background: var(--panel-2);
-  font-size: 0.85rem;
+.account-detail-row dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 800;
+  text-align: right;
+  word-break: break-word;
 }
 
-.profile-dropdown-item:hover,
-.profile-dropdown-item:focus-visible {
-  background: rgba(0, 115, 255, 0.16);
-  color: var(--blue);
-  outline: 0;
+/* Header icon in the account window (phones and tablets only). */
+.profile-modal-icon {
+  display: none;
 }
 
-.profile-dropdown-item.is-logout {
-  color: var(--red);
-}
-
-.profile-dropdown-item.is-logout:hover,
-.profile-dropdown-item.is-logout:focus-visible {
-  background: rgba(232, 61, 48, 0.14);
-  color: var(--red);
-}
-
-.profile-dropdown-divider {
-  margin: 0.3rem 0.4rem;
-  border: 0;
-  border-top: 1px solid var(--line);
-}
-
-.nav-item.is-menu-open {
-  border-color: rgba(0, 115, 255, 0.75);
-  background: rgba(0, 115, 255, 0.18);
-  color: var(--blue);
-}
-
+/* ---------- Profile page on desktop (sidebar layout, 1051px and wider) ----------
+   The account window's markup sits in the #profile page: menu on the left,
+   the chosen section on the right. Tablets and phones keep the window. */
 @media (min-width: 1051px) {
-  /* The window opens beside the Profile nav item (positioned by
-     positionProfileModal in app.js), so there's no dimmed full-screen
-     backdrop - it only catches clicks outside the window to close it. */
-  #profileModal {
-    display: block;
-    background: transparent;
-    padding: 0;
+  .profile-page {
+    padding: 1.25rem 1.5rem 2rem;
   }
 
-  #profileModal.is-hidden {
-    display: none;
-  }
-
-  #profileModal .profile-modal {
-    position: absolute;
-    top: 4rem;
-    left: 15rem;
-    flex-direction: column;
-    width: min(32rem, calc(100vw - 16rem));
-    height: auto;
-    min-height: 14rem;
-    max-height: calc(100vh - 1rem);
-  }
-
-  #profileModal .profile-modal-side {
-    display: none;
-  }
-
-  #profileModal .profile-modal-content {
-    padding-top: 1.5rem;
-  }
-
-  /* Title bar over the page: its name and the close button. */
-  #profileModal .profile-mobile-bar {
-    position: sticky;
-    top: 0;
-    z-index: 4;
+  .profile-page .profile-modal {
+    position: relative;
     display: flex;
-    align-items: center;
-    min-height: 3.5rem;
-    margin: -1.5rem -1.6rem 1.2rem;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel);
-    padding: 0 3.4rem 0 1.6rem;
+    flex-direction: row;
+    width: 100%;
+    max-width: 78rem;
+    height: auto;
+    min-height: calc(100vh - 8rem);
+    margin: 0 auto;
+    border-radius: 0.9rem;
+    box-shadow: none;
   }
 
-  #profileModal .profile-mobile-bar strong {
-    color: var(--text);
-    font-size: 1.05rem;
-  }
-
-  #profileModal #profileModalBack,
-  #profileModal .profile-pane h3 {
+  .profile-page .profile-modal-x,
+  .profile-page .profile-mobile-bar {
     display: none;
   }
 
-  #profileModal .profile-pane {
-    padding-top: 0.5rem;
+  .profile-page .profile-modal-side {
+    width: 17rem;
+    padding: 1.6rem 1rem;
+  }
+
+  .profile-page .profile-modal-content {
+    padding: 2rem 2.4rem 2.4rem;
+  }
+
+  .profile-page .profile-modal-menu button {
+    padding: 0.7rem 0.85rem;
+    font-size: 0.9rem;
+  }
+
+  .profile-page .profile-modal-name {
+    font-size: 0.95rem;
+  }
+
+  .profile-page .profile-pane {
+    max-width: 46rem;
+  }
+
+  .profile-page .profile-pane h3 {
+    font-size: 1.3rem;
   }
 }
