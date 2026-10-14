@@ -6837,127 +6837,6 @@ input[type="checkbox"] {
   }
 }
 
-/* ---------- Profile on desktop (sidebar layout, 1051px and wider) ----------
-   The Profile nav item opens a drop-down menu (see openProfileDropdown in
-   app.js), and the account window that its options open holds just the
-   chosen page - no side menu. Tablets and phones keep the account screen
-   with its own menu. */
-.profile-dropdown {
-  position: fixed;
-  z-index: 120;
-  width: 17rem;
-  max-height: calc(100vh - 1rem);
-  overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: 0.75rem;
-  background: var(--panel);
-  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.45);
-  padding: 0.4rem;
-}
-
-.profile-dropdown[hidden] {
-  display: none;
-}
-
-.profile-dropdown-user {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 0.15rem 0.7rem;
-  border-bottom: 1px solid var(--line);
-  padding: 0.6rem 0.6rem 0.8rem;
-}
-
-.profile-dropdown-avatar {
-  display: grid;
-  grid-row: span 2;
-  place-items: center;
-  width: 2.6rem;
-  height: 2.6rem;
-  border-radius: 50%;
-  background: var(--blue);
-  color: #fff;
-  font-weight: 900;
-}
-
-.profile-dropdown-user strong,
-.profile-dropdown-user small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-dropdown-user strong {
-  color: var(--text);
-  font-size: 0.88rem;
-}
-
-.profile-dropdown-user small {
-  color: var(--muted);
-  font-size: 0.72rem;
-}
-
-.profile-dropdown-user .status-pill {
-  grid-column: 2;
-  justify-self: start;
-}
-
-.profile-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  width: 100%;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--text);
-  padding: 0.55rem 0.6rem;
-  font-size: 0.85rem;
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-}
-
-.profile-dropdown-item > span:first-child {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 0.4rem;
-  background: var(--panel-2);
-  font-size: 0.85rem;
-}
-
-.profile-dropdown-item:hover,
-.profile-dropdown-item:focus-visible {
-  background: rgba(0, 115, 255, 0.16);
-  color: var(--blue);
-  outline: 0;
-}
-
-.profile-dropdown-item.is-logout {
-  color: var(--red);
-}
-
-.profile-dropdown-item.is-logout:hover,
-.profile-dropdown-item.is-logout:focus-visible {
-  background: rgba(232, 61, 48, 0.14);
-  color: var(--red);
-}
-
-.profile-dropdown-divider {
-  margin: 0.3rem 0.4rem;
-  border: 0;
-  border-top: 1px solid var(--line);
-}
-
-.nav-item.is-menu-open {
-  border-color: rgba(0, 115, 255, 0.75);
-  background: rgba(0, 115, 255, 0.18);
-  color: var(--blue);
-}
-
 /* Account Details page (all sizes). */
 .account-details-card {
   margin-bottom: 1.1rem;
@@ -7036,135 +6915,60 @@ input[type="checkbox"] {
   word-break: break-word;
 }
 
-/* Header icon in the account window: shown on desktop only. */
+/* Header icon in the account window (phones and tablets only). */
 .profile-modal-icon {
   display: none;
 }
 
-@keyframes profileWindowIn {
-  from {
-    opacity: 0;
-    transform: translateX(-8px);
-  }
-}
-
+/* ---------- Profile page on desktop (sidebar layout, 1051px and wider) ----------
+   The account window's markup sits in the #profile page: menu on the left,
+   the chosen section on the right. Tablets and phones keep the window. */
 @media (min-width: 1051px) {
-  /* The window opens beside the Profile nav item (positioned by
-     positionProfileModal in app.js), so there's no dimmed full-screen
-     backdrop - it only catches clicks outside the window to close it. */
-  #profileModal {
-    display: block;
-    background: transparent;
-    padding: 0;
+  .profile-page {
+    padding: 1.25rem 1.5rem 2rem;
   }
 
-  #profileModal.is-hidden {
-    display: none;
-  }
-
-  #profileModal .profile-modal {
-    --caret-y: 2rem;
-    position: absolute;
-    top: 4rem;
-    left: 15rem;
-    flex-direction: column;
-    width: min(30rem, calc(100vw - 16rem));
-    height: auto;
-    min-height: 12rem;
-    max-height: calc(100vh - 1rem);
-    overflow: visible; /* the pointer arrow sits outside the edge */
-    border-radius: 1rem;
-    box-shadow: 0 1.5rem 3.5rem rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.03);
-    animation: profileWindowIn 0.16s ease-out;
-  }
-
-  /* Pointer arrow toward the Profile item. */
-  #profileModal .profile-modal::before {
-    content: "";
-    position: absolute;
-    top: calc(var(--caret-y) - 0.4rem);
-    left: -0.42rem;
-    z-index: 6;
-    width: 0.8rem;
-    height: 0.8rem;
-    border-bottom: 1px solid var(--line);
-    border-left: 1px solid var(--line);
-    background: var(--panel-2);
-    transform: rotate(45deg);
-  }
-
-  #profileModal .profile-modal-side {
-    display: none;
-  }
-
-  #profileModal .profile-modal-content {
-    padding: 0;
-    border-radius: inherit;
-  }
-
-  /* Header: icon, title, close button on one centred line. */
-  #profileModal .profile-mobile-bar {
-    position: sticky;
-    top: 0;
-    z-index: 4;
+  .profile-page .profile-modal {
+    position: relative;
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    min-height: 3.75rem;
-    margin: 0;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel-2);
-    padding: 0 4rem 0 1.25rem;
+    flex-direction: row;
+    width: 100%;
+    max-width: 78rem;
+    height: auto;
+    min-height: calc(100vh - 8rem);
+    margin: 0 auto;
+    border-radius: 0.9rem;
+    box-shadow: none;
   }
 
-  #profileModal .profile-modal-icon {
-    display: grid;
-    flex-shrink: 0;
-    place-items: center;
-    width: 2.1rem;
-    height: 2.1rem;
-    border-radius: 0.6rem;
-    background: rgba(0, 115, 255, 0.16);
-    font-size: 1rem;
-  }
-
-  #profileModal .profile-mobile-bar strong {
-    color: var(--text);
-    font-size: 1.02rem;
-    font-weight: 800;
-  }
-
-  #profileModal #profileModalBack,
-  #profileModal .profile-pane h3 {
+  .profile-page .profile-modal-x,
+  .profile-page .profile-mobile-bar {
     display: none;
   }
 
-  #profileModal .profile-modal-x {
-    top: 0.85rem;
-    right: 0.95rem;
-    display: grid;
-    place-items: center;
-    width: 2.05rem;
-    height: 2.05rem;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text);
-    font-size: 1.25rem;
-    line-height: 1;
-    transition: background 0.15s;
+  .profile-page .profile-modal-side {
+    width: 17rem;
+    padding: 1.6rem 1rem;
   }
 
-  #profileModal .profile-modal-x:hover {
-    background: var(--line);
+  .profile-page .profile-modal-content {
+    padding: 2rem 2.4rem 2.4rem;
   }
 
-  #profileModal .profile-pane {
-    padding: 1.3rem 1.5rem 1.5rem;
+  .profile-page .profile-modal-menu button {
+    padding: 0.7rem 0.85rem;
+    font-size: 0.9rem;
   }
 
-  #profileModal .profile-pane-hint {
-    margin-bottom: 1.15rem;
-    font-size: 0.86rem;
-    line-height: 1.6;
+  .profile-page .profile-modal-name {
+    font-size: 0.95rem;
+  }
+
+  .profile-page .profile-pane {
+    max-width: 46rem;
+  }
+
+  .profile-page .profile-pane h3 {
+    font-size: 1.3rem;
   }
 }

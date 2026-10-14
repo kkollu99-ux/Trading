@@ -695,6 +695,11 @@
           </div>
         </section>
 
+        <!-- Desktop Profile page: the account window's markup (.profile-modal) is moved in here while this page shows (see mountProfilePage in app.js). -->
+        <section id="profile" class="view-section">
+          <div class="profile-page"><div id="profilePageHost"></div></div>
+        </section>
+
         <section id="orders" class="view-section">
           <div class="orders-clone-page">
             <div class="orders-blue-head">
@@ -911,9 +916,6 @@
           </footer>
         </div>
       </div>
-
-      <!-- Desktop only: the Profile nav item opens this menu (filled from #profileModalMenu by openProfileDropdown in app.js). -->
-      <div id="profileDropdown" class="profile-dropdown" role="menu" aria-label="Account menu" hidden></div>
 
       <div id="profileModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-label="My Account">
         <div class="profile-modal">

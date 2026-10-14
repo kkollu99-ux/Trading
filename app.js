@@ -428,6 +428,11 @@ function getNavLabel(item) {
 
 function moveSection(id) {
   if ((id === "users" || id === "products" || id === "logs") && !canManageUsers()) id = "dashboard";
+  // Tablets and phones show Profile as the account window, not a page.
+  if (id === "profile" && !isDesktopLayout()) {
+    openProfileModal();
+    return;
+  }
   navItems.forEach((item) => item.classList.toggle("is-active", item.dataset.section === id));
   sections.forEach((section) => section.classList.toggle("is-active", section.id === id));
   if (id === "dashboard") {
@@ -456,6 +461,8 @@ function moveSection(id) {
   if (id === "trade") {
     loadChartForCurrentSymbol();
   }
+  if (id === "profile") mountProfilePage();
+  else unmountProfilePage();
   drawCharts();
   renderTradeCandles();
   localStorage.setItem("fxccActiveSection", id);
@@ -950,31 +957,6 @@ function showProfileMenu() {
   document.querySelector(".profile-modal")?.classList.remove("is-pane-open");
 }
 
-// Desktop: the account window opens beside the Profile nav item (where the
-// drop-down was), not centred on the screen. profileModalAnchorRect is that
-// item's position when the option was chosen.
-let profileModalAnchorRect = null;
-
-function positionProfileModal() {
-  const modal = document.querySelector(".profile-modal");
-  if (!modal) return;
-  if (!isDesktopLayout() || !profileModalAnchorRect) {
-    modal.style.left = "";
-    modal.style.top = "";
-    modal.style.removeProperty("--caret-y");
-    return;
-  }
-  const margin = 8;
-  const left = Math.min(profileModalAnchorRect.right + 10, window.innerWidth - modal.offsetWidth - margin);
-  const top = Math.min(profileModalAnchorRect.top, window.innerHeight - modal.offsetHeight - margin);
-  const placedTop = Math.max(margin, Math.round(top));
-  modal.style.left = `${Math.max(margin, Math.round(left))}px`;
-  modal.style.top = `${placedTop}px`;
-  // The pointer arrow sits level with the Profile item's centre.
-  const pointerY = profileModalAnchorRect.top + profileModalAnchorRect.height / 2 - placedTop;
-  modal.style.setProperty("--caret-y", `${Math.round(Math.max(24, Math.min(pointerY, modal.offsetHeight - 24)))}px`);
-}
-
 function openProfilePane(pane) {
   switchProfilePane(pane);
   const label = document.querySelector(`#profileModalMenu [data-profile-pane="${pane}"] span:last-child`)?.textContent;
@@ -986,10 +968,10 @@ function openProfilePane(pane) {
   const modal = document.querySelector(".profile-modal");
   modal?.classList.add("is-pane-open");
   document.querySelector(".profile-modal-content")?.scrollTo(0, 0);
-  positionProfileModal();
 }
 
 function openProfileModal() {
+  unmountProfilePage();
   renderAccountSummary();
   loadInvitedFriends();
   loadKycStatus();
@@ -1001,108 +983,54 @@ function openProfileModal() {
 }
 
 function closeProfileModal() {
-  profileModalAnchorRect = null;
   document.querySelector("#profileModal")?.classList.add("is-hidden");
   document.body.classList.remove("profile-modal-open");
 }
 
 document.querySelector("#profileModalBack")?.addEventListener("click", showProfileMenu);
 
-// ---------- Desktop: Profile drop-down ----------
-// The same options as the account screen's list (cloned from #profileModalMenu
-// so they can't drift apart), in a menu beside the sidebar's Profile item.
-// Choosing one opens just that page in the account window, which has no side
-// menu on desktop (see the min-width: 1051px rules in styles.css).
+// ---------- Desktop: Profile as a page ----------
+// With the left sidebar (1051px and wider) Profile is an ordinary page: the
+// menu on the left, the chosen section on the right. It is the account
+// window's own markup (.profile-modal), moved into the #profile page while
+// that page shows and back into the hidden #profileModal otherwise, so its
+// forms and handlers exist only once. Tablets and phones keep the window.
 function isDesktopLayout() {
   return window.matchMedia("(min-width: 1051px)").matches;
 }
 
-let profileDropdownAnchor = null;
-
-function closeProfileDropdown() {
-  const dropdown = document.querySelector("#profileDropdown");
-  if (!dropdown || dropdown.hidden) return;
-  dropdown.hidden = true;
-  profileDropdownAnchor?.classList.remove("is-menu-open");
-  profileDropdownAnchor?.setAttribute("aria-expanded", "false");
-  profileDropdownAnchor = null;
-}
-
-function openProfileDropdown(anchor) {
-  const dropdown = document.querySelector("#profileDropdown");
-  if (!dropdown) return;
+function mountProfilePage() {
+  const host = document.querySelector("#profilePageHost");
+  const modal = document.querySelector(".profile-modal");
+  if (!host || !modal) return;
+  if (modal.parentElement !== host) host.appendChild(modal);
   renderAccountSummary();
-  const avatar = document.querySelector("#profileModalAvatar")?.textContent || "?";
-  const name = document.querySelector("#profileFullName")?.textContent?.trim() || "";
-  const kycBadge = document.querySelector("#profileKycBadge");
-  const items = [...document.querySelectorAll("#profileModalMenu button")].map((source) => {
-    const logout = source.id === "profileModalSignOut";
-    const pane = source.dataset.profilePane || "";
-    return `${logout ? '<hr class="profile-dropdown-divider" />' : ""}<button type="button" role="menuitem" class="profile-dropdown-item${logout ? " is-logout" : ""}" ${logout ? 'data-profile-logout="1"' : `data-profile-open="${escapeHtml(pane)}"`}>${source.innerHTML}</button>`;
-  });
-  dropdown.innerHTML = `
-    <div class="profile-dropdown-user">
-      <span class="profile-dropdown-avatar">${escapeHtml(avatar)}</span>
-      <div>
-        <strong>${escapeHtml(name)}</strong>
-        <small>${escapeHtml(document.querySelector("#profileEmail")?.textContent || "")}</small>
-      </div>
-      <span class="status-pill ${escapeHtml([...(kycBadge?.classList || [])].filter((c) => c.startsWith("is-")).join(" "))}">${escapeHtml(kycBadge?.textContent || "")}</span>
-    </div>
-    ${items.join("")}`;
-  dropdown.hidden = false;
-  // Beside the Profile item, kept inside the window.
-  const rect = anchor.getBoundingClientRect();
-  const height = dropdown.offsetHeight;
-  dropdown.style.left = `${Math.round(rect.right + 10)}px`;
-  dropdown.style.top = `${Math.round(Math.max(8, Math.min(rect.top, window.innerHeight - height - 8)))}px`;
-  profileDropdownAnchor = anchor;
-  anchor.classList.add("is-menu-open");
-  anchor.setAttribute("aria-haspopup", "menu");
-  anchor.setAttribute("aria-expanded", "true");
-  dropdown.querySelector("[role=menuitem]")?.focus();
+  loadInvitedFriends();
+  loadKycStatus();
+  loadBankDetails();
+  if (!document.querySelector("#profileModalMenu .is-active")) switchProfilePane("details");
 }
 
-function toggleProfileDropdown(anchor) {
-  if (document.querySelector("#profileDropdown")?.hidden === false) closeProfileDropdown();
-  else openProfileDropdown(anchor);
+function unmountProfilePage() {
+  const backdrop = document.querySelector("#profileModal");
+  const modal = document.querySelector(".profile-modal");
+  if (backdrop && modal && modal.parentElement !== backdrop) backdrop.appendChild(modal);
 }
 
-document.querySelector("#profileDropdown")?.addEventListener("click", (event) => {
-  const item = event.target.closest("[role=menuitem]");
-  if (!item) return;
-  profileModalAnchorRect = profileDropdownAnchor?.getBoundingClientRect() || null;
-  closeProfileDropdown();
-  if (item.dataset.profileLogout) {
-    document.querySelector("#profileModalSignOut")?.click();
-    return;
+// Crossing the desktop breakpoint (a resized window, a rotated tablet) moves
+// Profile between its page and its window.
+window.matchMedia("(min-width: 1051px)").addEventListener("change", () => {
+  if (isDesktopLayout()) {
+    if (!document.querySelector("#profileModal")?.classList.contains("is-hidden")) {
+      closeProfileModal();
+      moveSection("profile");
+    }
+  } else if (document.querySelector("#profile")?.classList.contains("is-active")) {
+    moveSection("dashboard");
   }
-  openProfileModal();
-  openProfilePane(item.dataset.profileOpen);
 });
 
-document.querySelector("#profileDropdown")?.addEventListener("keydown", (event) => {
-  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-  event.preventDefault();
-  const items = [...document.querySelectorAll("#profileDropdown [role=menuitem]")];
-  const next = items.indexOf(document.activeElement) + (event.key === "ArrowDown" ? 1 : -1);
-  items[(next + items.length) % items.length]?.focus();
-});
-
-document.addEventListener("click", (event) => {
-  if (!event.target.closest("#profileDropdown")) closeProfileDropdown();
-});
-window.addEventListener("resize", () => {
-  closeProfileDropdown();
-  if (!document.querySelector("#profileModal")?.classList.contains("is-hidden")) positionProfileModal();
-});
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && document.querySelector("#profileDropdown")?.hidden === false) {
-    const anchor = profileDropdownAnchor;
-    closeProfileDropdown();
-    anchor?.focus();
-    return;
-  }
   if (event.key !== "Escape" || document.querySelector("#profileModal")?.classList.contains("is-hidden")) return;
   const modal = document.querySelector(".profile-modal");
   if (modal?.classList.contains("is-pane-open") && window.matchMedia("(max-width: 680px)").matches) showProfileMenu();
@@ -1138,6 +1066,7 @@ document.querySelector(".profile-modal-content")?.addEventListener("click", (eve
 
 document.querySelector("#profileModalSignOut")?.addEventListener("click", () => {
   closeProfileModal();
+  moveSection("dashboard");
   clearSession();
   showHomeView();
 });
@@ -1384,16 +1313,7 @@ document.querySelector("#registerForm").addEventListener("submit", async (event)
   }
 });
 
-navItems.forEach((item) => item.addEventListener("click", (event) => {
-  if (item.dataset.section === "profile") {
-    // With the left sidebar (desktop) Profile is a drop-down menu; on
-    // tablets and phones it opens the account screen itself.
-    if (isDesktopLayout()) {
-      event.stopPropagation(); // else the outside-click handler closes it again
-      toggleProfileDropdown(item);
-    } else openProfileModal();
-    return;
-  }
+navItems.forEach((item) => item.addEventListener("click", () => {
   moveSection(item.dataset.section);
 }));
 
