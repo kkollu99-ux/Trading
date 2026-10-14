@@ -459,6 +459,7 @@ function moveSection(id) {
     loadServiceInbox();
   }
   if (id === "trade") {
+    collapseWatchPanel();
     loadChartForCurrentSymbol();
   }
   if (id === "profile") mountProfilePage();
@@ -1342,7 +1343,7 @@ function renderMarketInstrumentRow(instrument, quotes) {
   const arrow = changePercent >= 0 ? "↗" : "↘";
   const symbol = compactSymbol(instrument.symbol);
   const group = categoryFilter(instrument.category);
-  return `<div class="instrument-row" data-category="${group}" data-symbol="${escapeHtml(`${symbol} ${instrument.displayName}`)}"><div><strong>${escapeHtml(symbol)}</strong><small>${escapeHtml(instrument.displayName)}</small></div><em>${formatTradeNumber(price)} <b class="${trendClass}">${arrow} ${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%</b></em><button type="button">Trade</button></div>`;
+  return `<div class="instrument-row" data-category="${group}" data-api-symbol="${escapeHtml(instrument.symbol)}" data-symbol="${escapeHtml(`${symbol} ${instrument.displayName}`)}"><div><strong>${escapeHtml(symbol)}</strong><small>${escapeHtml(instrument.displayName)}</small></div><em>${formatTradeNumber(price)} <b class="${trendClass}">${arrow} ${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%</b></em><button type="button">Trade</button></div>`;
 }
 
 function renderMarketsList(instruments, quotes = {}) {
@@ -1416,6 +1417,11 @@ document.querySelectorAll(".market-filter-tabs button").forEach((button) => {
 document.querySelector(".markets-page")?.addEventListener("click", (event) => {
   const button = event.target.closest(".instrument-row button");
   if (!button) return;
+  // Open the Trade page on the product that was clicked, not on whatever
+  // was selected there last.
+  const apiSymbol = button.closest(".instrument-row")?.dataset.apiSymbol;
+  const watchRow = apiSymbol ? [...document.querySelectorAll("#tradeWatchTable .watch-row")].find((row) => row.dataset.apiSymbol === apiSymbol) : null;
+  if (watchRow) selectTradeSymbol(watchRow);
   moveSection("trade");
   button.textContent = "Opening";
   window.setTimeout(() => {
@@ -3428,6 +3434,21 @@ document.querySelector("#tradeWatchTable")?.addEventListener("click", (event) =>
   if (!row) return;
   selectTradeSymbol(row);
 });
+
+// The Trade page always opens with Market Watch (the left panel) collapsed,
+// leaving the room to the chart and order ticket; the arrow on its edge
+// brings it back for that visit.
+function collapseWatchPanel() {
+  const terminal = document.querySelector(".trade-terminal");
+  if (!terminal || terminal.classList.contains("is-watch-collapsed")) return;
+  terminal.classList.add("is-watch-collapsed");
+  const button = document.querySelector("#toggleWatchPanel");
+  if (button) {
+    button.textContent = "›";
+    button.setAttribute("aria-label", "Show market watch");
+  }
+  window.setTimeout(renderTradeCandles, 300);
+}
 
 function toggleTradePanel(panel, button, collapsedGlyph, expandedGlyph, label) {
   const terminal = document.querySelector(".trade-terminal");
