@@ -963,9 +963,13 @@ function renderKycSubmissionSummary(submission) {
         <dt>Full Name</dt><dd>${escapeHtml(submission.full_name)}</dd>
         <dt>Document Number</dt><dd>${escapeHtml(submission.document_number)}</dd>
         <dt>Address</dt><dd>${escapeHtml(submission.address)}</dd>
+        ${submission.date_of_birth ? `<dt>Date of Birth</dt><dd>${escapeHtml(submission.date_of_birth)}</dd>` : ""}
+        ${submission.country ? `<dt>Country</dt><dd>${escapeHtml(submission.country)}</dd>` : ""}
         <dt>Submitted</dt><dd>${new Date(submission.submitted_at).toLocaleString()}</dd>
       </dl>
-      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document" />
+      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document (front)" />
+      ${submission.document_back_url ? `<img src="${escapeHtml(submission.document_back_url)}" alt="Submitted document (back)" />` : ""}
+      ${submission.selfie_url ? `<img src="${escapeHtml(submission.selfie_url)}" alt="Selfie" />` : ""}
     </div>`;
   // A verified submission has nothing left to resubmit; pending/rejected can
   // still resubmit (e.g. to fix a rejected document), so keep the form visible.
@@ -5338,9 +5342,13 @@ function renderUserDetailKyc(submission) {
         <dt>Full Name</dt><dd>${escapeHtml(submission.full_name)}</dd>
         <dt>Document Number</dt><dd>${escapeHtml(submission.document_number)}</dd>
         <dt>Address</dt><dd>${escapeHtml(submission.address)}</dd>
+        ${submission.date_of_birth ? `<dt>Date of Birth</dt><dd>${escapeHtml(submission.date_of_birth)}</dd>` : ""}
+        ${submission.country ? `<dt>Country</dt><dd>${escapeHtml(submission.country)}</dd>` : ""}
         <dt>Submitted</dt><dd>${new Date(submission.submitted_at).toLocaleString()}</dd>
       </dl>
-      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document" />
+      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document (front)" />
+      ${submission.document_back_url ? `<img src="${escapeHtml(submission.document_back_url)}" alt="Submitted document (back)" />` : ""}
+      ${submission.selfie_url ? `<img src="${escapeHtml(submission.selfie_url)}" alt="Selfie" />` : ""}
     </div>
     ${actions}`;
 }
@@ -5808,3 +5816,180 @@ setInterval(refreshLivePositions, 3000);
 setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);
 startVersionCheck();
+
+// ---------- Mobile Trade page: Buy/Sell bar opens the order ticket as a sheet ----------
+(function setupMobileTicketSheet() {
+  const terminal = document.querySelector(".trade-terminal");
+  const open = () => {
+    if (!terminal) return;
+    terminal.classList.add("is-ticket-open");
+    document.body.classList.add("ticket-sheet-open");
+    document.querySelector("#orderTicket")?.scrollTo?.(0, 0);
+  };
+  const close = () => {
+    terminal?.classList.remove("is-ticket-open");
+    document.body.classList.remove("ticket-sheet-open");
+  };
+  document.querySelector("#mobileBuyButton")?.addEventListener("click", open);
+  document.querySelector("#mobileSellButton")?.addEventListener("click", open);
+  document.querySelector("#ticketBackButton")?.addEventListener("click", close);
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+  // Leaving the Trade page or growing to the desktop layout drops the sheet.
+  document.addEventListener("click", (event) => { if (event.target.closest("[data-section]")) close(); });
+  window.matchMedia("(min-width: 1051px)").addEventListener?.("change", close);
+})();
+
+// ---------- KYC Identity Verification popup ----------
+(function setupKycModal() {
+  const modal = document.querySelector("#kycModal");
+  const form = document.querySelector("#kycWizard");
+  if (!modal || !form) return;
+  const MAX_BYTES = 5 * 1024 * 1024;
+  const labels = { passport: "Passport", id_card: "National ID Card", drivers_license: "Driver's License" };
+  const nextButton = document.querySelector("#kycNext");
+  const backButton = document.querySelector("#kycBack");
+  const message = document.querySelector("#kycWizardMessage");
+  const note = document.querySelector("#kycStatusNote");
+  let step = 1;
+  let submitted = false;
+
+  const field = (name) => form.elements[name];
+  const needsBack = () => field("documentType").value !== "passport";
+  const say = (text, type) => { message.textContent = text || ""; message.classList.toggle("is-error", type === "error"); message.classList.toggle("is-success", type === "success"); };
+
+  function showStep(n) {
+    step = n;
+    form.querySelectorAll("[data-kyc-step]").forEach((el) => el.classList.toggle("is-active", Number(el.dataset.kycStep) === n));
+    modal.querySelectorAll("[data-kyc-step-dot]").forEach((el) => {
+      const i = Number(el.dataset.kycStepDot);
+      el.classList.toggle("is-done", i < n || submitted);
+      el.classList.toggle("is-current", i === n && !submitted);
+    });
+    backButton.classList.toggle("is-hidden", n === 1 || submitted);
+    nextButton.textContent = submitted ? "Close" : n === 4 ? "Submit for Review" : "Next";
+    document.querySelector("#kycBackUpload").classList.toggle("is-hidden", !needsBack());
+    if (n === 4) renderReview();
+    say("");
+  }
+
+  function renderReview() {
+    const rows = [
+      ["Full Name", field("fullName").value], ["Date of Birth", field("dateOfBirth").value], ["Country", field("country").value],
+      ["Address", field("address").value], ["Document", labels[field("documentType").value]], ["Document Number", field("documentNumber").value],
+      ["Front Side", field("document").files[0]?.name || "—"], ["Back Side", needsBack() ? field("documentBack").files[0]?.name || "—" : "Not required"],
+      ["Selfie", field("selfie").files[0]?.name || "—"],
+    ];
+    document.querySelector("#kycReview").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join("");
+  }
+
+  function validate(n) {
+    const filled = (name) => String(field(name).value || "").trim();
+    if (n === 1) {
+      if (!filled("fullName") || !filled("dateOfBirth") || !filled("country") || !filled("address")) return "Please fill in all personal details.";
+      const age = (Date.now() - new Date(field("dateOfBirth").value).getTime()) / 31557600000;
+      if (!(age >= 18 && age < 120)) return "You must be at least 18 years old.";
+    }
+    if (n === 2) {
+      if (!filled("documentNumber")) return "Enter your document number.";
+      if (!field("document").files[0]) return "Upload the front side of your document.";
+      if (needsBack() && !field("documentBack").files[0]) return "Upload the back side of your document.";
+    }
+    if (n === 3 && !field("selfie").files[0]) return "Upload a selfie.";
+    return "";
+  }
+
+  function setFile(name, file) {
+    const box = form.querySelector(`[data-kyc-upload="${name}"]`);
+    const input = field(name);
+    const preview = box.querySelector(".kyc-preview");
+    if (!file) { input.value = ""; preview.classList.add("is-hidden"); box.classList.remove("has-file"); return; }
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { say("Only JPEG, PNG or WEBP images are accepted.", "error"); return; }
+    if (file.size > MAX_BYTES) { say("That file is larger than 5 MB.", "error"); return; }
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    preview.src = URL.createObjectURL(file);
+    preview.classList.remove("is-hidden");
+    box.classList.add("has-file");
+    box.querySelector(".kyc-drop-text strong").textContent = file.name;
+    say("");
+  }
+
+  form.querySelectorAll("[data-kyc-upload]").forEach((box) => {
+    const name = box.dataset.kycUpload;
+    box.querySelector("input").addEventListener("change", (e) => setFile(name, e.target.files[0]));
+    const drop = box.querySelector(".kyc-drop");
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("is-over"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("is-over"));
+    drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("is-over"); setFile(name, e.dataTransfer.files[0]); });
+  });
+  field("documentType").addEventListener("change", () => document.querySelector("#kycBackUpload").classList.toggle("is-hidden", !needsBack()));
+
+  async function submit() {
+    nextButton.disabled = true;
+    nextButton.textContent = "Submitting…";
+    try {
+      const data = new FormData();
+      ["fullName", "dateOfBirth", "country", "address", "documentType", "documentNumber"].forEach((n) => data.append(n, field(n).value.trim()));
+      data.append("document", field("document").files[0]);
+      if (needsBack()) data.append("documentBack", field("documentBack").files[0]);
+      data.append("selfie", field("selfie").files[0]);
+      const response = await fetch(`${apiBase}/api/kyc/submit`, { method: "POST", headers: { Authorization: `Bearer ${currentSession.token}` }, body: data });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Submission failed");
+      currentSession.user.kycStatus = result.user.kycStatus;
+      localStorage.setItem("fxccUser", JSON.stringify(currentSession.user));
+      renderAccountSummary();
+      renderKycSubmissionSummary?.(result.submission);
+      submitted = true;
+      showStep(4);
+      say("KYC submitted — we will review it shortly.", "success");
+    } catch (error) {
+      say(error.message, "error");
+      nextButton.textContent = "Submit for Review";
+    } finally {
+      nextButton.disabled = false;
+    }
+  }
+
+  nextButton.addEventListener("click", () => {
+    if (submitted) return closeModal();
+    const problem = validate(step);
+    if (problem) return say(problem, "error");
+    if (step < 4) showStep(step + 1); else submit();
+  });
+  backButton.addEventListener("click", () => step > 1 && showStep(step - 1));
+
+  function closeModal() { modal.classList.add("is-hidden"); document.body.classList.remove("kyc-open"); }
+  async function openModal() {
+    if (!currentSession?.token) return;
+    submitted = false;
+    note.classList.add("is-hidden");
+    form.classList.remove("is-hidden");
+    modal.classList.remove("is-hidden");
+    document.body.classList.add("kyc-open");
+    const status = currentSession.user?.kycStatus;
+    if (status === "verified") {
+      form.classList.add("is-hidden");
+      note.textContent = "Your identity is verified ✓";
+      note.classList.remove("is-hidden");
+      return;
+    }
+    if (status === "pending") {
+      const result = await authFetch("/api/kyc/me").catch(() => null);
+      if (result?.submission) {
+        note.textContent = "Your documents are under review. You can submit again if something needs fixing.";
+        note.classList.remove("is-hidden");
+      }
+    } else if (status === "rejected") {
+      note.textContent = "Your last submission was rejected. Please submit clearer documents.";
+      note.classList.remove("is-hidden");
+    }
+    showStep(1);
+  }
+
+  document.querySelector("#openKycModal")?.addEventListener("click", openModal);
+  document.querySelector("#kycModalClose")?.addEventListener("click", closeModal);
+  modal.addEventListener("click", (event) => { if (event.target === modal) closeModal(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !modal.classList.contains("is-hidden")) closeModal(); });
+})();

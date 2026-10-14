@@ -473,13 +473,13 @@ async function recordWithdrawal({ userId, amount, createdBy }) {
   });
 }
 
-async function createKycSubmission({ userId, documentType, fullName, documentNumber, address, documentImageUrl }) {
+async function createKycSubmission({ userId, documentType, fullName, documentNumber, address, documentImageUrl, documentBackUrl = null, selfieUrl = null, dateOfBirth = null, country = null }) {
   if (pool) {
     const rows = await query(
-      `INSERT INTO kyc_submissions (user_id, document_type, full_name, document_number, address, document_image_url)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO kyc_submissions (user_id, document_type, full_name, document_number, address, document_image_url, document_back_url, selfie_url, date_of_birth, country)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [userId, documentType, fullName, documentNumber, address, documentImageUrl],
+      [userId, documentType, fullName, documentNumber, address, documentImageUrl, documentBackUrl, selfieUrl, dateOfBirth, country],
     );
     return rows[0];
   }
@@ -491,6 +491,10 @@ async function createKycSubmission({ userId, documentType, fullName, documentNum
     document_number: documentNumber,
     address,
     document_image_url: documentImageUrl,
+    document_back_url: documentBackUrl,
+    selfie_url: selfieUrl,
+    date_of_birth: dateOfBirth,
+    country,
     status: "pending",
     reviewed_by: null,
     reviewed_at: null,
@@ -829,6 +833,10 @@ async function seedDefaults() {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0`);
     // Practice accounts started from "Try Demo" - see POST /api/auth/demo.
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+    await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS document_back_url TEXT`);
+    await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS selfie_url TEXT`);
+    await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS date_of_birth TEXT`);
+    await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS country TEXT`);
     // Per-account UI preferences (display currency, sidebar collapsed state,
     // etc.) - a single JSONB blob rather than one column per setting, so a
     // new preference never needs its own migration. Previously only
@@ -1349,19 +1357,29 @@ app.get("/api/admin/users/:id/ledger", requireAuth, attachUser, requireRole("adm
 
 const kycDocumentTypes = ["passport", "id_card", "drivers_license"];
 
-app.post("/api/kyc/submit", requireAuth, attachUser, upload.single("document"), async (request, response) => {
+app.post("/api/kyc/submit", requireAuth, attachUser, upload.fields([{ name: "document", maxCount: 1 }, { name: "documentBack", maxCount: 1 }, { name: "selfie", maxCount: 1 }]), async (request, response) => {
   if (rejectDemo(request, response, "submit identity documents")) return;
   const documentType = String(request.body.documentType || "").toLowerCase();
   const fullName = String(request.body.fullName || "").trim();
   const documentNumber = String(request.body.documentNumber || "").trim();
   const address = String(request.body.address || "").trim();
+  const dateOfBirth = String(request.body.dateOfBirth || "").trim().slice(0, 20) || null;
+  const country = String(request.body.country || "").trim().slice(0, 80) || null;
 
   if (!kycDocumentTypes.includes(documentType)) return response.status(400).json({ error: "Invalid document type" });
   if (!fullName || !documentNumber || !address) return response.status(400).json({ error: "Full name, document number, and address are required" });
-  if (!request.file) return response.status(400).json({ error: "A document image is required" });
+  const front = request.files?.document?.[0];
+  const back = request.files?.documentBack?.[0];
+  const selfie = request.files?.selfie?.[0];
+  if (!front) return response.status(400).json({ error: "A document image is required" });
+  if (documentType !== "passport" && !back) return response.status(400).json({ error: "The back side of the document is required" });
 
-  const documentImageUrl = `/uploads/${request.file.filename}`;
-  const submission = await createKycSubmission({ userId: request.user.id, documentType, fullName, documentNumber, address, documentImageUrl });
+  const submission = await createKycSubmission({
+    userId: request.user.id, documentType, fullName, documentNumber, address, dateOfBirth, country,
+    documentImageUrl: `/uploads/${front.filename}`,
+    documentBackUrl: back ? `/uploads/${back.filename}` : null,
+    selfieUrl: selfie ? `/uploads/${selfie.filename}` : null,
+  });
   // Any new submission needs fresh review, even if a prior one was rejected.
   const user = await updateUser(request.user.id, { kycStatus: "pending" });
   response.status(201).json({ submission, user: publicUser(user) });
