@@ -1418,6 +1418,7 @@ function scaleSeries(series, factor) {
 const seriesMatchFullBars = 360; // the last 30 minutes take the full adjustment
 const seriesMatchRampBars = 360; // the 30 minutes before that blend into it
 const seriesMatchMaxFactor = 100;
+const seriesMatchMaxRealFactor = 4;
 
 // Scales the size of each recent bar's move (never its direction or shape) so
 // the typical move matches targetPercent. Prices are rebuilt backward from the
@@ -1444,7 +1445,13 @@ function matchHistoryVolatility(series, targetPercent) {
       bar.low = Math.min(bar.open, bar.close) * (1 - (Math.abs(gaussian()) * targetPercent * 0.4) / 100);
     }
   }
-  const factor = flat ? 1 : Math.min(seriesMatchMaxFactor, targetPercent / meanAbsPercent);
+  // Over a real hour of history (see realSeedBars) only a modest boost: a
+  // much bigger one invents a move the market never made, which the longer
+  // timeframes would show as a false spike. A very fast simulation then
+  // simply looks faster than the market around it, which it is.
+  const maxFactor = Number.isFinite(series.historyOffsetMs) ? seriesMatchMaxRealFactor : seriesMatchMaxFactor;
+  const factor = flat ? 1 : Math.min(maxFactor, targetPercent / meanAbsPercent);
+  const firstOpenBefore = bars[0].open;
   let close = bars.at(-1).close;
   for (let index = bars.length - 1; index >= 0; index -= 1) {
     const bar = bars[index];
@@ -1460,6 +1467,23 @@ function matchHistoryVolatility(series, targetPercent) {
     bar.high = Math.max(open, close) * (1 + wickUp);
     bar.low = Math.max(0.00001, Math.min(open, close) * (1 + wickDown));
     close = open;
+  }
+  // Livelier moves add up to a drift that would leave the older history at
+  // the wrong level (and, with a real week behind it, a false jump on the
+  // longer timeframes). Take it back out with a gentle ramp that's exactly 1
+  // at the last close and undoes the whole drift at the first open - every
+  // bar still opens at the previous close.
+  const ratio = firstOpenBefore / bars[0].open;
+  if (Number.isFinite(ratio) && ratio > 0 && ratio !== 1) {
+    const n = bars.length;
+    bars.forEach((bar, index) => {
+      bar.open *= ratio ** ((n - index) / n);
+      bar.close *= ratio ** ((n - index - 1) / n);
+      bar.high *= ratio ** ((n - index - 0.5) / n);
+      bar.low *= ratio ** ((n - index - 0.5) / n);
+      bar.high = Math.max(bar.high, bar.open, bar.close);
+      bar.low = Math.min(bar.low, bar.open, bar.close);
+    });
   }
 }
 
@@ -1484,6 +1508,7 @@ function getSeries(symbol) {
       simulated: Boolean(candle.simulated),
     }));
     const restored = { bars, sigma, volLevel: 1, anchor: bars.at(-1).close };
+    if (Number.isFinite(saved.historyOffsetMs)) restored.historyOffsetMs = saved.historyOffsetMs;
     priceSeries.set(symbol, restored);
     return restored;
   }
@@ -1493,13 +1518,24 @@ function getSeries(symbol) {
   return series;
 }
 
-// Fills a series with a fresh hour of generated history whose last bar sits
-// in lastBucketMs and closes exactly on basis, replacing whatever was there.
-function seedSeries(series, basis, lastBucketMs) {
+// Fills a series with a fresh hour of history whose last bar sits in
+// lastBucketMs and closes exactly on basis, replacing whatever was there: the
+// product's real last hour when its week of history is loaded (pass symbol),
+// otherwise a generated one.
+function seedSeries(series, basis, lastBucketMs, symbol = null) {
   series.bars = [];
   series.volLevel = 1;
   series.anchor = basis;
   delete series.pullPerBar;
+  delete series.historyOffsetMs;
+  const real = symbol ? realSeedBars(symbol, lastBucketMs) : null;
+  if (real) {
+    series.bars = real.bars;
+    series.historyOffsetMs = real.offsetMs;
+    scaleSeries(series, basis / series.bars.at(-1).close);
+    series.anchor = basis;
+    return;
+  }
   let price = basis;
   for (let index = seriesSeedBars - 1; index >= 0; index -= 1) {
     const bar = generatedBar(series, lastBucketMs - index * seriesBucketMs, price);
@@ -1789,6 +1825,194 @@ function startRealPriceFetching() {
   }
 }
 
+// ---------- One week of real 1-minute history ----------
+// What a simulation chart shows before its simulated part: the product's real
+// last week, in 1-minute candles - crypto from Coinbase's public candles API,
+// everything else from Yahoo Finance's chart API (unofficial, no key;
+// commodities come from their futures, whose level can sit a little off the
+// spot price - only the shape is used, rescaled to join the live price).
+// Kept in memory: fetched in full at boot, topped up every few minutes and
+// trimmed to 7 days. Prices themselves still come from the sources above.
+const historyMinuteMs = 60000;
+const historyKeepMs = 7 * 86400000;
+const historyRefreshMs = 5 * 60 * 1000;
+const coinbaseHistoryPageMinutes = 300;
+const marketHistory = new Map(); // symbol -> [{ t, open, high, low, close, volume }], ascending 1-minute bars
+const marketHistoryErrors = new Map();
+const yahooFuturesSymbols = { "XAU/USD": "GC=F", "XAG/USD": "SI=F", USOIL: "CL=F", UKOIL: "BZ=F", NATGAS: "NG=F" };
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function historySourceFor(symbol, category) {
+  if (category === "crypto") return { kind: "coinbase", id: `${symbol.split("/")[0]}-USD` };
+  if (yahooFuturesSymbols[symbol]) return { kind: "yahoo", id: yahooFuturesSymbols[symbol] };
+  if (category === "stocks") return { kind: "yahoo", id: symbol };
+  if (category === "forex" && symbol.includes("/")) {
+    const [base, quote] = symbol.split("/");
+    return { kind: "yahoo", id: base === "USD" ? `${quote}=X` : `${base}${quote}=X` };
+  }
+  return null;
+}
+
+async function fetchHistoryJson(url) {
+  const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (FXCC price history)" }, signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+async function fetchCoinbaseHistory(productId, sinceMs) {
+  const bars = [];
+  for (let start = sinceMs; start < Date.now(); start += coinbaseHistoryPageMinutes * historyMinuteMs) {
+    const end = Math.min(Date.now(), start + coinbaseHistoryPageMinutes * historyMinuteMs);
+    const rows = await fetchHistoryJson(
+      `https://api.exchange.coinbase.com/products/${productId}/candles?granularity=60&start=${new Date(start).toISOString()}&end=${new Date(end).toISOString()}`,
+    );
+    if (!Array.isArray(rows)) throw new Error(rows?.message || "unexpected response");
+    // Each row: [time (s), low, high, open, close, volume].
+    for (const [time, low, high, open, close, volume] of rows) bars.push({ t: time * 1000, open, high, low, close, volume });
+    await pause(150); // well inside Coinbase's public rate limit
+  }
+  return bars;
+}
+
+async function fetchYahooHistory(ticker, sinceMs) {
+  // 7d reaches back seven trading days, enough for a full week of minutes.
+  const range = Date.now() - sinceMs > 86400000 ? "7d" : "1d";
+  const payload = await fetchHistoryJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=${range}`);
+  const result = payload?.chart?.result?.[0];
+  if (!result) throw new Error(payload?.chart?.error?.description || "no data");
+  const quote = result.indicators?.quote?.[0] || {};
+  const bars = [];
+  (result.timestamp || []).forEach((time, index) => {
+    const [open, high, low, close] = [quote.open?.[index], quote.high?.[index], quote.low?.[index], quote.close?.[index]];
+    if ([open, high, low, close].every((value) => Number.isFinite(value) && value > 0)) {
+      bars.push({ t: time * 1000, open, high, low, close, volume: quote.volume?.[index] || 0 });
+    }
+  });
+  return bars;
+}
+
+function mergeHistory(symbol, bars) {
+  const byMinute = new Map((marketHistory.get(symbol) || []).map((bar) => [bar.t, bar]));
+  for (const bar of bars) byMinute.set(Math.floor(bar.t / historyMinuteMs) * historyMinuteMs, { ...bar, t: Math.floor(bar.t / historyMinuteMs) * historyMinuteMs });
+  // A week back from the product's own latest trade, not from now, so a
+  // market that's closed (a weekend, overnight) still keeps a full week of
+  // trading rather than a week of calendar that's partly empty.
+  const sorted = [...byMinute.values()].sort((x, y) => x.t - y.t);
+  const cutoff = (sorted.at(-1)?.t ?? Date.now()) - historyKeepMs;
+  marketHistory.set(symbol, sorted.filter((bar) => bar.t >= cutoff));
+}
+
+async function refreshMarketHistory() {
+  const instruments = await listInstruments({ includeDisabled: true });
+  for (const instrument of instruments) {
+    const source = historySourceFor(instrument.symbol, instrument.category);
+    if (!source) continue;
+    const known = marketHistory.get(instrument.symbol);
+    // A top-up re-reads the last few minutes too, since the newest candle
+    // is usually still forming when it's first fetched.
+    const sinceMs = known?.length ? known.at(-1).t - 10 * historyMinuteMs : Date.now() - historyKeepMs;
+    try {
+      const bars = source.kind === "coinbase" ? await fetchCoinbaseHistory(source.id, sinceMs) : await fetchYahooHistory(source.id, sinceMs);
+      if (!bars.length && !known?.length) throw new Error("no candles returned");
+      mergeHistory(instrument.symbol, bars);
+      if (marketHistoryErrors.has(instrument.symbol)) console.log(`Price history for ${instrument.symbol} recovered.`);
+      marketHistoryErrors.delete(instrument.symbol);
+    } catch (error) {
+      if (marketHistoryErrors.get(instrument.symbol) !== error.message) {
+        console.warn(`Price history for ${instrument.symbol} (${source.kind} ${source.id}) failed: ${error.message}`);
+      }
+      marketHistoryErrors.set(instrument.symbol, error.message);
+    }
+    await pause(200);
+  }
+}
+
+function startMarketHistoryFetching() {
+  if (process.env.MARKET_HISTORY === "off") return;
+  const run = () =>
+    refreshMarketHistory()
+      .catch((error) => console.warn("Refreshing price history failed:", error.message))
+      .finally(() => setTimeout(run, historyRefreshMs));
+  run();
+}
+
+// The real hour leading up to a fresh simulation, as 5-second bars: the last
+// 60 minutes of history, moved forward in time (by whole minutes) so they end
+// now, with each minute traced open -> one extreme -> the other -> close
+// across its twelve 5-second bars. Moving the hour forward means a product
+// whose market is closed (or whose data runs a few minutes behind) still
+// opens on its last real trading, not on a flat line. Returns null without
+// enough history. offsetMs is how far the history was moved, so the rest of
+// the week can be drawn before it on the same time axis.
+function realSeedBars(symbol, lastBucketMs) {
+  const history = marketHistory.get(symbol);
+  if (!history || history.length < 60) return null;
+  const lastMinute = history.at(-1).t;
+  const offsetMs = Math.max(0, Math.floor((lastBucketMs - lastMinute) / historyMinuteMs) * historyMinuteMs);
+  const hour = history.filter((bar) => bar.t > lastMinute - 60 * historyMinuteMs);
+  const bars = [];
+  const subBars = historyMinuteMs / seriesBucketMs;
+  let previous = null;
+  for (const minute of hour) {
+    // Minutes the market skipped inside the hour carry flat.
+    for (let t = previous ? previous.t + historyMinuteMs : minute.t; t < minute.t; t += historyMinuteMs) {
+      for (let k = 0; k < subBars; k += 1) {
+        const c = previous.close;
+        bars.push({ t: t + offsetMs + k * seriesBucketMs, open: c, high: c, low: c, close: c, volume: 0, simulated: false });
+      }
+    }
+    const up = minute.close >= minute.open;
+    const [first, second] = up ? [minute.low, minute.high] : [minute.high, minute.low];
+    // Twelve evenly spaced points along the minute's path, measured by
+    // distance travelled - so a leg of zero length (a minute that opened at
+    // its low, say) takes no time instead of drawing flat 5-second bars.
+    const path = [minute.open, first, second, minute.close];
+    const legs = [0, 1, 2].map((i) => Math.abs(path[i + 1] - path[i]));
+    const total = legs[0] + legs[1] + legs[2];
+    const points = [];
+    for (let k = 0; k <= subBars; k += 1) {
+      let along = (total * k) / subBars;
+      let i = 0;
+      while (i < 2 && along > legs[i]) along -= legs[i++];
+      points.push(legs[i] > 0 ? path[i] + ((path[i + 1] - path[i]) * along) / legs[i] : path[i + 1]);
+    }
+    const volume = minute.volume > 0 ? minute.volume / subBars : 20 + Math.random() * 60;
+    for (let k = 0; k < subBars; k += 1) {
+      const open = points[k];
+      const close = points[k + 1];
+      bars.push({ t: minute.t + offsetMs + k * seriesBucketMs, open, high: Math.max(open, close), low: Math.min(open, close), close, volume, simulated: false });
+    }
+    previous = minute;
+  }
+  // Up to the bucket in progress, flat at the last close.
+  for (let t = bars.at(-1).t + seriesBucketMs; t <= lastBucketMs; t += seriesBucketMs) {
+    const c = bars.at(-1).close;
+    bars.push({ t, open: c, high: c, low: c, close: c, volume: 0, simulated: false });
+  }
+  return { bars: bars.filter((bar) => bar.t <= lastBucketMs), offsetMs };
+}
+
+// The part of the week that comes before a series' first bar, on the series'
+// time axis and price level: shifted by the offset its seed hour was moved
+// by, and scaled so its last close meets the series' first open.
+function historyBeforeSeries(symbol, series) {
+  const history = marketHistory.get(symbol);
+  if (!history?.length || !Number.isFinite(series.historyOffsetMs) || !series.bars.length) return [];
+  const boundary = series.bars[0].t - series.historyOffsetMs;
+  const before = history.filter((bar) => bar.t + historyMinuteMs <= boundary);
+  if (!before.length) return [];
+  const factor = series.bars[0].open / before.at(-1).close;
+  return before.map((bar) => ({
+    t: bar.t + series.historyOffsetMs,
+    open: bar.open * factor,
+    high: bar.high * factor,
+    low: bar.low * factor,
+    close: bar.close * factor,
+    volume: bar.volume,
+    simulated: false,
+  }));
+}
+
 // Lets the client show account balances, P&L, and instrument prices in a
 // currency other than USD - purely a display conversion (everything stays
 // stored and computed in USD; see /api/markets/fx-rate for how the client
@@ -1833,8 +2057,8 @@ async function loadCandleSnapshotsFromDb() {
   }
 }
 
-async function saveCandleSnapshot(symbol, candles, bucketMs = 60000) {
-  const snapshot = { version: seriesSnapshotVersion, bucketMs, candles };
+async function saveCandleSnapshot(symbol, candles, bucketMs = 60000, extra = {}) {
+  const snapshot = { version: seriesSnapshotVersion, bucketMs, candles, ...extra };
   candleSnapshotStore.set(symbol, { candles: snapshot, updatedAt: new Date().toISOString() });
   if (!pool) return;
   await query(
@@ -1853,7 +2077,7 @@ async function persistSeriesSnapshots() {
     try {
       const recent = series.bars.slice(-seriesChartBars);
       if (priceSimulations.has(symbol) || recent.some((bar) => bar.simulated)) {
-        await saveCandleSnapshot(symbol, serializeBars(recent), seriesBucketMs);
+        await saveCandleSnapshot(symbol, serializeBars(recent), seriesBucketMs, Number.isFinite(series.historyOffsetMs) ? { historyOffsetMs: series.historyOffsetMs } : {});
       } else {
         await saveCandleSnapshot(symbol, resampleBars(series.bars, 60000).slice(-240));
       }
@@ -2067,7 +2291,7 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     // Starting a simulation from the admin controls begins on a clean chart:
     // fresh history ending at the start price (or the market price), with
     // nothing left of an earlier run's move or of the drift back after it.
-    seedSeries(series, hasStartPrice ? startPrice : simulationResetPrice(symbol), seriesBucket(Date.now()));
+    seedSeries(series, hasStartPrice ? startPrice : simulationResetPrice(symbol), seriesBucket(Date.now()), symbol);
   } else if (hasStartPrice) {
     scaleSeries(series, startPrice / series.bars.at(-1).close);
   }
@@ -2757,6 +2981,9 @@ app.get("/api/admin/prices", requireAuth, attachUser, requireRole("admin"), asyn
       realPriceAt: real ? new Date(real.at).toISOString() : null,
       simulated: priceSimulations.has(instrument.symbol),
       held: isPriceHeld(instrument.symbol),
+      // Minutes of real history loaded for simulation charts (up to a week).
+      historyMinutes: marketHistory.get(instrument.symbol)?.length || 0,
+      historyError: marketHistoryErrors.get(instrument.symbol) || null,
     };
   }
   response.json({ prices });
@@ -2832,12 +3059,25 @@ app.get("/api/markets/candles", async (request, response) => {
 // simulation ticks are recorded here as they happen, loading this at any
 // point (a refresh, switching tabs or products and back) returns the same
 // continuous chart the live view had been building.
+// Candle sizes a simulation chart can show. 5S is the series' own 5-second
+// bars; every other size also reaches back across the product's real week
+// (see historyBeforeSeries).
+const seriesTimeframes = { "5S": 5000, "1M": 60000, "5M": 300000, "15M": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000 };
+const seriesMaxCandles = 3000;
+
 app.get("/api/markets/series", async (request, response) => {
   const symbol = String(request.query.symbol || "").trim().toUpperCase();
   if (!(await isKnownInstrument(symbol))) return response.status(400).json({ error: "Unknown symbol" });
+  const timeframe = String(request.query.tf || "5S").toUpperCase();
+  const bucketMs = seriesTimeframes[timeframe];
+  if (!bucketMs) return response.status(400).json({ error: "Unknown timeframe" });
   const series = getSeries(symbol);
   advanceSeries(symbol, series);
-  response.json({ symbol, bucketMs: seriesBucketMs, bars: serializeBars(series.bars.slice(-seriesChartBars)) });
+  if (bucketMs === seriesBucketMs) {
+    return response.json({ symbol, timeframe, bucketMs, bars: serializeBars(series.bars.slice(-seriesChartBars)) });
+  }
+  const bars = resampleBars([...historyBeforeSeries(symbol, series), ...series.bars], bucketMs).slice(-seriesMaxCandles);
+  response.json({ symbol, timeframe, bucketMs, bars });
 });
 
 app.post("/api/service-requests", requireAuth, attachUser, upload.single("attachment"), async (request, response) => {
@@ -2969,6 +3209,7 @@ seedDefaults()
     });
     await restoreSimulations();
     startRealPriceFetching();
+    startMarketHistoryFetching();
     tickSyntheticQuotes();
     setInterval(tickSyntheticQuotes, syntheticQuoteTickIntervalMs);
     setInterval(() => {

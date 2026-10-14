@@ -603,19 +603,17 @@
                   <div><span>Spread</span><strong id="tradeSpreadValue">0.02</strong></div>
                 </div>
                 <div class="timeframes">
+                  <button class="is-active" type="button" data-timeframe="5S">5s</button>
                   <button type="button" data-timeframe="1M">1M</button>
                   <button type="button" data-timeframe="5M">5M</button>
-                  <button class="is-active" type="button" data-timeframe="1H">1H</button>
+                  <button type="button" data-timeframe="1H">1H</button>
                   <select id="tradeTimeframeSelect" aria-label="More timeframes">
                     <option value="" selected disabled>More…</option>
+                    <option value="15M">15M</option>
+                    <option value="4H">4H</option>
                     <option value="1D">1D</option>
-                    <option value="5D">5D</option>
-                    <option value="1MO">1Mo</option>
-                    <option value="5MO">5Mo</option>
-                    <option value="1Y">1Y</option>
-                    <option value="ALL">All</option>
                   </select>
-                  <button id="tradeCalendarToggle" type="button" class="calendar-toggle" aria-label="Choose a custom date range" aria-expanded="false" aria-haspopup="dialog">📅</button>
+                  <button id="tradeCalendarToggle" type="button" class="calendar-toggle is-hidden" aria-label="Choose a custom date range" aria-expanded="false" aria-haspopup="dialog">📅</button>
                 </div>
                 <div id="tradeCalendarPopover" class="calendar-popover is-hidden" role="dialog" aria-label="Custom date range" aria-modal="false">
                   <label>From<input id="tradeCalendarStart" type="date"></label>
@@ -914,6 +912,9 @@
         </div>
       </div>
 
+      <!-- Desktop only: the Profile nav item opens this menu (filled from #profileModalMenu by openProfileDropdown in app.js). -->
+      <div id="profileDropdown" class="profile-dropdown" role="menu" aria-label="Account menu" hidden></div>
+
       <div id="profileModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-label="My Account">
         <div class="profile-modal">
           <button id="closeProfileModal" class="profile-modal-x" type="button" aria-label="Close profile">×</button>
@@ -926,7 +927,8 @@
               <div class="profile-modal-kyc-badge status-pill" id="profileKycBadge">Pending</div>
             </div>
             <nav class="profile-modal-menu" id="profileModalMenu" aria-label="Account menu">
-              <button class="is-active" type="button" data-profile-pane="kyc"><span>🪪</span> <span>KYC Verification</span></button>
+              <button class="is-active" type="button" data-profile-pane="details"><span>👤</span> <span>Account Details</span></button>
+              <button type="button" data-profile-pane="kyc"><span>🪪</span> <span>KYC Verification</span></button>
               <button type="button" data-profile-pane="bank"><span>🏦</span> <span>Bind Account</span></button>
               <button type="button" data-profile-pane="orders"><span>☰</span> <span>Orders</span></button>
               <button type="button" data-profile-pane="deposit"><span>↓</span> <span>Deposit</span></button>
@@ -946,7 +948,14 @@
               <strong id="profileModalTitle">Account</strong>
             </div>
 
-            <div class="profile-pane is-active" data-profile-pane-content="kyc">
+            <div class="profile-pane is-active" data-profile-pane-content="details">
+              <h3>Account Details</h3>
+              <p class="profile-pane-hint">Your account at a glance. Identity documents are handled separately under KYC Verification.</p>
+              <div id="accountDetailsCard" class="kyc-submission-card"></div>
+              <button class="primary-action" type="button" data-profile-goto-pane="kyc">Go to KYC Verification</button>
+            </div>
+
+            <div class="profile-pane" data-profile-pane-content="kyc">
               <h3>Identity Verification</h3>
               <p class="profile-pane-hint">Verify your identity to unlock deposits and withdrawals.</p>
               <div id="kycSubmissionSummary"></div>
