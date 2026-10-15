@@ -3289,28 +3289,6 @@ function renderTradeCandles() {
     ctx.globalAlpha = 1;
   });
 
-  // Marks where a running simulation's own price stream took over from
-  // real/synthetic history (see simulationStartTime above) - without this,
-  // zooming out far enough to see real pre-simulation candles next to a much
-  // bigger simulated move makes the quiet real portion look like it might be
-  // placeholder data rather than what it actually is: real history that just
-  // barely moved compared to the deliberately larger simulated swing next to
-  // it.
-  if (tradeChartState.simulationStartTime) {
-    const markerIndex = candles.findIndex((candle) => candle.time === tradeChartState.simulationStartTime);
-    if (markerIndex >= 0) {
-      const markerX = chart.left + markerIndex * candleStep + candleStep / 2;
-      ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = "rgba(255, 176, 0, 0.55)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(markerX, chart.top);
-      ctx.lineTo(markerX, chart.top + height);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-  }
-
   const latest = candles.at(-1);
   const priceY = yFor(latest.close);
   const priceMarker = document.querySelector("#tradePriceMarker");
