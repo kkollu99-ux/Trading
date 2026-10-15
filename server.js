@@ -1802,27 +1802,77 @@ function getSeries(symbol) {
   return series;
 }
 
-// Fills a series with a fresh hour of history whose last bar sits in
+// Each product's pre-simulation history is generated once and then kept (in
+// memory and in the database), so every refresh, restart and fresh simulation
+// start shows the same candles - re-timed to end now and rescaled to the start
+// price - instead of a newly invented history each time. A baseline made from
+// a generated walk is replaced once, by the product's real last hour, as soon
+// as that history has been fetched; after that it stays.
+const historyBaselines = new Map(); // key -> { source: "real" | "synthetic", offsetMs, bars: [[t, o, h, l, c, v], ...] }
+
+async function loadHistoryBaselinesFromDb() {
+  if (!pool) return;
+  try {
+    for (const row of await query("SELECT symbol, source, offset_ms, bars FROM history_baselines")) {
+      historyBaselines.set(row.symbol, { source: row.source, offsetMs: row.offset_ms == null ? null : Number(row.offset_ms), bars: row.bars });
+    }
+  } catch (error) {
+    console.warn("Loading history baselines failed:", error.message);
+  }
+}
+
+function rememberHistoryBaseline(key, source, series) {
+  const baseline = {
+    source,
+    offsetMs: Number.isFinite(series.historyOffsetMs) ? series.historyOffsetMs : null,
+    bars: series.bars.map((bar) => [bar.t, bar.open, bar.high, bar.low, bar.close, bar.volume]),
+  };
+  historyBaselines.set(key, baseline);
+  if (!pool) return;
+  query(
+    `INSERT INTO history_baselines (symbol, source, offset_ms, bars, created_at) VALUES ($1, $2, $3, $4::jsonb, NOW())
+     ON CONFLICT (symbol) DO UPDATE SET source = EXCLUDED.source, offset_ms = EXCLUDED.offset_ms, bars = EXCLUDED.bars, created_at = NOW()`,
+    [key, source, baseline.offsetMs, JSON.stringify(baseline.bars)],
+  ).catch((error) => console.warn("Saving history baseline failed:", error.message));
+}
+
+function applyHistoryBaseline(series, baseline, basis, lastBucketMs) {
+  const delta = lastBucketMs - baseline.bars.at(-1)[0];
+  series.bars = baseline.bars.map(([t, open, high, low, close, volume]) => ({ t: t + delta, open, high, low, close, volume, simulated: false }));
+  if (Number.isFinite(baseline.offsetMs)) series.historyOffsetMs = baseline.offsetMs + delta;
+  scaleSeries(series, basis / series.bars.at(-1).close);
+  series.anchor = basis;
+}
+
+// Fills a series with the product's hour of history so that its last bar sits in
 // lastBucketMs and closes exactly on basis, replacing whatever was there: the
-// product's real last hour when its week of history is loaded (pass symbol),
-// otherwise a generated one.
+// kept baseline if there is one, otherwise the product's real last hour when
+// its week of history is loaded (pass symbol), otherwise a generated one.
 function seedSeries(series, basis, lastBucketMs, symbol = null, seedKey = null) {
   series.bars = [];
   series.volLevel = 1;
   series.anchor = basis;
   delete series.pullPerBar;
   delete series.historyOffsetMs;
+  const key = symbol || seedKey;
+  const baseline = key ? historyBaselines.get(key) : null;
+  const realReady = Boolean(symbol) && (marketHistory.get(symbol)?.length || 0) >= 60;
+  if (baseline && !(baseline.source === "synthetic" && realReady)) {
+    applyHistoryBaseline(series, baseline, basis, lastBucketMs);
+    return;
+  }
   const real = symbol ? realSeedBars(symbol, lastBucketMs) : null;
   if (real) {
     series.bars = real.bars;
     series.historyOffsetMs = real.offsetMs;
     scaleSeries(series, basis / series.bars.at(-1).close);
     series.anchor = basis;
+    if (key) rememberHistoryBaseline(key, "real", series);
     return;
   }
   let price = basis;
   const liveRandom = seriesRandom;
-  seriesRandom = seededRandom(`${symbol || seedKey || "series"}:history`);
+  seriesRandom = seededRandom(`${key || "series"}:history`);
   try {
     for (let index = seriesSeedBars - 1; index >= 0; index -= 1) {
       const bar = generatedBar(series, lastBucketMs - index * seriesBucketMs, price);
@@ -1835,6 +1885,7 @@ function seedSeries(series, basis, lastBucketMs, symbol = null, seedKey = null) 
   // The walk wanders off basis; rescale so the history ends exactly on it.
   scaleSeries(series, basis / price);
   series.anchor = basis;
+  if (key) rememberHistoryBaseline(key, "synthetic", series);
 }
 
 // Where a fresh simulation opens when admin gives no start price: the real
@@ -3589,6 +3640,7 @@ seedDefaults()
     // Loaded before anything prices a product, so every series resumes from
     // where it was before this restart (see seedBasisPrice).
     await loadCandleSnapshotsFromDb();
+    await loadHistoryBaselinesFromDb();
     server.listen(port, () => {
       console.log(`FXCM platform running on http://127.0.0.1:${port}`);
     });
