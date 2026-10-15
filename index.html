@@ -810,7 +810,10 @@
                 <h2>Admin Control Center</h2>
                 <p>Create clients, update balances, and review KYC state.</p>
               </div>
-              <button id="refreshManagedUsers" class="secondary-action compact-action" type="button">⟳ Refresh</button>
+              <div class="user-management-actions">
+                <button id="purgeNonAdminUsers" class="danger-action compact-action" type="button">🗑 Delete all non-admin users</button>
+                <button id="refreshManagedUsers" class="secondary-action compact-action" type="button">⟳ Refresh</button>
+              </div>
             </header>
             <div class="user-management-metrics">
               <article><span>Total Users</span><strong id="managedTotalUsers">0</strong></article>

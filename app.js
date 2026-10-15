@@ -5036,6 +5036,19 @@ async function loadManagedInstruments() {
 
 document.querySelector("#managedUserSearch")?.addEventListener("input", renderManagedUsers);
 document.querySelector("#refreshManagedUsers")?.addEventListener("click", loadManagedUsers);
+document.querySelector("#purgeNonAdminUsers")?.addEventListener("click", async () => {
+  if (!canEditManagedUsers()) return;
+  const typed = window.prompt("This permanently deletes EVERY account that is not an admin (clients, team, test and demo accounts) together with their orders, balances, ledger, chats and KYC records.\n\nType DELETE to confirm.");
+  if (typed === null) return;
+  if (typed.trim() !== "DELETE") return setManagedMessage("Cancelled - you must type DELETE exactly.", "error");
+  try {
+    const result = await adminFetch("/api/admin/users/purge-non-admin", { method: "POST", body: JSON.stringify({ confirm: "DELETE" }) });
+    await loadManagedUsers();
+    setManagedMessage(`Deleted ${result.removed} non-admin account${result.removed === 1 ? "" : "s"}.`, "success");
+  } catch (error) {
+    setManagedMessage(error.message, "error");
+  }
+});
 document.querySelector("#refreshManagedInstruments")?.addEventListener("click", loadManagedInstruments);
 
 // Admin/team support requests: the real client-facing chat (see

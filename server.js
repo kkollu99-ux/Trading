@@ -1257,6 +1257,53 @@ app.get("/api/admin/users", requireAuth, attachUser, requireRole("admin"), async
   response.json({ users: users.map(publicUser) });
 });
 
+async function purgeNonAdminUsers() {
+  if (!pool) {
+    const doomed = new Set(memory.users.filter((user) => user.role !== "admin").map((user) => user.id));
+    memory.orders = memory.orders.filter((item) => !doomed.has(item.user_id));
+    memory.ledger = memory.ledger.filter((item) => !doomed.has(item.user_id) && !doomed.has(item.created_by));
+    memory.chatMessages = memory.chatMessages.filter((item) => !doomed.has(item.sender_id));
+    memory.serviceRequests = memory.serviceRequests.filter((item) => !doomed.has(item.user_id));
+    memory.kycSubmissions = memory.kycSubmissions.filter((item) => !doomed.has(item.user_id));
+    memory.bankAccounts = memory.bankAccounts.filter((item) => !doomed.has(item.user_id));
+    memory.users = memory.users.filter((user) => !doomed.has(user.id));
+    return doomed.size;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("CREATE TEMP TABLE doomed ON COMMIT DROP AS SELECT id FROM users WHERE role <> 'admin'");
+    await client.query("UPDATE service_requests SET assigned_team_id = NULL WHERE assigned_team_id IN (SELECT id FROM doomed)");
+    await client.query("UPDATE kyc_submissions SET reviewed_by = NULL WHERE reviewed_by IN (SELECT id FROM doomed)");
+    await client.query("DELETE FROM audit_logs WHERE actor_id IN (SELECT id FROM doomed)");
+    await client.query("DELETE FROM chat_messages WHERE sender_id IN (SELECT id FROM doomed)");
+    await client.query("DELETE FROM ledger WHERE user_id IN (SELECT id FROM doomed) OR created_by IN (SELECT id FROM doomed)");
+    for (const table of ["orders", "service_requests", "kyc_submissions", "bank_accounts"]) {
+      await client.query(`DELETE FROM ${table} WHERE user_id IN (SELECT id FROM doomed)`);
+    }
+    const removed = await client.query("DELETE FROM users WHERE id IN (SELECT id FROM doomed)");
+    await client.query("COMMIT");
+    return removed.rowCount;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+app.post("/api/admin/users/purge-non-admin", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
+  if (request.body?.confirm !== "DELETE") return response.status(400).json({ error: 'Type DELETE to confirm' });
+  try {
+    const removed = await purgeNonAdminUsers();
+    await logEvent({ category: "admin", action: "purge_non_admin_users", actorId: request.user.id, actorLabel: request.user.email, details: { removed } });
+    response.json({ removed });
+  } catch (error) {
+    console.warn("Purging users failed:", error.message);
+    response.status(500).json({ error: "Could not delete the users. Nothing was changed." });
+  }
+});
+
 app.post("/api/admin/users", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const email = String(request.body.email || "").trim().toLowerCase();
   const password = String(request.body.password || "Client@12345");
