@@ -1611,10 +1611,32 @@ function seriesBucket(ms) {
   return Math.floor(ms / seriesBucketMs) * seriesBucketMs;
 }
 
+// Random source for the synthetic walk. It is Math.random for live ticks, but
+// while a product's history is being generated (seedSeries) it is a seeded
+// generator, so the same product always gets the same-looking history instead
+// of a different one every time it is rebuilt (a restart, a new simulation).
+let seriesRandom = Math.random;
+
+function seededRandom(text) {
+  let h = 1779033703 ^ text.length;
+  for (let i = 0; i < text.length; i += 1) {
+    h = Math.imul(h ^ text.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let state = h >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function gaussian() {
   let u = 0;
-  while (u === 0) u = Math.random();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+  while (u === 0) u = seriesRandom();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * seriesRandom());
 }
 
 // Where a symbol's series starts the first time this process uses it: its
@@ -1641,7 +1663,7 @@ function seedBasisPrice(symbol) {
 // market without drifting off without bound. fraction is how much of one
 // 5-second bar this step represents (a 2.5s tick is half a bar).
 function syntheticStep(series, price, fraction = 1) {
-  series.volLevel = Math.max(0.5, Math.min(2.2, series.volLevel * (1 + (Math.random() - 0.5) * 0.12)));
+  series.volLevel = Math.max(0.5, Math.min(2.2, series.volLevel * (1 + (seriesRandom() - 0.5) * 0.12)));
   series.anchor = Math.max(0.00001, series.anchor * (1 + series.sigma * 0.25 * gaussian() * Math.sqrt(fraction)));
   const pull = (series.anchor - price) * (series.pullPerBar || 0.015) * fraction;
   const shock = price * series.sigma * series.volLevel * gaussian() * Math.sqrt(fraction);
@@ -1657,7 +1679,7 @@ function generatedBar(series, t, open) {
     close,
     high: Math.max(open, close) + Math.abs(gaussian()) * wick,
     low: Math.max(0.00001, Math.min(open, close) - Math.abs(gaussian()) * wick),
-    volume: 20 + Math.random() * 60 * series.volLevel,
+    volume: 20 + seriesRandom() * 60 * series.volLevel,
     simulated: false,
   };
 }
@@ -1775,7 +1797,7 @@ function getSeries(symbol) {
     return restored;
   }
   const series = { bars: [], sigma, volLevel: 1, anchor: 0 };
-  seedSeries(series, seedBasisPrice(symbol), seriesBucket(Date.now()) - seriesBucketMs);
+  seedSeries(series, seedBasisPrice(symbol), seriesBucket(Date.now()) - seriesBucketMs, null, symbol);
   priceSeries.set(symbol, series);
   return series;
 }
@@ -1784,7 +1806,7 @@ function getSeries(symbol) {
 // lastBucketMs and closes exactly on basis, replacing whatever was there: the
 // product's real last hour when its week of history is loaded (pass symbol),
 // otherwise a generated one.
-function seedSeries(series, basis, lastBucketMs, symbol = null) {
+function seedSeries(series, basis, lastBucketMs, symbol = null, seedKey = null) {
   series.bars = [];
   series.volLevel = 1;
   series.anchor = basis;
@@ -1799,10 +1821,16 @@ function seedSeries(series, basis, lastBucketMs, symbol = null) {
     return;
   }
   let price = basis;
-  for (let index = seriesSeedBars - 1; index >= 0; index -= 1) {
-    const bar = generatedBar(series, lastBucketMs - index * seriesBucketMs, price);
-    series.bars.push(bar);
-    price = bar.close;
+  const liveRandom = seriesRandom;
+  seriesRandom = seededRandom(`${symbol || seedKey || "series"}:history`);
+  try {
+    for (let index = seriesSeedBars - 1; index >= 0; index -= 1) {
+      const bar = generatedBar(series, lastBucketMs - index * seriesBucketMs, price);
+      series.bars.push(bar);
+      price = bar.close;
+    }
+  } finally {
+    seriesRandom = liveRandom;
   }
   // The walk wanders off basis; rescale so the history ends exactly on it.
   scaleSeries(series, basis / price);
@@ -2238,11 +2266,21 @@ function realSeedBars(symbol, lastBucketMs) {
       while (i < 2 && along > legs[i]) along -= legs[i++];
       points.push(legs[i] > 0 ? path[i] + ((path[i + 1] - path[i]) * along) / legs[i] : path[i + 1]);
     }
-    const volume = minute.volume > 0 ? minute.volume / subBars : 20 + Math.random() * 60;
+    // The straight legs above would draw a perfectly regular saw-tooth. Give the
+    // twelve points a little deterministic noise (same minute, same bars, every
+    // time) and real-looking wicks, kept inside the minute's own low-high range.
+    const rand = seededRandom(`${symbol}:${minute.t}`);
+    const span = Math.max(minute.high - minute.low, minute.close * 0.000005);
+    for (let k = 1; k < subBars; k += 1) {
+      points[k] = Math.min(minute.high, Math.max(minute.low, points[k] + (rand() - 0.5) * span * 0.18));
+    }
+    const volume = minute.volume > 0 ? minute.volume / subBars : 20 + rand() * 60;
     for (let k = 0; k < subBars; k += 1) {
       const open = points[k];
       const close = points[k + 1];
-      bars.push({ t: minute.t + offsetMs + k * seriesBucketMs, open, high: Math.max(open, close), low: Math.min(open, close), close, volume, simulated: false });
+      const high = Math.min(minute.high, Math.max(open, close) + rand() * span * 0.08);
+      const low = Math.max(minute.low, Math.min(open, close) - rand() * span * 0.08);
+      bars.push({ t: minute.t + offsetMs + k * seriesBucketMs, open, high: Math.max(high, open, close), low: Math.min(low, open, close), close, volume: volume * (0.6 + rand() * 0.8), simulated: false });
     }
     previous = minute;
   }
