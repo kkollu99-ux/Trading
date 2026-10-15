@@ -5858,6 +5858,7 @@ startVersionCheck();
   const say = (text, type) => { message.textContent = text || ""; message.classList.toggle("is-error", type === "error"); message.classList.toggle("is-success", type === "success"); };
 
   function showStep(n) {
+    if (typeof stopCamera === "function") stopCamera();
     step = n;
     form.querySelectorAll("[data-kyc-step]").forEach((el) => el.classList.toggle("is-active", Number(el.dataset.kycStep) === n));
     modal.querySelectorAll("[data-kyc-step-dot]").forEach((el) => {
@@ -5960,8 +5961,54 @@ startVersionCheck();
   });
   backButton.addEventListener("click", () => step > 1 && showStep(step - 1));
 
-  function closeModal() { modal.classList.add("is-hidden"); document.body.classList.remove("kyc-open"); }
-  async function openModal() {
+  // ----- Selfie: live camera capture (file upload stays as a fallback) -----
+  const camera = document.querySelector("#kycCamera");
+  const video = document.querySelector("#kycVideo");
+  const selfieBox = document.querySelector("#kycSelfieBox");
+  let stream = null;
+  function stopCamera() {
+    stream?.getTracks().forEach((track) => track.stop());
+    stream = null;
+    if (video) video.srcObject = null;
+    camera.classList.add("is-hidden");
+    selfieBox.classList.remove("is-hidden");
+  }
+  async function startCamera() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      say("This browser can't open the camera. Use \"Upload a photo\" instead.", "error");
+      return field("selfie").click();
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false });
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      selfieBox.classList.add("is-hidden");
+      camera.classList.remove("is-hidden");
+      say("");
+    } catch (error) {
+      stopCamera();
+      say(error?.name === "NotAllowedError" ? "Camera access was blocked. Allow the camera in your browser, or use \"Upload a photo\"." : "No camera found. Use \"Upload a photo\" instead.", "error");
+    }
+  }
+  document.querySelector("#kycOpenCamera").addEventListener("click", startCamera);
+  document.querySelector("#kycUploadSelfie").addEventListener("click", () => field("selfie").click());
+  document.querySelector("#kycCamCancel").addEventListener("click", stopCamera);
+  document.querySelector("#kycSnap").addEventListener("click", () => {
+    if (!video.videoWidth) return say("The camera is still starting - try again in a second.", "error");
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      if (!blob) return say("Couldn't capture the photo. Try again.", "error");
+      stopCamera();
+      setFile("selfie", new File([blob], "selfie.jpg", { type: "image/jpeg" }));
+      document.querySelector("#kycOpenCamera").textContent = "🔄 Retake";
+    }, "image/jpeg", 0.9);
+  });
+
+  function closeModal() { stopCamera(); modal.classList.add("is-hidden"); document.body.classList.remove("kyc-open"); }
+  async function openModal(reason) {
     if (!currentSession?.token) return;
     submitted = false;
     note.classList.add("is-hidden");
@@ -5975,10 +6022,17 @@ startVersionCheck();
       note.classList.remove("is-hidden");
       return;
     }
+    const gate = typeof reason === "string" ? reason : "";
     if (status === "pending") {
       const result = await authFetch("/api/kyc/me").catch(() => null);
       if (result?.submission) {
-        note.textContent = "Your documents are under review. You can submit again if something needs fixing.";
+        note.textContent = gate
+          ? `Your documents are under review. ${gate} will unlock as soon as you are verified.`
+          : "Your documents are under review. You can submit again if something needs fixing.";
+        note.classList.remove("is-hidden");
+        if (gate) { form.classList.add("is-hidden"); return; }
+      } else if (gate) {
+        note.textContent = `Complete KYC verification to unlock ${gate.toLowerCase()}.`;
         note.classList.remove("is-hidden");
       }
     } else if (status === "rejected") {
@@ -5988,8 +6042,24 @@ startVersionCheck();
     showStep(1);
   }
 
-  document.querySelector("#openKycModal")?.addEventListener("click", openModal);
+  document.querySelector("#openKycModal")?.addEventListener("click", () => openModal());
+  window.openKycModal = openModal;
   document.querySelector("#kycModalClose")?.addEventListener("click", closeModal);
   modal.addEventListener("click", (event) => { if (event.target === modal) closeModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !modal.classList.contains("is-hidden")) closeModal(); });
+})();
+
+// ---------- Deposit / Withdraw need a verified account: send everyone else to KYC ----------
+(function setupKycGate() {
+  const gated = '[data-chat-topic="deposit"], [data-chat-topic="withdrawal"], [data-profile-pane="deposit"], [data-profile-pane="withdraw"]';
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest(gated);
+    if (!target || !currentSession?.user || currentSession.user.isDemo) return;
+    if (currentSession.user.kycStatus === "verified") return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const withdraw = target.dataset.chatTopic === "withdrawal" || target.dataset.profilePane === "withdraw";
+    closeProfileModal?.();
+    window.openKycModal?.(withdraw ? "Withdrawals" : "Deposits");
+  }, true);
 })();

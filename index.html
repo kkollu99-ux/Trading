@@ -997,10 +997,22 @@
             <p class="kyc-hint">Upload a clear selfie of your face in good light. Do not wear sunglasses or a hat.</p>
             <div class="kyc-upload" data-kyc-upload="selfie">
               <span class="kyc-upload-label">Selfie *</span>
-              <label class="kyc-drop"><input type="file" name="selfie" accept="image/jpeg,image/png,image/webp" capture="user" hidden />
+              <div id="kycCamera" class="kyc-camera is-hidden">
+                <video id="kycVideo" playsinline muted autoplay></video>
+                <div class="kyc-camera-actions">
+                  <button id="kycSnap" class="primary-action" type="button">📸 Take Photo</button>
+                  <button id="kycCamCancel" class="secondary-action" type="button">Cancel</button>
+                </div>
+              </div>
+              <div id="kycSelfieBox" class="kyc-drop">
+                <input type="file" name="selfie" accept="image/jpeg,image/png,image/webp" capture="user" hidden />
                 <img class="kyc-preview is-hidden" alt="" />
-                <span class="kyc-drop-text"><strong>Take or upload a selfie</strong><small>JPEG, PNG, WEBP — max 5 MB</small></span>
-                <span class="kyc-choose">Choose File</span></label>
+                <span class="kyc-drop-text"><strong>Take a selfie with your camera</strong><small>JPEG, PNG, WEBP — max 5 MB</small></span>
+                <span class="kyc-selfie-buttons">
+                  <button id="kycOpenCamera" class="kyc-choose kyc-choose-primary" type="button">📷 Open Camera</button>
+                  <button id="kycUploadSelfie" class="kyc-choose" type="button">Upload a photo</button>
+                </span>
+              </div>
             </div>
           </section>
           <section class="kyc-step" data-kyc-step="4">
