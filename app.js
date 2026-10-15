@@ -2651,6 +2651,8 @@ function updateTopTicker() {
 
 const timeframeMinutes = {
   "5S": 5 / 60,
+  "10S": 10 / 60,
+  "15S": 15 / 60,
   "1M": 1,
   "5M": 5,
   "15M": 15,
@@ -2740,6 +2742,8 @@ function ensureTradingViewScript() {
 // ("5D"/"5MO" are windows, not bar sizes), so those pick the closest bar size.
 const tradingViewIntervalMap = {
   "5S": "1",
+  "10S": "1",
+  "15S": "1",
   "1M": "1",
   "5M": "5",
   "15M": "15",
@@ -2975,7 +2979,7 @@ function formatChartTime(timeStr, timeframe) {
     if (timeframe === "1H" || timeframe === "4H") {
       return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric" });
     }
-    if (timeframe === "5S") return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    if (/^\d+S$/.test(timeframe)) return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
   }
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
@@ -3048,7 +3052,7 @@ function syncTradeTerminal(ohlcCandle) {
   setTradeText("#tradeAskValue", formatTradeNumber(ask));
   setTradeText("#tradeSpreadValue", formatTradeNumber(ask - bid));
   setTradeText("#tradePriceMarker", formatTradeNumber(livePrice));
-  setTradeText("#tradeTimeframeLabel", tradeChartState.timeframe === "5S" ? "5s" : tradeChartState.timeframe);
+  setTradeText("#tradeTimeframeLabel", /^\d+S$/.test(tradeChartState.timeframe) ? tradeChartState.timeframe.toLowerCase() : tradeChartState.timeframe);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("positive", movePercent >= 0);
   document.querySelector("#tradeSymbolChange")?.classList.toggle("danger-text", movePercent < 0);
   updateTopTicker();
@@ -3462,7 +3466,7 @@ const simulationSeriesBucketMs = 5000;
 // Candle sizes the simulation chart offers (the server's seriesTimeframes):
 // 5s from the live series itself, the rest reaching back over the product's
 // real last week.
-const simulationTimeframes = ["5S", "1M", "5M", "15M", "1H", "4H", "1D"];
+const simulationTimeframes = ["5S", "10S", "15S", "1M", "5M", "15M", "1H", "4H", "1D"];
 const maxSimulationSeriesCandles = 3000;
 let seriesRequestToken = 0;
 
@@ -3700,11 +3704,17 @@ initPanelResizer("#ticketResizeHandle", { varName: "--ticket-width", side: "righ
 // neutral state (no button highlighted / dropdown back to its placeholder).
 function setActiveTimeframeControl(value) {
   const select = document.querySelector("#tradeTimeframeSelect");
+  const secondsSelect = document.querySelector("#tradeSecondsSelect");
   const isSelectOption = select && Array.from(select.options).some((option) => option.value === value);
+  const isSecondsOption = secondsSelect && Array.from(secondsSelect.options).some((option) => option.value === value);
   document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.timeframe === value);
   });
   if (select) select.value = isSelectOption ? value : "";
+  if (secondsSelect) {
+    if (isSecondsOption) secondsSelect.value = value;
+    secondsSelect.classList.toggle("is-active", Boolean(isSecondsOption));
+  }
 }
 
 document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button) => {
@@ -3714,6 +3724,14 @@ document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button)
     tradeChartState.customRange = null;
     loadChartForCurrentSymbol();
   });
+});
+
+// How often a new candle appears: 5s, 10s or 15s.
+document.querySelector("#tradeSecondsSelect")?.addEventListener("change", (event) => {
+  setActiveTimeframeControl(event.target.value);
+  tradeChartState.timeframe = event.target.value;
+  tradeChartState.customRange = null;
+  loadChartForCurrentSymbol();
 });
 
 document.querySelector("#tradeTimeframeSelect")?.addEventListener("change", (event) => {
