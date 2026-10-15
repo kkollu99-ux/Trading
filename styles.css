@@ -7290,3 +7290,90 @@ body.kyc-open { overflow: hidden; }
 body { top: 0 !important; }
 .goog-text-highlight { background: none !important; box-shadow: none !important; }
 #google_translate_element { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* ---------- Admin: Users page layout ---------- */
+.user-management-head { align-items: center; }
+.user-management-head > div p { margin: 0.25rem 0 0; }
+.user-management-metrics article { padding: 0.8rem 1rem; }
+.user-management-metrics strong { font-size: 1.5rem; }
+
+/* Create User: a collapsible card with proper padding and a tidy grid. */
+.managed-form-card > summary {
+  display: flex; align-items: center; gap: 0.8rem; cursor: pointer; list-style: none;
+  padding: 0.9rem 1.1rem; font-weight: 800; border-bottom: 1px solid transparent;
+}
+.managed-form-card > summary::-webkit-details-marker { display: none; }
+.managed-form-card > summary span { font-size: 0.95rem; color: var(--text); }
+.managed-form-card > summary small { color: var(--muted); font-size: 0.78rem; font-weight: 600; }
+.managed-form-card > summary::after { content: "▾"; margin-left: auto; color: var(--muted); transition: transform 0.2s; }
+.managed-form-card[open] > summary { border-bottom-color: var(--line); }
+.managed-form-card[open] > summary::after { transform: rotate(180deg); }
+.managed-create-form {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.85rem 1rem;
+  margin: 0; padding: 1.1rem;
+}
+.managed-create-form .managed-form-row { display: contents; }
+.managed-create-form .managed-user-hint,
+.managed-create-form .primary-action,
+.managed-create-form .managed-user-message { grid-column: 1 / -1; }
+.managed-create-form .primary-action { justify-self: start; min-width: 12rem; }
+.managed-create-form label { margin: 0; }
+
+/* Users table: readable columns on desktop. */
+.managed-user-table { min-width: 60rem; }
+.managed-user-table th, .managed-user-table td { padding: 0.8rem 0.9rem; }
+.managed-user-table td.mu-user { min-width: 14rem; }
+.managed-user-table td.mu-user small { display: block; margin-top: 0.15rem; word-break: break-all; }
+.managed-user-table select { min-width: 7.5rem; }
+.managed-user-table td .status-pill { margin-top: 0.35rem; font-size: 0.7rem; }
+.managed-user-table .wallet-amount-input { width: 6.5rem; }
+.managed-user-table .managed-save-button { min-width: 4.5rem; }
+.managed-table-head { margin-bottom: 0.9rem; }
+
+/* Tablet and phone: each user becomes a card instead of a squeezed table row. */
+@media (max-width: 1000px) {
+  .managed-user-table, .managed-user-table tbody { display: block; min-width: 0; width: 100%; }
+  .managed-user-table thead { display: none; }
+  .managed-user-table tr {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.7rem 0.8rem;
+    margin-bottom: 0.8rem; padding: 0.95rem; border: 1px solid var(--line); border-radius: 0.7rem; background: var(--panel-2);
+  }
+  .managed-user-table td { display: block; padding: 0; border: 0; min-width: 0; }
+  .managed-user-table td[data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 0.25rem; color: var(--muted);
+    font-size: 0.68rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .managed-user-table td.mu-user { grid-column: 1 / -1; min-width: 0; }
+  .managed-user-table td.mu-user::before { display: none; }
+  .managed-user-table td.balance-cell { grid-column: 1 / -1; min-width: 0; }
+  .managed-user-table td.mu-actions { grid-column: 1 / -1; }
+  .managed-user-table select { width: 100%; min-width: 0; }
+  .managed-user-table .managed-save-button { width: 100%; padding: 0.7rem; }
+  .managed-user-table .wallet-action-row { flex-wrap: wrap; }
+  .managed-user-table .wallet-amount-input { flex: 1 1 6rem; max-width: none; }
+  .managed-user-table .wallet-action-row button { flex: 1 1 6rem; padding: 0.6rem 0.5rem; }
+  .managed-user-table-wrap { overflow: visible; }
+}
+@media (max-width: 560px) {
+  .managed-user-table tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .managed-user-table td[data-label="KYC"] { grid-column: 1 / -1; }
+  .user-management-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
+  .user-management-metrics article { padding: 0.65rem 0.7rem; }
+  .user-management-metrics span { font-size: 0.62rem; }
+  .user-management-metrics strong { font-size: 1.25rem; }
+  .user-management-head { flex-direction: row; align-items: flex-start; }
+  .user-management-head h2 { font-size: 1.2rem; }
+  .managed-table-head { grid-template-columns: 1fr; gap: 0.6rem; }
+  .managed-form-card > summary small { display: none; }
+}
+
+.managed-table-card .managed-table-head { padding: 1rem 1.1rem 0; align-items: end; }
+.managed-table-card .managed-table-head h3 { margin: 0; }
+.managed-table-card .managed-table-head p { margin: 0.2rem 0 0; font-size: 0.82rem; }
+.managed-table-card .managed-user-table-wrap { padding: 0 0 0.3rem; }
+.managed-create-form { grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+.wallet-kyc-hint { display: block; line-height: 1.35; }
+@media (max-width: 1000px) {
+  .managed-table-card .managed-user-table-wrap { padding: 0.9rem 1rem 0.3rem; }
+  .managed-table-card .managed-table-head { padding: 1rem 1rem 0; }
+}

@@ -4698,14 +4698,14 @@ function renderManagedUsers() {
     const actionCell = canEditManagedUsers() ? `<button class="managed-save-button" type="button" data-managed-user="${escapeHtml(user.id)}">Save</button>` : `<span class="status-pill">view only</span>`;
     return `
       <tr data-managed-user-row="${escapeHtml(user.id)}">
-        <td><strong>${escapeHtml(user.name)}</strong>${pendingRequestUserIds.has(user.id) ? '<span class="request-badge" title="Has an open support request"></span>' : ""}<small>${escapeHtml(user.email)}</small></td>
-        <td>
+        <td class="mu-user" data-label="User"><strong>${escapeHtml(user.name)}</strong>${pendingRequestUserIds.has(user.id) ? '<span class="request-badge" title="Has an open support request"></span>' : ""}<small>${escapeHtml(user.email)}</small></td>
+        <td data-label="Role">
           <select data-user-field="role" ${roleDisabled}>
             <option value="user" ${user.role === "user" ? "selected" : ""}>User</option>
             <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
           </select>
         </td>
-        <td>
+        <td data-label="Status">
           <select data-user-field="status" ${roleDisabled}>
             <option value="active" ${user.status === "active" ? "selected" : ""}>Active</option>
             <option value="pending" ${user.status === "pending" ? "selected" : ""}>Pending</option>
@@ -4713,7 +4713,7 @@ function renderManagedUsers() {
           </select>
           <span class="status-pill ${statusClass}">${escapeHtml(user.status || "active")}</span>
         </td>
-        <td>
+        <td data-label="KYC">
           <select data-user-field="kycStatus" ${financeDisabled}>
             <option value="pending" ${user.kycStatus === "pending" ? "selected" : ""}>Pending</option>
             <option value="verified" ${user.kycStatus === "verified" ? "selected" : ""}>Verified</option>
@@ -4721,7 +4721,7 @@ function renderManagedUsers() {
           </select>
           <span class="status-pill ${kycClass}">${escapeHtml(user.kycStatus || "pending")}</span>
         </td>
-        <td class="balance-cell">
+        <td class="balance-cell" data-label="Balance">
           <strong>${formatCurrency(user.balance)}</strong>
           ${canEditManagedUsers()
             ? user.kycStatus === "verified"
@@ -4733,7 +4733,7 @@ function renderManagedUsers() {
               : `<small class="wallet-kyc-hint">Verify KYC to enable deposits</small>`
             : ""}
         </td>
-        <td>${actionCell}</td>
+        <td class="mu-actions">${actionCell}</td>
       </tr>`;
   }).join("");
 }

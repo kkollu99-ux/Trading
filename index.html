@@ -818,9 +818,9 @@
               <article><span>Pending Review</span><strong id="managedPendingUsers">0</strong></article>
             </div>
             <div class="management-grid users-management-grid">
-              <article class="clone-card managed-form-card">
-                <h3>Create User</h3>
-                <form id="managedUserForm" class="compact-form">
+              <details class="clone-card managed-form-card" id="createUserCard">
+                <summary><span>＋ Create User</span><small>Add a client or admin account</small></summary>
+                <form id="managedUserForm" class="compact-form managed-create-form">
                   <label>Full Name<input name="name" type="text" placeholder="Client name" required /></label>
                   <label>Email Address<input name="email" type="email" placeholder="client@example.com" required /></label>
                   <label>Temporary Password<input name="password" type="text" value="Client@12345" minlength="6" required /></label>
@@ -832,7 +832,7 @@
                   <button class="primary-action" type="submit">Create Account</button>
                   <p id="managedUserMessage" class="managed-user-message" role="status"></p>
                 </form>
-              </article>
+              </details>
               <article class="clone-card managed-table-card">
                 <div class="managed-table-head">
                   <div>
