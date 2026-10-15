@@ -433,7 +433,7 @@
             <option value="PLN">PLN</option>
           </select>
           <button class="wallet-button" id="walletBalance" type="button">▣ $0.00</button>
-          <button class="icon-button sun-button" type="button" aria-label="Light mode">☼</button>
+          <button id="themeToggle" class="icon-button sun-button" type="button" aria-label="Switch to light mode">☼</button>
           <button id="signOut" class="icon-button" type="button" aria-label="Sign out">⇱</button>
         </div>
       </header>
@@ -949,7 +949,18 @@
         <button class="nav-item" data-section="profile" data-label="Profile"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 10h16"/><path d="M8 15h4"/></svg></span><span class="nav-label">Profile</span></button>
         <button class="nav-item" data-section="service" data-label="Online Service"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M5 13h3v6H5z"/><path d="M16 13h3v6h-3z"/><path d="M19 19a4 4 0 0 1-4 3h-3"/></svg></span><span class="nav-label">Online Service</span></button>
       </nav>
-          <div id="kycModal" class="modal-backdrop kyc-modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="kycModalTitle">
+          <div id="languageModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-label="Language">
+      <div class="language-sheet">
+        <header><strong>Language</strong><button id="languageClose" type="button" aria-label="Close">✕</button></header>
+        <button class="is-selected" type="button" data-language="en">English <span>✓</span></button>
+        <button type="button" disabled>हिन्दी <small>Coming soon</small></button>
+        <button type="button" disabled>العربية <small>Coming soon</small></button>
+        <button type="button" disabled>中文 <small>Coming soon</small></button>
+        <button type="button" disabled>Español <small>Coming soon</small></button>
+      </div>
+    </div>
+
+    <div id="kycModal" class="modal-backdrop kyc-modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="kycModalTitle">
       <div class="kyc-modal">
         <header class="kyc-modal-head">
           <h2 id="kycModalTitle"><span aria-hidden="true">🛡</span> KYC Identity Verification</h2>
@@ -1079,8 +1090,18 @@
               <div class="profile-modal-email" id="profileEmail">—</div>
               <div class="profile-modal-uid">UID: <span id="profileAccountId">—</span></div>
               <div class="profile-modal-kyc-badge status-pill" id="profileKycBadge">Pending</div>
+              <div class="pm-wallet">
+                <div><strong id="pmBalance">$0.00</strong><small>Available Assets</small></div>
+                <button id="profileBalanceEye" type="button" aria-label="Hide balance" aria-pressed="false">👁</button>
+              </div>
+            </div>
+            <div class="pm-actions">
+              <button class="pm-deposit" type="button" data-pm-go="deposit"><span aria-hidden="true">▣</span><strong>Deposit</strong><small>Billing Details &gt;&gt;</small></button>
+              <button class="pm-withdraw" type="button" data-pm-go="withdraw"><span aria-hidden="true">$</span><strong>Withdraw</strong><small>Withdraw Details &gt;&gt;</small></button>
             </div>
             <nav class="profile-modal-menu" id="profileModalMenu" aria-label="Account menu">
+              <button class="pm-row pm-row-theme" type="button" data-pm-row="theme" role="switch" aria-checked="true"><span>🌙</span> <span>Dark Mode</span><i class="pm-switch" aria-hidden="true"></i></button>
+              <button class="pm-row pm-row-language" type="button" data-pm-row="language"><span>🌐</span> <span>Language</span><em id="pmLanguageValue">English</em></button>
               <button class="is-active" type="button" data-profile-pane="details"><span>👤</span> <span>Account Details</span></button>
               <button type="button" data-profile-pane="kyc"><span>🪪</span> <span>KYC Verification</span></button>
               <button type="button" data-profile-pane="bank"><span>🏦</span> <span>Bind Account</span></button>
@@ -1091,6 +1112,7 @@
               <button type="button" data-profile-pane="history"><span>▤</span> <span>History</span></button>
               <button type="button" data-profile-pane="referrals"><span>♙</span> <span>Referrals</span></button>
               <button type="button" data-profile-pane="notifications"><span>🔔</span> <span>Notifications</span></button>
+              <button class="pm-row pm-row-service" type="button" data-pm-row="service"><span>💬</span> <span>Online service</span></button>
               <button type="button" data-profile-pane="about"><span>🏢</span> <span>About Us</span></button>
               <button type="button" data-profile-pane="help"><span>❓</span> <span>Help</span></button>
               <button id="profileModalSignOut" class="profile-modal-logout" type="button"><span>⇱</span> <span>Logout</span></button>

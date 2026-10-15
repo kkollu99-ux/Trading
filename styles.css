@@ -99,7 +99,7 @@ button {
   top: 0;
   z-index: 20;
   border-bottom: 1px solid rgba(37, 45, 65, 0.9);
-  background: rgba(17, 24, 39, 0.94);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
   backdrop-filter: blur(18px);
 }
 
@@ -170,7 +170,7 @@ button {
   place-items: center;
   border: 1px solid rgba(37, 45, 65, 0.8);
   border-radius: var(--radius);
-  background: rgba(24, 31, 47, 0.82);
+  background: color-mix(in srgb, var(--panel-2) 82%, transparent);
   padding: 0.55rem;
 }
 
@@ -338,7 +338,7 @@ button {
   border: 1px solid var(--line);
   border-top-color: var(--blue);
   border-radius: 0.5rem;
-  background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(12, 17, 29, 0.96));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, transparent), rgba(12, 17, 29, 0.96));
   padding: 1.45rem;
 }
 
@@ -1117,7 +1117,7 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 0.5rem;
   padding: 0.9rem;
-  background: rgba(24, 31, 47, 0.72);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
 }
 
 .desk-status small {
@@ -1401,7 +1401,7 @@ select:focus {
   gap: 0.25rem;
   border: 1px solid rgba(37, 45, 65, 0.8);
   border-radius: 0.5rem;
-  background: rgba(24, 31, 47, 0.55);
+  background: color-mix(in srgb, var(--panel-2) 55%, transparent);
   padding: 0.75rem;
 }
 
@@ -2464,7 +2464,7 @@ select:focus {
   bottom: 0;
   width: 7.5rem;
   height: 5rem;
-  background: #0e1626;
+  background: var(--panel-2);
   z-index: 3;
 }
 
@@ -2987,7 +2987,7 @@ select:focus {
 .panel {
   border: 1px solid rgba(37, 45, 65, 0.9);
   border-radius: 0.5rem;
-  background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(12, 17, 29, 0.98));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 98%, transparent), rgba(12, 17, 29, 0.98));
   box-shadow: var(--shadow);
 }
 
@@ -3082,7 +3082,7 @@ canvas {
 .book-card {
   border: 1px solid var(--line);
   border-radius: 0.4rem;
-  background: rgba(20, 32, 51, 0.72);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
   padding: 0.85rem;
 }
 
@@ -3119,7 +3119,7 @@ canvas {
   gap: 0.75rem;
   border: 1px solid var(--line);
   border-radius: 0.4rem;
-  background: rgba(20, 32, 51, 0.58);
+  background: color-mix(in srgb, var(--panel-2) 58%, transparent);
   padding: 0.85rem;
 }
 
@@ -3183,7 +3183,7 @@ canvas {
 .user-management-metrics article {
   border: 1px solid rgba(0, 115, 255, 0.32);
   border-radius: 0.5rem;
-  background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(9, 22, 42, 0.98));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 98%, transparent), rgba(9, 22, 42, 0.98));
   padding: 0.9rem;
 }
 
@@ -3338,7 +3338,7 @@ canvas {
   gap: 0.55rem;
   border: 1px solid var(--line);
   border-radius: 0.65rem;
-  background: rgba(20, 32, 51, 0.62);
+  background: color-mix(in srgb, var(--panel-2) 62%, transparent);
   padding: 0.95rem 1rem;
   transition: border-color 0.15s ease;
 }
@@ -3877,7 +3877,7 @@ th {
   max-width: min(34rem, 85%);
   border: 1px solid var(--line);
   border-radius: 0.5rem;
-  background: rgba(20, 32, 51, 0.72);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
   padding: 0.85rem;
 }
 
@@ -4038,7 +4038,7 @@ input[type="checkbox"] {
 .support-topics button {
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(20, 32, 51, 0.8);
+  background: color-mix(in srgb, var(--panel-2) 80%, transparent);
   color: var(--muted);
   padding: 0.45rem 0.7rem;
   font-weight: 900;
@@ -4066,7 +4066,7 @@ input[type="checkbox"] {
   gap: 0.85rem;
   border: 1px solid rgba(37, 45, 65, 0.75);
   border-radius: 0.65rem;
-  background: rgba(15, 25, 41, 0.72);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
   padding: 0.85rem;
 }
 
@@ -4314,7 +4314,7 @@ input[type="checkbox"] {
   width: 100%;
   border: 1px solid rgba(37, 45, 65, 0.75);
   border-radius: 0.65rem;
-  background: rgba(15, 25, 41, 0.72);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
   color: var(--text);
   padding: 0.85rem;
   text-align: left;
@@ -4357,7 +4357,7 @@ input[type="checkbox"] {
   max-width: min(31rem, 88%);
   border: 1px solid var(--line);
   border-radius: 0.75rem;
-  background: rgba(15, 25, 41, 0.72);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
   padding: 0.85rem;
 }
 
@@ -4597,7 +4597,7 @@ input[type="checkbox"] {
   width: 3rem;
   height: 3rem;
   border-radius: 999px;
-  background: rgba(25, 35, 54, 0.9);
+  background: color-mix(in srgb, var(--panel-2) 90%, transparent);
   color: var(--muted);
   font-size: 1.4rem;
 }
@@ -4662,7 +4662,7 @@ input[type="checkbox"] {
 .clone-card > h3 {
   margin: 0;
   border-bottom: 1px solid var(--line);
-  background: rgba(25, 35, 54, 0.8);
+  background: color-mix(in srgb, var(--panel-2) 80%, transparent);
   color: var(--text);
   padding: 0.8rem 1rem;
   font-size: 0.76rem;
@@ -4914,7 +4914,7 @@ input[type="checkbox"] {
   justify-content: space-between;
   gap: 1rem;
   border-bottom: 1px solid var(--line);
-  background: rgba(25, 35, 54, 0.88);
+  background: color-mix(in srgb, var(--panel-2) 88%, transparent);
   padding: 0.9rem 1rem;
 }
 
@@ -5399,7 +5399,7 @@ input[type="checkbox"] {
   align-items: center;
   gap: 0.75rem;
   border-bottom: 1px solid var(--line);
-  background: rgba(25, 35, 54, 0.88);
+  background: color-mix(in srgb, var(--panel-2) 88%, transparent);
   padding: 1rem 2.4rem 1rem 1.2rem;
 }
 
@@ -5609,7 +5609,7 @@ input[type="checkbox"] {
   width: 100%;
   border: 1px solid rgba(37, 45, 65, 0.85);
   border-radius: 0.65rem;
-  background: rgba(15, 25, 41, 0.72);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
   color: var(--text);
   padding: 0.85rem;
   text-align: left;
@@ -5739,7 +5739,7 @@ input[type="checkbox"] {
   max-width: 78%;
   margin: 0;
   border-radius: 1rem 1rem 1rem 0.25rem;
-  background: var(--muted-bg, rgba(25, 35, 54, 0.95));
+  background: var(--muted-bg, color-mix(in srgb, var(--panel-2) 95%, transparent));
   color: var(--text);
   padding: 0.65rem 0.75rem;
   font-size: 0.76rem;
@@ -7174,3 +7174,110 @@ body.kyc-open { overflow: hidden; }
 .kyc-selfie-buttons .kyc-choose { cursor: pointer; font: inherit; font-size: 0.82rem; }
 .kyc-choose-primary { background: var(--blue); border-color: var(--blue); color: #fff; }
 .kyc-camera.is-hidden, .kyc-drop.is-hidden { display: none; }
+
+/* ---------- Light theme (Dark Mode switch) ---------- */
+:root[data-theme="light"] {
+  --bg: #f2f5fa;
+  --bg-deep: #e8edf5;
+  --panel: #ffffff;
+  --panel-2: #f1f4f9;
+  --line: #dde3ee;
+  --muted: #5f6c84;
+  --text: #121a2b;
+  --shadow: 0 12px 36px rgba(20, 30, 60, 0.12);
+  --trade-bg: #f2f5fa;
+  --trade-panel: #ffffff;
+  --trade-panel-soft: #f1f4f9;
+  --trade-border: #dde3ee;
+  --trade-muted: #5f6c84;
+  color-scheme: light;
+}
+:root[data-theme="light"] body { background: var(--bg); color: var(--text); }
+:root[data-theme="light"] .modal-backdrop { background: rgba(30, 40, 70, 0.45); }
+
+/* ---------- Account page extras: hidden on desktop, shown in the phone/tablet layout ---------- */
+.pm-wallet, .pm-actions, .pm-row, .language-sheet { display: none; }
+.language-sheet { flex-direction: column; width: min(22rem, calc(100% - 2rem)); border: 1px solid var(--line); border-radius: 0.8rem; background: var(--panel); overflow: hidden; }
+#languageModal:not(.is-hidden) .language-sheet { display: flex; }
+.language-sheet header { display: flex; justify-content: space-between; align-items: center; padding: 0.9rem 1rem; border-bottom: 1px solid var(--line); }
+.language-sheet header button { border: 0; background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; }
+.language-sheet > button { display: flex; justify-content: space-between; align-items: center; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); padding: 0.95rem 1rem; font: inherit; text-align: left; }
+.language-sheet > button:last-child { border-bottom: 0; }
+.language-sheet > button:disabled { color: var(--muted); }
+.language-sheet small { color: var(--muted); font-size: 0.72rem; }
+.language-sheet .is-selected span { color: var(--blue); }
+#languageModal { z-index: 140; }
+
+@media (max-width: 1050px) {
+  /* Blue account card: email, UID and the balance, like a wallet app. */
+  #profileModal .profile-modal-user {
+    display: block;
+    position: relative;
+    margin: 0 0 0.9rem;
+    border-radius: 1rem;
+    background: linear-gradient(135deg, #1d5fe0 0%, #1f7bff 100%);
+    color: #fff;
+    padding: 1.1rem 1.1rem 1rem;
+    text-align: left;
+  }
+  #profileModal .profile-modal-avatar,
+  #profileModal .profile-modal-name { display: none; }
+  #profileModal .profile-modal-email { color: #fff; font-size: 1rem; font-weight: 800; word-break: break-all; white-space: normal; overflow: visible; text-overflow: clip; padding-right: 2.6rem; }
+  body.is-demo #profileModal .profile-modal-kyc-badge, body.is-demo .pm-actions { display: none; }
+  #profileModal .profile-modal-uid { color: rgba(255, 255, 255, 0.82); margin: 0.2rem 0 0.2rem; }
+  #profileModal .profile-modal-kyc-badge { display: inline-block; margin-top: 0.2rem; }
+  body.is-demo #profileModal .profile-modal-email::after {
+    content: "DEMO"; margin-left: 0.5rem; padding: 0.1rem 0.45rem; border-radius: 0.8rem;
+    background: #ff7a2f; color: #fff; font-size: 0.68rem; font-weight: 800; vertical-align: middle;
+  }
+  .pm-wallet { display: flex; align-items: flex-end; justify-content: space-between; gap: 0.6rem; margin-top: 0.9rem; }
+  .pm-wallet strong { display: block; font-size: 1.85rem; font-weight: 800; line-height: 1.15; }
+  .pm-wallet small { color: rgba(255, 255, 255, 0.85); font-size: 0.85rem; }
+  .pm-wallet button { position: absolute; top: 1rem; right: 1rem; border: 0; background: none; color: #fff; font-size: 1.35rem; cursor: pointer; opacity: 0.95; }
+  .pm-wallet button.is-off { opacity: 0.5; }
+
+  .pm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; margin-bottom: 0.9rem; }
+  .pm-actions button {
+    display: grid; grid-template-columns: auto 1fr; column-gap: 0.7rem; align-items: center; text-align: left;
+    min-height: 4.2rem; border: 0; border-radius: 0.85rem; color: #fff; padding: 0.7rem 0.8rem; cursor: pointer; font: inherit;
+  }
+  .pm-actions button span { grid-row: span 2; display: grid; place-items: center; width: 2.4rem; height: 2.4rem; border-radius: 0.6rem; background: rgba(255, 255, 255, 0.22); font-size: 1.2rem; font-weight: 800; }
+  .pm-actions strong { font-size: 1.02rem; align-self: end; }
+  .pm-actions small { font-size: 0.7rem; opacity: 0.9; align-self: start; }
+  .pm-deposit { background: #2368e8; }
+  .pm-withdraw { background: #ef4a4a; }
+
+  /* Every option is its own rounded row, with Sign Out as a pink button last. */
+  #profileModal .profile-modal-menu { gap: 0.6rem; border: 0; background: none; }
+  #profileModal .profile-modal-menu button {
+    border: 0; border-radius: 0.85rem !important; background: var(--panel); min-height: 3.6rem;
+  }
+  #profileModal .profile-modal-menu button > span:first-child { width: 2.5rem; height: 2.5rem; border-radius: 0.7rem; font-size: 1.1rem; }
+  :root[data-theme="light"] #profileModal .profile-modal-menu button > span:first-child { background: #eaf1ff; }
+  #profileModal .profile-modal-menu button[data-profile-pane="deposit"],
+  #profileModal .profile-modal-menu button[data-profile-pane="withdraw"] { display: none; }
+  .pm-row { display: flex; }
+  .pm-row > span:nth-child(2) { flex: 1; }
+  .pm-row-theme::after { display: none !important; }
+  .pm-row-language::after { display: none !important; }
+  .pm-row-language em { color: var(--muted); font-style: normal; font-size: 0.85rem; margin-right: 0.3rem; }
+  .pm-row-language::before { order: 3; content: "›"; color: var(--muted); font-size: 1.4rem; line-height: 1; margin-left: 0.2rem; }
+  .pm-row-language em { order: 2; }
+  .pm-switch { position: relative; flex-shrink: 0; width: 3rem; height: 1.75rem; border-radius: 1rem; background: #9aa6bd; transition: background 0.2s; }
+  .pm-switch::after { content: ""; position: absolute; top: 0.2rem; left: 0.2rem; width: 1.35rem; height: 1.35rem; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+  .pm-row-theme.is-on .pm-switch { background: #1f6bff; }
+  .pm-row-theme.is-on .pm-switch::after { transform: translateX(1.25rem); }
+  #profileModal .profile-modal-menu .profile-modal-logout {
+    justify-content: center; background: #fdeeee; color: #d83a3a; font-weight: 800;
+    border: 1px solid #f6caca; margin-top: 0.4rem; padding-top: 0.7rem !important;
+  }
+  #profileModal .profile-modal-menu .profile-modal-logout > span { color: inherit; background: none !important; width: auto; flex: 0 0 auto !important; }
+  :root:not([data-theme="light"]) #profileModal .profile-modal-menu .profile-modal-logout { background: #2a1a20; border-color: #4a2530; color: #ff6b6b; }
+}
+
+/* The chart stays dark in light mode (TradingView / canvas draw their own dark theme). */
+:root[data-theme="light"] .chart-terminal {
+  --text: #e4e9f1; --muted: #8b97ad; --line: #252d41; --panel: #111827; --panel-2: #181f2f;
+  --trade-border: #252d41; --trade-muted: #8b97ad;
+  color: var(--text);
+}
