@@ -3540,7 +3540,33 @@ async function loadSimulationSeries(symbol, attempt = 1) {
   renderTradeTicket();
 }
 
+// A reload must know which products are being simulated before the first chart is
+// drawn - otherwise it flashes the real market chart and only flips to the
+// simulation a second or two later (or not at all if no tick arrives).
+let simulationsReady = Promise.resolve();
+async function preloadActiveSimulations() {
+  const token = localStorage.getItem("fxccAuthToken");
+  if (!token) return;
+  try {
+    const response = await fetch(`${apiBase}/api/price-simulations/active`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) return;
+    const data = await response.json();
+    (data.simulations || []).forEach((sim) =>
+      activeSimulationsBySymbol.set(sim.symbol, {
+        direction: sim.direction,
+        expiresAt: sim.expiresAt || null,
+        targetPrice: sim.targetPrice || null,
+        startPrice: sim.startPrice || null,
+        candleSeconds: sim.candleSeconds || 5,
+      })
+    );
+  } catch {
+    /* the live status messages still correct it */
+  }
+}
+
 async function loadChartForCurrentSymbol() {
+  await Promise.race([simulationsReady, new Promise((resolve) => setTimeout(resolve, 2500))]);
   tradeChartState.liveBid = null;
   tradeChartState.liveAsk = null;
   tradeChartState.slideAnim = null;
@@ -5855,6 +5881,7 @@ seedMetalData();
 // selectTradeSymbol, which is where this gets written.
 const savedTradeSymbol = localStorage.getItem("fxccTradeSymbol");
 if (savedTradeSymbol) tradeChartState.symbol = savedTradeSymbol;
+simulationsReady = preloadActiveSimulations();
 hydrateSession();
 renderTickers();
 renderBook();

@@ -2934,6 +2934,23 @@ app.get("/api/price-simulation-status", requireAuth, attachUser, (request, respo
   });
 });
 
+// Every running simulation in one call, for any signed-in user. A page that is
+// (re)loaded needs this before it draws the Trade chart; without it the chart
+// first shows the real market and only flips to the simulation when the first
+// price tick or a per-symbol status request comes back.
+app.get("/api/price-simulations/active", requireAuth, attachUser, (_request, response) => {
+  response.json({
+    simulations: [...priceSimulations.entries()].map(([symbol, simulation]) => ({
+      symbol,
+      direction: simulation.direction,
+      expiresAt: simulation.expiresAt,
+      targetPrice: simulation.targetPrice,
+      startPrice: simulation.basePrice,
+      candleSeconds: candleSecondsFor(symbol),
+    })),
+  });
+});
+
 // A per-symbol opt-in: once enabled, placing a buy order on that symbol
 // auto-starts an UP simulation (the favorable direction for a buy) and a
 // sell auto-starts a DOWN simulation (favorable for a sell) - see
