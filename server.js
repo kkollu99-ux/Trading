@@ -2522,6 +2522,7 @@ async function restoreSimulations() {
   }
   for (const { symbol, kind, state } of rows) {
     try {
+      if (state?.candleSeconds) setSimulationCandleSeconds(symbol, state.candleSeconds);
       if (kind === "active") restoreActiveSimulation(symbol, state);
       else if (kind === "scheduled" && Date.parse(state.toISO) > Date.now()) {
         schedulePriceSimulation(symbol, state.direction, state.stepPercent, state.fromISO, state.toISO, state.startedBy, state.targetPrice, state.startPrice);
@@ -2531,6 +2532,16 @@ async function restoreSimulations() {
       console.warn(`Restoring ${kind} simulation for ${symbol} failed:`, error.message);
     }
   }
+}
+
+// How often a new candle appears on a simulated product's chart: 5, 10 or 15 seconds,
+// picked by the admin beside the start price. Kept per symbol and saved with the
+// simulation, so a restart or a scheduled window keeps it.
+const simulationCandleSeconds = new Map();
+const candleSecondsFor = (symbol) => simulationCandleSeconds.get(symbol) || 5;
+function setSimulationCandleSeconds(symbol, value) {
+  const seconds = Number(value);
+  simulationCandleSeconds.set(symbol, [5, 10, 15].includes(seconds) ? seconds : 5);
 }
 
 function startPriceSimulation(symbol, direction, stepPercent, startedBy, durationMs, targetPrice = null, startPrice = null, { reset = false } = {}) {
@@ -2648,8 +2659,9 @@ function startPriceSimulation(symbol, direction, stepPercent, startedBy, duratio
     startedBy,
     startedAt: simulation.startedAt,
     expiresAt,
+    candleSeconds: candleSecondsFor(symbol),
   });
-  broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt, targetPrice: simulation.targetPrice, startPrice: simulation.basePrice, reset });
+  broadcast({ type: "simulation-status", symbol, active: true, direction, expiresAt, targetPrice: simulation.targetPrice, startPrice: simulation.basePrice, candleSeconds: candleSecondsFor(symbol), reset });
 }
 
 function stopPriceSimulation(symbol) {
@@ -2707,8 +2719,8 @@ function schedulePriceSimulation(symbol, direction, stepPercent, fromISO, toISO,
   }, fromMs - now);
 
   scheduledSimulations.set(symbol, { direction, stepPercent, fromISO, toISO, startedBy, startTimer, targetPrice, startPrice });
-  persistSimulation(symbol, "scheduled", { direction, stepPercent, fromISO, toISO, startedBy, targetPrice, startPrice });
-  broadcast({ type: "simulation-scheduled", symbol, active: true, direction, fromISO, toISO, targetPrice, startPrice });
+  persistSimulation(symbol, "scheduled", { direction, stepPercent, fromISO, toISO, startedBy, targetPrice, startPrice, candleSeconds: candleSecondsFor(symbol) });
+  broadcast({ type: "simulation-scheduled", symbol, active: true, direction, fromISO, toISO, targetPrice, startPrice, candleSeconds: candleSecondsFor(symbol) });
   return { scheduled: true, active: false };
 }
 
@@ -2841,6 +2853,7 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
   const startPriceRaw = Number(request.body.startPrice);
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
+  setSimulationCandleSeconds(symbol, request.body.candleSeconds);
   // A new run starts fresh (see startPriceSimulation), so with no start price
   // given it opens at the market price, not wherever a previous run ended.
   const startPrice = Number.isFinite(startPriceRaw) && startPriceRaw > 0 ? startPriceRaw : simulationResetPrice(symbol);
@@ -2867,6 +2880,7 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
     expiresAt: simulation?.expiresAt || null,
     targetPrice: simulation?.targetPrice || null,
     startPrice: simulation?.basePrice || null,
+    candleSeconds: candleSecondsFor(symbol),
   });
 });
 
@@ -2893,6 +2907,7 @@ app.get("/api/admin/price-simulation", requireAuth, attachUser, requireRole("adm
     expiresAt: simulation.expiresAt,
     targetPrice: simulation.targetPrice,
     startPrice: simulation.basePrice,
+    candleSeconds: candleSecondsFor(symbol),
   }));
   response.json({ simulations });
 });
@@ -2914,6 +2929,7 @@ app.get("/api/price-simulation-status", requireAuth, attachUser, (request, respo
     expiresAt: simulation.expiresAt,
     targetPrice: simulation.targetPrice,
     startPrice: simulation.basePrice,
+    candleSeconds: candleSecondsFor(symbol),
     price: simulation.price,
   });
 });
@@ -2976,6 +2992,7 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
   const startPrice = Number.isFinite(startPriceRaw) && startPriceRaw > 0 ? startPriceRaw : null;
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
+  setSimulationCandleSeconds(symbol, request.body.candleSeconds);
 
   const fromMs = new Date(from).getTime();
   const toMs = new Date(to).getTime();

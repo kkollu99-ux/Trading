@@ -2044,13 +2044,21 @@ function applySimulationStatus(payload) {
       expiresAt: payload.expiresAt || null,
       targetPrice: payload.targetPrice || null,
       startPrice: payload.startPrice || null,
+      candleSeconds: payload.candleSeconds || 5,
     });
   else activeSimulationsBySymbol.delete(payload.symbol);
 
   if (payload.symbol === tradeChartState.apiSymbol) {
     // A fresh run replaced the product's whole history on the server - drop
     // the candles on screen (an earlier run's among them) and load anew.
-    if (payload.active && payload.reset) tradeChartState.seriesSymbol = null;
+    if (payload.active && payload.reset) {
+      tradeChartState.seriesSymbol = null;
+      // A fresh run opens everyone's chart on the admin's candle size; they can pick another afterwards.
+      tradeChartState.userPickedTimeframe = false;
+      tradeChartState.timeframe = `${payload.candleSeconds || 5}S`;
+      tradeChartState.customRange = null;
+      setActiveTimeframeControl(tradeChartState.timeframe);
+    }
     // Reload fresh rather than just flipping the flag - loadChartForCurrentSymbol
     // re-derives isSimulated from activeSimulationsBySymbol (just updated above)
     // and is the one place that decides TradingView-widget vs. the simulated
@@ -3571,9 +3579,10 @@ async function loadChartForCurrentSymbol() {
   showSimulationChart();
   // The simulation chart has its own candle sizes (see simulationTimeframes);
   // anything else - e.g. the TradingView interval it was on - starts at 5s.
-  if (!simulationTimeframes.includes(tradeChartState.timeframe)) {
-    setActiveTimeframeControl("5S");
-    tradeChartState.timeframe = "5S";
+  const candleFrame = `${activeSimulationsBySymbol.get(tradeChartState.apiSymbol)?.candleSeconds || 5}S`;
+  if (!tradeChartState.userPickedTimeframe || !simulationTimeframes.includes(tradeChartState.timeframe)) {
+    setActiveTimeframeControl(candleFrame);
+    tradeChartState.timeframe = candleFrame;
     tradeChartState.customRange = null;
   }
   setStreamStatus(null);
@@ -3592,6 +3601,7 @@ async function loadChartForCurrentSymbol() {
 
 function selectTradeSymbol(row) {
   Object.assign(tradeChartState, readTradeRow(row));
+  tradeChartState.userPickedTimeframe = false;
   // Mirrors fxccActiveSection below (see hydrateSession) - without this, a
   // refresh always comes back to the chart's hardcoded default symbol
   // (XAUUSD), not whatever was actually being viewed/simulated, so a
@@ -3720,22 +3730,16 @@ function setActiveTimeframeControl(value) {
 document.querySelectorAll(".timeframes button[data-timeframe]").forEach((button) => {
   button.addEventListener("click", () => {
     setActiveTimeframeControl(button.dataset.timeframe);
+    tradeChartState.userPickedTimeframe = true;
     tradeChartState.timeframe = button.dataset.timeframe;
     tradeChartState.customRange = null;
     loadChartForCurrentSymbol();
   });
 });
 
-// How often a new candle appears: 5s, 10s or 15s.
-document.querySelector("#tradeSecondsSelect")?.addEventListener("change", (event) => {
-  setActiveTimeframeControl(event.target.value);
-  tradeChartState.timeframe = event.target.value;
-  tradeChartState.customRange = null;
-  loadChartForCurrentSymbol();
-});
-
 document.querySelector("#tradeTimeframeSelect")?.addEventListener("change", (event) => {
   setActiveTimeframeControl(event.target.value);
+  tradeChartState.userPickedTimeframe = true;
   tradeChartState.timeframe = event.target.value;
   tradeChartState.customRange = null;
   loadChartForCurrentSymbol();
@@ -3863,6 +3867,7 @@ function applyLiveTick(tick) {
             expiresAt: status.expiresAt || null,
             targetPrice: status.targetPrice || null,
             startPrice: status.startPrice || null,
+            candleSeconds: status.candleSeconds || 5,
           });
           if (tick.symbol === tradeChartState.apiSymbol) updateTradeSimulationBadge();
         })
@@ -4003,7 +4008,7 @@ async function resyncSimulationStatus() {
     try {
       const status = await authFetch(`/api/price-simulation-status?symbol=${encodeURIComponent(symbol)}`);
       if (status?.active) {
-        applySimulationStatus({ symbol, active: true, direction: status.direction, expiresAt: status.expiresAt, targetPrice: status.targetPrice, startPrice: status.startPrice });
+        applySimulationStatus({ symbol, active: true, direction: status.direction, expiresAt: status.expiresAt, targetPrice: status.targetPrice, startPrice: status.startPrice, candleSeconds: status.candleSeconds });
       } else if (status && activeSimulationsBySymbol.has(symbol)) {
         applySimulationStatus({ symbol, active: false });
       }
@@ -4766,7 +4771,7 @@ const simFormState = new Map(); // symbol -> { from, to, start, target, unit, st
 const managedLivePrices = new Map(); // symbol -> { price, source, realPriceAt, simulated, held }
 
 function simFormFor(symbol) {
-  if (!simFormState.has(symbol)) simFormState.set(symbol, { from: "", to: "", start: "", target: "", unit: "percent", startEdited: false });
+  if (!simFormState.has(symbol)) simFormState.set(symbol, { from: "", to: "", start: "", target: "", unit: "percent", candle: "5", startEdited: false });
   return simFormState.get(symbol);
 }
 
@@ -4839,8 +4844,15 @@ function renderManagedInstruments() {
                 </div>
               </div>
               <div class="sim-control-group">
-                <span class="sim-control-label">Start price (optional)</span>
-                <input type="number" step="any" min="0" class="sim-target-input" data-schedule-start-price="${escapeHtml(instrument.symbol)}" value="${escapeHtml(startValue)}" placeholder="e.g. 150" title="Filled in with the live price - change it to open the simulation at a different price" />
+                <span class="sim-control-label">Start price (optional) · Candle every</span>
+                <div class="sim-target-pair">
+                  <input type="number" step="any" min="0" class="sim-target-input" data-schedule-start-price="${escapeHtml(instrument.symbol)}" value="${escapeHtml(startValue)}" placeholder="e.g. 150" title="Filled in with the live price - change it to open the simulation at a different price" />
+                  <select class="sim-target-unit" data-schedule-candle="${escapeHtml(instrument.symbol)}" title="How often a new candle appears on the chart">
+                    <option value="5" ${String(form.candle) === "5" ? "selected" : ""}>5s</option>
+                    <option value="10" ${String(form.candle) === "10" ? "selected" : ""}>10s</option>
+                    <option value="15" ${String(form.candle) === "15" ? "selected" : ""}>15s</option>
+                  </select>
+                </div>
               </div>
               <div class="sim-control-group">
                 <span class="sim-control-label">Target price (optional)</span>
@@ -5030,6 +5042,7 @@ async function loadManagedInstruments() {
           expiresAt: sim.expiresAt || null,
           targetPrice: sim.targetPrice || null,
           startPrice: sim.startPrice || null,
+          candleSeconds: sim.candleSeconds || 5,
         })
       );
       const scheduleData = await adminFetch("/api/admin/price-simulation/schedule");
@@ -5578,11 +5591,12 @@ document.querySelector("#managedInstrumentList")?.addEventListener("change", asy
 
 document.querySelector("#managedInstrumentList")?.addEventListener("input", (event) => {
   const field = event.target;
-  const { scheduleFrom, scheduleTo, scheduleStartPrice, scheduleTarget, scheduleTargetUnit } = field.dataset;
-  const symbol = scheduleFrom || scheduleTo || scheduleStartPrice || scheduleTarget || scheduleTargetUnit;
+  const { scheduleFrom, scheduleTo, scheduleStartPrice, scheduleTarget, scheduleTargetUnit, scheduleCandle } = field.dataset;
+  const symbol = scheduleFrom || scheduleTo || scheduleStartPrice || scheduleTarget || scheduleTargetUnit || scheduleCandle;
   if (!symbol) return;
   const form = simFormFor(symbol);
-  if (scheduleFrom) form.from = field.value;
+  if (scheduleCandle) form.candle = field.value;
+  else if (scheduleFrom) form.from = field.value;
   else if (scheduleTo) form.to = field.value;
   else if (scheduleTarget) form.target = field.value;
   else if (scheduleTargetUnit) form.unit = field.value;
@@ -5666,6 +5680,7 @@ document.querySelector("#managedInstrumentList")?.addEventListener("click", asyn
         ...(hasTarget && targetUnit === "price" ? { targetPrice: targetValue } : {}),
         ...(hasTarget && targetUnit === "percent" ? { targetPercent: targetValue } : {}),
         ...(hasStartPrice ? { startPrice: startPriceValue } : {}),
+        candleSeconds: Number(document.querySelector(`[data-schedule-candle="${CSS.escape(symbol)}"]`)?.value) || 5,
       };
       if (!from && !to) {
         // No window picked - the admin just wants the move to start right now,
