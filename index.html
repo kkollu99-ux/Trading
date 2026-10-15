@@ -48,13 +48,13 @@
             <button id="homeMobileOpen" class="mini-action primary" type="button">Open Account</button>
           </div>
         </div>
-        <div class="quote-strip" aria-label="Live market quotes">
-          <span>EUR/USD <strong>1.08492</strong> <em>+0.12%</em></span>
-          <span>GBP/USD <strong>1.26794</strong> <em>+0.08%</em></span>
-          <span>USD/JPY <strong>149.482</strong> <em class="down">-0.05%</em></span>
-          <span>BTC/USD <strong>67,421</strong> <em>+1.24%</em></span>
-          <span>XAU/USD <strong>2049.5</strong> <em>+0.32%</em></span>
-          <span>AAPL <strong>185.40</strong> <em>+0.54%</em></span>
+        <div class="quote-strip" id="homeQuoteStrip" aria-label="Live market quotes">
+          <span data-quote-symbol="EUR/USD">EUR/USD <strong>—</strong> <em></em></span>
+          <span data-quote-symbol="GBP/USD">GBP/USD <strong>—</strong> <em></em></span>
+          <span data-quote-symbol="USD/JPY">USD/JPY <strong>—</strong> <em></em></span>
+          <span data-quote-symbol="BTC/USD">BTC/USD <strong>—</strong> <em></em></span>
+          <span data-quote-symbol="XAU/USD">XAU/USD <strong>—</strong> <em></em></span>
+          <span data-quote-symbol="AAPL">AAPL <strong>—</strong> <em></em></span>
         </div>
       </header>
 
@@ -513,23 +513,11 @@
               <div class="movers-grid">
                 <article class="mover-panel">
                   <header><div><span class="mover-icon up">↗</span><strong>Top Gainers</strong></div><small>24h change</small></header>
-                  <ol class="mover-list">
-                    <li><span>#1</span><div><strong>USOIL</strong><small>Crude Oil WTI</small></div><em>17553755537.02<br><b>+22447257619.98%</b></em></li>
-                    <li><span>#2</span><div><strong>AUDJPY</strong><small>Australian Dollar / Japanese Yen</small></div><em>3112118245.18433<br><b>+3195193170.21%</b></em></li>
-                    <li><span>#3</span><div><strong>AUDCAD</strong><small>Australian Dollar / Canadian Dollar</small></div><em>97035.98986<br><b>+1092736.34%</b></em></li>
-                    <li><span>#4</span><div><strong>EURJPY</strong><small>Euro / Japanese Yen</small></div><em>250.09375<br><b>+46.42%</b></em></li>
-                    <li><span>#5</span><div><strong>AUDNZD</strong><small>Australian Dollar / New Zealand Dollar</small></div><em>1.29792<br><b>+19.62%</b></em></li>
-                  </ol>
+                  <ol id="moversGainers" class="mover-list"><li class="mover-empty">Loading live prices…</li></ol>
                 </article>
                 <article class="mover-panel">
                   <header><div><span class="mover-icon down">↘</span><strong class="danger-text">Top Losers</strong></div><small>24h change</small></header>
-                  <ol class="mover-list loser-list">
-                    <li><span>#1</span><div><strong>AUDCHF</strong><small>Australian Dollar / Swiss Franc</small></div><em>0.47053<br><b>-19.01%</b></em></li>
-                    <li><span>#2</span><div><strong>BTCUSD</strong><small>Bitcoin / US Dollar</small></div><em>63971.14<br><b>-15.56%</b></em></li>
-                    <li><span>#3</span><div><strong>GBPJPY</strong><small>British Pound / Japanese Yen</small></div><em>196.84855<br><b>-1.63%</b></em></li>
-                    <li><span>#4</span><div><strong>UKOIL</strong><small>Crude Oil Brent</small></div><em>82.33<br><b>-0.09%</b></em></li>
-                    <li><span>#5</span><div><strong>GBPNZD</strong><small>British Pound / New Zealand Dollar</small></div><em>2.10903<br><b>-0.05%</b></em></li>
-                  </ol>
+                  <ol id="moversLosers" class="mover-list loser-list"><li class="mover-empty">Loading live prices…</li></ol>
                 </article>
               </div>
             </section>

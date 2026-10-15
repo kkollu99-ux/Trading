@@ -6207,3 +6207,68 @@ startVersionCheck();
   document.querySelector("#homeMobileOpen")?.addEventListener("click", () => { setOpen(false); document.querySelector("#homeOpenAccount")?.click(); });
   window.matchMedia("(min-width: 681px)").addEventListener?.("change", () => setOpen(false));
 })();
+
+// ---------- Dashboard Market Movers: live 24h change from the real quote feed ----------
+(function setupMarketMovers() {
+  const gainersEl = document.querySelector("#moversGainers");
+  const losersEl = document.querySelector("#moversLosers");
+  if (!gainersEl || !losersEl) return;
+  const formatMoverPrice = (price) => {
+    const digits = price >= 1000 ? 2 : price >= 10 ? 3 : 5;
+    return price.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  };
+  const row = (item, index) => `<li><span>#${index + 1}</span><div><strong>${escapeHtml(compactSymbol(item.symbol))}</strong><small>${escapeHtml(item.name)}</small></div><em>${formatMoverPrice(item.price)}<br><b>${item.change >= 0 ? "+" : ""}${item.change.toFixed(2)}%</b></em></li>`;
+  async function refreshMovers() {
+    if (!document.querySelector("#dashboard")?.classList.contains("is-active")) return;
+    try {
+      const response = await fetch(`${apiBase}/api/tradable-instruments`);
+      const instruments = (await response.json().catch(() => ({}))).instruments || [];
+      const quotes = await fetchTradeQuotes(instruments);
+      const items = instruments.map((instrument) => {
+        const quote = quotes[instrument.symbol];
+        return { symbol: instrument.symbol, name: instrument.displayName || instrument.name || instrument.symbol, price: Number(quote?.price), change: Number(quote?.percent_change) };
+      }).filter((item) => Number.isFinite(item.price) && item.price > 0 && Number.isFinite(item.change) && Math.abs(item.change) < 1000);
+      const gainers = items.filter((item) => item.change > 0).sort((a, b) => b.change - a.change).slice(0, 5);
+      const losers = items.filter((item) => item.change < 0).sort((a, b) => a.change - b.change).slice(0, 5);
+      gainersEl.innerHTML = gainers.length ? gainers.map(row).join("") : '<li class="mover-empty">No gainers right now</li>';
+      losersEl.innerHTML = losers.length ? losers.map(row).join("") : '<li class="mover-empty">No losers right now</li>';
+    } catch {
+      /* keep whatever is shown */
+    }
+  }
+  window.refreshMarketMovers = refreshMovers;
+  document.addEventListener("click", (event) => { if (event.target.closest('[data-section="dashboard"]')) setTimeout(refreshMovers, 50); });
+  setInterval(refreshMovers, 20000);
+  setTimeout(refreshMovers, 1500);
+})();
+
+// ---------- Landing page quote strip: live prices instead of fixed sample numbers ----------
+(function setupHomeQuoteStrip() {
+  const strip = document.querySelector("#homeQuoteStrip");
+  if (!strip) return;
+  const spans = [...strip.querySelectorAll("[data-quote-symbol]")];
+  async function refresh() {
+    try {
+      const symbols = spans.map((span) => span.dataset.quoteSymbol);
+      const response = await fetch(`${apiBase}/api/markets/quotes?symbols=${encodeURIComponent(symbols.join(","))}`);
+      const data = (await response.json().catch(() => ({}))).data || {};
+      spans.forEach((span) => {
+        const quote = data[span.dataset.quoteSymbol];
+        const price = Number(quote?.price);
+        const change = Number(quote?.percent_change);
+        if (!Number.isFinite(price) || price <= 0) return;
+        const digits = price >= 1000 ? 2 : price >= 10 ? 3 : 5;
+        span.querySelector("strong").textContent = price.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+        const em = span.querySelector("em");
+        if (Number.isFinite(change)) {
+          em.textContent = `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`;
+          em.classList.toggle("down", change < 0);
+        }
+      });
+    } catch {
+      /* keep the last values */
+    }
+  }
+  refresh();
+  setInterval(refresh, 20000);
+})();
