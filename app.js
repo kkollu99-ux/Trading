@@ -3150,7 +3150,7 @@ function renderTradeCandles() {
   const range = max - min || 1;
   const volumeMax = Math.max(...candles.map((candle) => candle.volume));
   const candleStep = width / candles.length;
-  const candleWidth = Math.max(4, Math.min(12, candleStep * 0.58));
+  const candleWidth = Math.max(1.5, Math.min(12, candleStep * 0.58));
   // Log mode maps price through log() before the linear pixel interpolation,
   // so equal on-screen distances represent equal percentage moves instead of
   // equal absolute ones. Falls back to linear if min isn't positive (log of
