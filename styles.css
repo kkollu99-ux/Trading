@@ -7443,3 +7443,4 @@ body { top: 0 !important; }
   .home-header.menu-open .home-menu-button span:nth-child(2) { opacity: 0; }
   .home-header.menu-open .home-menu-button span:nth-child(3) { transform: translateY(-0.44rem) rotate(-45deg); }
 }
+.mover-list .mover-empty { display: block; padding: 1rem; color: var(--muted); font-size: 0.85rem; text-align: center; }
