@@ -434,7 +434,7 @@
           </select>
           <button class="wallet-button" id="walletBalance" type="button">▣ $0.00</button>
           <button id="languageToggle" class="icon-button" type="button" aria-label="Change language">🌐</button>
-          <button id="themeToggle" class="icon-button sun-button" type="button" aria-label="Switch to light mode">☼</button>
+          <button id="themeToggle" class="theme-switch-btn" type="button" role="switch" aria-checked="true" aria-label="Toggle light / dark theme"><span class="theme-switch" aria-hidden="true"><b class="ts-sun">☀</b><b class="ts-moon">☾</b><i></i></span></button>
           <button id="signOut" class="icon-button" type="button" aria-label="Sign out">⇱</button>
         </div>
       </header>
@@ -1098,7 +1098,7 @@
               <button class="pm-withdraw" type="button" data-pm-go="withdraw"><span aria-hidden="true">$</span><strong>Withdraw</strong><small>Withdraw Details &gt;&gt;</small></button>
             </div>
             <nav class="profile-modal-menu" id="profileModalMenu" aria-label="Account menu">
-              <button class="pm-row pm-row-theme" type="button" data-pm-row="theme" role="switch" aria-checked="true"><span>🌙</span> <span>Dark Mode</span><i class="pm-switch" aria-hidden="true"></i></button>
+              <button class="pm-row pm-row-theme" type="button" data-pm-row="theme" role="switch" aria-checked="true" aria-label="Toggle light / dark theme"><span>🌓</span> <span class="pm-theme-fill"></span><span class="theme-switch theme-switch-lg" aria-hidden="true"><b class="ts-sun">☀</b><b class="ts-moon">☾</b><i></i></span></button>
               <button class="pm-row pm-row-language" type="button" data-pm-row="language"><span>🌐</span> <span>Language</span><em id="pmLanguageValue">English</em></button>
               <button class="is-active" type="button" data-profile-pane="details"><span>👤</span> <span>Account Details</span></button>
               <button type="button" data-profile-pane="kyc"><span>🪪</span> <span>KYC Verification</span></button>
