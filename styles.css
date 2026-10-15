@@ -7164,3 +7164,13 @@ body.kyc-open { overflow: hidden; }
   .ticket-back { border: 0; background: none; color: var(--blue); font-size: 1rem; font-weight: 600; cursor: pointer; padding: 0.3rem 0.2rem; }
   body.ticket-sheet-open { overflow: hidden; }
 }
+
+/* KYC selfie camera */
+.kyc-camera { display: grid; gap: 0.6rem; margin-bottom: 0.6rem; }
+.kyc-camera video { width: 100%; max-height: 22rem; border-radius: 0.5rem; background: #000; object-fit: cover; transform: scaleX(-1); }
+.kyc-camera-actions { display: flex; gap: 0.6rem; }
+.kyc-camera-actions button { flex: 1; min-height: 2.7rem; }
+.kyc-selfie-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; }
+.kyc-selfie-buttons .kyc-choose { cursor: pointer; font: inherit; font-size: 0.82rem; }
+.kyc-choose-primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.kyc-camera.is-hidden, .kyc-drop.is-hidden { display: none; }
