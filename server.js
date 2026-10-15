@@ -1211,6 +1211,7 @@ async function removeExpiredDemoAccounts() {
   try {
     await client.query("BEGIN");
     const old = `(SELECT id FROM users WHERE is_demo AND created_at < NOW() - make_interval(days => ${demoRetentionDays}))`;
+    await client.query(`DELETE FROM chat_messages WHERE request_id IN (SELECT id FROM service_requests WHERE user_id IN ${old})`);
     for (const [table, column] of [["audit_logs", "actor_id"], ["ledger", "user_id"], ["orders", "user_id"], ["chat_messages", "sender_id"], ["service_requests", "user_id"], ["kyc_submissions", "user_id"], ["bank_accounts", "user_id"]]) {
       await client.query(`DELETE FROM ${table} WHERE ${column} IN ${old}`);
     }
@@ -1262,7 +1263,8 @@ async function purgeNonAdminUsers() {
     const doomed = new Set(memory.users.filter((user) => user.role !== "admin").map((user) => user.id));
     memory.orders = memory.orders.filter((item) => !doomed.has(item.user_id));
     memory.ledger = memory.ledger.filter((item) => !doomed.has(item.user_id) && !doomed.has(item.created_by));
-    memory.chatMessages = memory.chatMessages.filter((item) => !doomed.has(item.sender_id));
+    const doomedRequests = new Set(memory.serviceRequests.filter((item) => doomed.has(item.user_id)).map((item) => item.id));
+    memory.chatMessages = memory.chatMessages.filter((item) => !doomed.has(item.sender_id) && !doomedRequests.has(item.request_id));
     memory.serviceRequests = memory.serviceRequests.filter((item) => !doomed.has(item.user_id));
     memory.kycSubmissions = memory.kycSubmissions.filter((item) => !doomed.has(item.user_id));
     memory.bankAccounts = memory.bankAccounts.filter((item) => !doomed.has(item.user_id));
@@ -1276,6 +1278,8 @@ async function purgeNonAdminUsers() {
     await client.query("UPDATE service_requests SET assigned_team_id = NULL WHERE assigned_team_id IN (SELECT id FROM doomed)");
     await client.query("UPDATE kyc_submissions SET reviewed_by = NULL WHERE reviewed_by IN (SELECT id FROM doomed)");
     await client.query("DELETE FROM audit_logs WHERE actor_id IN (SELECT id FROM doomed)");
+    // Every message in a doomed user's request goes too (including admin replies), or the request can't be deleted.
+    await client.query("DELETE FROM chat_messages WHERE request_id IN (SELECT id FROM service_requests WHERE user_id IN (SELECT id FROM doomed))");
     await client.query("DELETE FROM chat_messages WHERE sender_id IN (SELECT id FROM doomed)");
     await client.query("DELETE FROM ledger WHERE user_id IN (SELECT id FROM doomed) OR created_by IN (SELECT id FROM doomed)");
     for (const table of ["orders", "service_requests", "kyc_submissions", "bank_accounts"]) {
