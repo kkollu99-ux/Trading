@@ -7197,7 +7197,7 @@ body.kyc-open { overflow: hidden; }
 
 /* ---------- Account page extras: hidden on desktop, shown in the phone/tablet layout ---------- */
 .pm-wallet, .pm-actions, .pm-row, .language-sheet { display: none; }
-.language-sheet { flex-direction: column; width: min(22rem, calc(100% - 2rem)); border: 1px solid var(--line); border-radius: 0.8rem; background: var(--panel); overflow: hidden; }
+.language-sheet { flex-direction: column; width: min(22rem, calc(100% - 2rem)); max-height: min(80vh, 36rem); border: 1px solid var(--line); border-radius: 0.8rem; background: var(--panel); overflow: hidden; }
 #languageModal:not(.is-hidden) .language-sheet { display: flex; }
 .language-sheet header { display: flex; justify-content: space-between; align-items: center; padding: 0.9rem 1rem; border-bottom: 1px solid var(--line); }
 .language-sheet header button { border: 0; background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; }
@@ -7281,3 +7281,12 @@ body.kyc-open { overflow: hidden; }
   --trade-border: #252d41; --trade-muted: #8b97ad;
   color: var(--text);
 }
+
+.language-list { overflow-y: auto; display: flex; flex-direction: column; }
+.language-list > button { display: flex; justify-content: space-between; align-items: center; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); padding: 0.9rem 1rem; font: inherit; text-align: left; cursor: pointer; }
+.language-list > button.is-selected { color: var(--blue); font-weight: 700; }
+/* Hide Google's own banner/tooltips; the picker above is the only UI. */
+.goog-te-banner-frame, .skiptranslate > iframe, #goog-gt-tt, .goog-te-balloon-frame { display: none !important; }
+body { top: 0 !important; }
+.goog-text-highlight { background: none !important; box-shadow: none !important; }
+#google_translate_element { position: absolute; width: 0; height: 0; overflow: hidden; }

@@ -433,6 +433,7 @@
             <option value="PLN">PLN</option>
           </select>
           <button class="wallet-button" id="walletBalance" type="button">▣ $0.00</button>
+          <button id="languageToggle" class="icon-button" type="button" aria-label="Change language">🌐</button>
           <button id="themeToggle" class="icon-button sun-button" type="button" aria-label="Switch to light mode">☼</button>
           <button id="signOut" class="icon-button" type="button" aria-label="Sign out">⇱</button>
         </div>
@@ -949,14 +950,11 @@
         <button class="nav-item" data-section="profile" data-label="Profile"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 10h16"/><path d="M8 15h4"/></svg></span><span class="nav-label">Profile</span></button>
         <button class="nav-item" data-section="service" data-label="Online Service"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M5 13h3v6H5z"/><path d="M16 13h3v6h-3z"/><path d="M19 19a4 4 0 0 1-4 3h-3"/></svg></span><span class="nav-label">Online Service</span></button>
       </nav>
+          <div id="google_translate_element" class="notranslate" aria-hidden="true"></div>
           <div id="languageModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-label="Language">
       <div class="language-sheet">
         <header><strong>Language</strong><button id="languageClose" type="button" aria-label="Close">✕</button></header>
-        <button class="is-selected" type="button" data-language="en">English <span>✓</span></button>
-        <button type="button" disabled>हिन्दी <small>Coming soon</small></button>
-        <button type="button" disabled>العربية <small>Coming soon</small></button>
-        <button type="button" disabled>中文 <small>Coming soon</small></button>
-        <button type="button" disabled>Español <small>Coming soon</small></button>
+        <div id="languageList" class="language-list"></div>
       </div>
     </div>
 
