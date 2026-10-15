@@ -127,7 +127,7 @@ if (process.env.DATABASE_URL) {
 
 function publicUser(user) {
   if (!user) return null;
-  const { passwordHash, password_hash: _passwordHash, ...safeUser } = user;
+  const { passwordHash, password_hash: _passwordHash, tokensValidAfter: _tokensValidAfter, ...safeUser } = user;
   return safeUser;
 }
 
@@ -147,6 +147,7 @@ function normalizeUser(row) {
     referredBy: row.referred_by || row.referredBy,
     kycStatus: row.kyc_status || row.kycStatus,
     isDemo: Boolean(row.is_demo ?? row.isDemo),
+    tokensValidAfter: row.tokens_valid_after ?? row.tokensValidAfter ?? null,
     balance: Number(row.balance || 0),
     marginUsed: Number(row.margin_used ?? row.marginUsed ?? 0),
     preferences: row.preferences || {},
@@ -813,6 +814,10 @@ function requireAuth(request, response, next) {
 async function attachUser(request, response, next) {
   const user = await findUserById(request.auth.sub);
   if (!user) return response.status(401).json({ error: "User not found" });
+  // A password reset revokes every session issued before it.
+  if (user.tokensValidAfter && (request.auth.iat || 0) * 1000 < Math.floor(new Date(user.tokensValidAfter).getTime() / 1000) * 1000) {
+    return response.status(401).json({ error: "Session expired. Please sign in again." });
+  }
   request.user = user;
   return next();
 }
@@ -833,6 +838,7 @@ async function seedDefaults() {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0`);
     // Practice accounts started from "Try Demo" - see POST /api/auth/demo.
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMPTZ`);
     await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS document_back_url TEXT`);
     await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS selfie_url TEXT`);
     await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS date_of_birth TEXT`);
@@ -1149,7 +1155,7 @@ app.post("/api/auth/reset-password", async (request, response) => {
     resetStore.delete(email);
     return response.status(400).json({ error: "Request a reset code first" });
   }
-  await setUserPassword(user.id, await bcrypt.hash(password, 12));
+  await setUserPassword(user.id, await bcrypt.hash(password, 12), { revokeSessions: true });
   resetStore.delete(email);
   response.json({ ok: true });
 });
@@ -1428,13 +1434,16 @@ app.get("/api/admin/users/:id/orders", requireAuth, attachUser, requireRole("adm
   response.json({ orders: enriched });
 });
 
-async function setUserPassword(userId, passwordHash) {
+async function setUserPassword(userId, passwordHash, { revokeSessions = false } = {}) {
   if (pool) {
-    await query("UPDATE users SET password_hash = $2 WHERE id = $1", [userId, passwordHash]);
+    await query(`UPDATE users SET password_hash = $2${revokeSessions ? ", tokens_valid_after = NOW()" : ""} WHERE id = $1`, [userId, passwordHash]);
     return;
   }
   const user = memory.users.find((item) => item.id === userId);
-  if (user) user.passwordHash = passwordHash;
+  if (user) {
+    user.passwordHash = passwordHash;
+    if (revokeSessions) user.tokensValidAfter = new Date().toISOString();
+  }
 }
 
 app.post("/api/auth/change-password", requireAuth, attachUser, async (request, response) => {

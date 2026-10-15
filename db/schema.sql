@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   balance NUMERIC(14, 2) NOT NULL DEFAULT 0,
   margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0,
   is_demo BOOLEAN NOT NULL DEFAULT FALSE,
+  tokens_valid_after TIMESTAMPTZ,
   preferences JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
