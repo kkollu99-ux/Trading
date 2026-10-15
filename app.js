@@ -6083,10 +6083,10 @@ startVersionCheck();
   const sun = document.querySelector("#themeToggle");
   function renderTheme() {
     const dark = root.dataset.theme !== "light";
-    themeRow?.setAttribute("aria-checked", String(dark));
-    themeRow?.classList.toggle("is-on", dark);
-    sun?.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
-    if (sun) sun.textContent = dark ? "☼" : "☾";
+    for (const control of [themeRow, sun]) {
+      control?.setAttribute("aria-checked", String(dark));
+      control?.setAttribute("title", dark ? "Switch to light theme" : "Switch to dark theme");
+    }
   }
   function setTheme(theme) {
     root.dataset.theme = theme;

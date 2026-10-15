@@ -25,6 +25,8 @@
   --trade-muted: #7b879d;
   --trade-buy: #25b15f;
   --trade-sell: #e83d30;
+  --rgb-bg: 12, 17, 29; --rgb-deep: 8, 13, 24; --rgb-navy: 9, 22, 42; --rgb-card: 19, 31, 50; --rgb-card2: 11, 18, 32;
+  --rgb-soft: 15, 25, 41; --rgb-soft2: 20, 32, 51; --rgb-soft3: 25, 35, 54; --rgb-panel: 17, 24, 39; --rgb-panel2: 24, 31, 47;
   color-scheme: dark;
 }
 
@@ -232,7 +234,7 @@ button {
   position: relative;
   overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(12, 17, 29, 0.92), rgba(8, 13, 24, 0.98)),
+    linear-gradient(135deg, rgba(var(--rgb-bg), 0.92), rgba(var(--rgb-deep), 0.98)),
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 74px);
 }
 
@@ -338,7 +340,7 @@ button {
   border: 1px solid var(--line);
   border-top-color: var(--blue);
   border-radius: 0.5rem;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, transparent), rgba(12, 17, 29, 0.96));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, transparent), rgba(var(--rgb-bg), 0.96));
   padding: 1.45rem;
 }
 
@@ -495,7 +497,7 @@ button {
   overflow: hidden;
   padding: clamp(2rem, 4vw, 3.5rem);
   background:
-    linear-gradient(140deg, rgba(12, 17, 29, 0.96), rgba(8, 13, 24, 0.98)),
+    linear-gradient(140deg, rgba(var(--rgb-bg), 0.96), rgba(var(--rgb-deep), 0.98)),
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 72px);
 }
 
@@ -512,7 +514,7 @@ button {
 
 .register-brand {
   background:
-    linear-gradient(140deg, rgba(12, 17, 29, 0.98), rgba(8, 13, 24, 0.99)),
+    linear-gradient(140deg, rgba(var(--rgb-bg), 0.98), rgba(var(--rgb-deep), 0.99)),
     repeating-linear-gradient(90deg, rgba(0, 199, 133, 0.05) 0 1px, transparent 1px 72px);
 }
 
@@ -2987,7 +2989,7 @@ select:focus {
 .panel {
   border: 1px solid rgba(37, 45, 65, 0.9);
   border-radius: 0.5rem;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 98%, transparent), rgba(12, 17, 29, 0.98));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 98%, transparent), rgba(var(--rgb-bg), 0.98));
   box-shadow: var(--shadow);
 }
 
@@ -3183,7 +3185,7 @@ canvas {
 .user-management-metrics article {
   border: 1px solid rgba(0, 115, 255, 0.32);
   border-radius: 0.5rem;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 98%, transparent), rgba(9, 22, 42, 0.98));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 98%, transparent), rgba(var(--rgb-navy), 0.98));
   padding: 0.9rem;
 }
 
@@ -3966,7 +3968,7 @@ input[type="checkbox"] {
 .portal-card {
   border: 1px solid var(--line);
   border-radius: 0.75rem;
-  background: linear-gradient(180deg, rgba(19, 31, 50, 0.95), rgba(11, 18, 32, 0.95));
+  background: linear-gradient(180deg, rgba(var(--rgb-card), 0.95), rgba(var(--rgb-card2), 0.95));
   box-shadow: 0 1.25rem 2.5rem rgba(0, 0, 0, 0.18);
 }
 
@@ -4183,7 +4185,7 @@ input[type="checkbox"] {
   padding: 1rem;
   border: 1px solid var(--line);
   border-radius: 0.75rem;
-  background: linear-gradient(180deg, rgba(19, 31, 50, 0.92), rgba(11, 18, 32, 0.92));
+  background: linear-gradient(180deg, rgba(var(--rgb-card), 0.92), rgba(var(--rgb-card2), 0.92));
 }
 
 .trader-avatar {
@@ -7185,11 +7187,14 @@ body.kyc-open { overflow: hidden; }
   --muted: #5f6c84;
   --text: #121a2b;
   --shadow: 0 12px 36px rgba(20, 30, 60, 0.12);
+  --gold: #a35f00; --cyan: #00855a; --green: #1a8a48;
   --trade-bg: #f2f5fa;
   --trade-panel: #ffffff;
   --trade-panel-soft: #f1f4f9;
   --trade-border: #dde3ee;
   --trade-muted: #5f6c84;
+  --rgb-bg: 242, 245, 250; --rgb-deep: 232, 237, 245; --rgb-navy: 233, 240, 252; --rgb-card: 255, 255, 255; --rgb-card2: 244, 247, 252;
+  --rgb-soft: 244, 247, 252; --rgb-soft2: 238, 242, 249; --rgb-soft3: 233, 238, 246; --rgb-panel: 255, 255, 255; --rgb-panel2: 241, 244, 249;
   color-scheme: light;
 }
 :root[data-theme="light"] body { background: var(--bg); color: var(--text); }
@@ -7376,4 +7381,44 @@ body { top: 0 !important; }
 @media (max-width: 1000px) {
   .managed-table-card .managed-user-table-wrap { padding: 0.9rem 1rem 0.3rem; }
   .managed-table-card .managed-table-head { padding: 1rem 1rem 0; }
+}
+
+/* ---------- Theme toggle (replaces the words "Dark Mode" / "Light Mode") ---------- */
+.theme-switch-btn { display: inline-grid; place-items: center; border: 0; background: none; padding: 0.2rem; cursor: pointer; }
+.theme-switch {
+  position: relative; display: inline-flex; align-items: center; justify-content: space-between;
+  width: 3.9rem; height: 2rem; padding: 0 0.5rem; border-radius: 1rem;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+  font-size: 0.85rem; transition: background 0.25s;
+}
+.theme-switch b { font-weight: 400; line-height: 1; }
+.theme-switch i {
+  position: absolute; top: 50%; left: 0.2rem; width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  display: grid; place-items: center; background: var(--blue); color: #fff; font-style: normal; font-size: 0.85rem;
+  transform: translate(calc(3.9rem - 1.5rem - 0.4rem - 2px), -50%); transition: transform 0.25s;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+.theme-switch i::before { content: "☾"; }
+:root[data-theme="light"] .theme-switch i { transform: translate(0, -50%); background: #f5a524; }
+:root[data-theme="light"] .theme-switch i::before { content: "☀"; }
+.theme-switch-lg { width: 4.6rem; height: 2.3rem; }
+.theme-switch-lg i { width: 1.8rem; height: 1.8rem; transform: translate(calc(4.6rem - 1.8rem - 0.4rem - 2px), -50%); }
+:root[data-theme="light"] .theme-switch-lg i { transform: translate(0, -50%); }
+@media (max-width: 1050px) {
+  #profileModal .pm-row-theme > span:nth-child(2) { flex: 1; }
+  #profileModal .pm-row-theme > .theme-switch { margin-left: auto; }
+}
+
+/* ---------- Light theme: text that was hard-coded white for the dark design ---------- */
+:root[data-theme="light"] .home-logo small,
+:root[data-theme="light"] .brand-mark small,
+:root[data-theme="light"] .order-symbol { color: var(--text); }
+:root[data-theme="light"] .secondary-action,
+:root[data-theme="light"] .mini-action,
+:root[data-theme="light"] .watch-tabs button:hover { color: var(--text); }
+:root[data-theme="light"] #refreshServiceInbox { color: #fff; }
+@media (max-width: 1050px) {
+  /* KYC badge on the blue account card: white pill so every status colour stays readable. */
+  #profileModal .profile-modal-kyc-badge { background: #fff !important; }
+  :root:not([data-theme="light"]) #profileModal .profile-modal-kyc-badge { color: #c27a00; }
 }
