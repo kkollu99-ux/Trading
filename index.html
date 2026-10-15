@@ -668,7 +668,11 @@
                   <div><span>Spread</span><strong id="tradeSpreadValue">0.02</strong></div>
                 </div>
                 <div class="timeframes">
-                  <button class="is-active" type="button" data-timeframe="5S">5s</button>
+                  <select id="tradeSecondsSelect" class="is-active" aria-label="Candle interval in seconds" title="How often a new candle appears">
+                    <option value="5S" selected>5s</option>
+                    <option value="10S">10s</option>
+                    <option value="15S">15s</option>
+                  </select>
                   <button type="button" data-timeframe="1M">1M</button>
                   <button type="button" data-timeframe="5M">5M</button>
                   <button type="button" data-timeframe="1H">1H</button>

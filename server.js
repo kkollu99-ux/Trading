@@ -3371,7 +3371,7 @@ app.get("/api/markets/candles", async (request, response) => {
 // Candle sizes a simulation chart can show. 5S is the series' own 5-second
 // bars; every other size also reaches back across the product's real week
 // (see historyBeforeSeries).
-const seriesTimeframes = { "5S": 5000, "1M": 60000, "5M": 300000, "15M": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000 };
+const seriesTimeframes = { "5S": 5000, "10S": 10000, "15S": 15000, "1M": 60000, "5M": 300000, "15M": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000 };
 const seriesMaxCandles = 3000;
 
 app.get("/api/markets/series", async (request, response) => {
@@ -3385,7 +3385,10 @@ app.get("/api/markets/series", async (request, response) => {
   if (bucketMs === seriesBucketMs) {
     return response.json({ symbol, timeframe, bucketMs, bars: serializeBars(series.bars.slice(-seriesChartBars)) });
   }
-  const bars = resampleBars([...historyBeforeSeries(symbol, series), ...series.bars], bucketMs).slice(-seriesMaxCandles);
+  // Sub-minute candles (10s, 15s) are built from the live 5-second series alone;
+  // the real history behind it is one-minute data and can't be split that finely.
+  const source = bucketMs < 60000 ? series.bars : [...historyBeforeSeries(symbol, series), ...series.bars];
+  const bars = resampleBars(source, bucketMs).slice(-seriesMaxCandles);
   response.json({ symbol, timeframe, bucketMs, bars });
 });
 
