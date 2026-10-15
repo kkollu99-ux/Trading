@@ -45,8 +45,8 @@ http://127.0.0.1:4173
 Default seeded accounts:
 
 ```text
-admin@fxcc.capital / Admin@12345
-support@fxcc.capital / Support@12345
+admin@fxcaptialmarket.online / Admin@12345 (only created on a brand-new, empty database)
+(no separate support login; admins handle Online Service)
 ```
 
 Without `DATABASE_URL`, the backend uses in-memory data so development starts immediately. On Railway, attach PostgreSQL and set `DATABASE_URL` for persistence.

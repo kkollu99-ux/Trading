@@ -739,7 +739,7 @@ function showHomeView() {
 
 function enterWorkspace(session = null) {
   if (session) saveSession(session);
-  else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital", balance: 10000 } });
+  else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcaptialmarket.online", balance: 10000 } });
   applyServerPreferences(currentSession?.user);
   homeView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
@@ -1196,11 +1196,13 @@ document.querySelector("#passwordForm")?.addEventListener("submit", async (event
     return;
   }
   try {
-    await authRequest("/api/auth/change-password", {
+    const result = await authRequest("/api/auth/change-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ currentPassword: data.currentPassword, newPassword: data.newPassword }),
     });
+    // Other devices are signed out by the server; keep this one signed in.
+    if (result?.token) saveSession({ ...currentSession, token: result.token });
     form.reset();
     setPaneMessage("#passwordFormMessage", "Password updated.", "success");
   } catch (error) {
@@ -2019,7 +2021,7 @@ function applyIncomingOrderUpdate(payload) {
   // one), so this is exactly the case the acting user didn't just cause
   // themselves and needs telling about.
   if (payload.reason && payload.order?.status === "closed") {
-    const label = payload.reason === "stop_loss" ? "Stop Loss" : "Take Profit";
+    const label = { stop_loss: "Stop Loss", take_profit: "Take Profit", stop_out: "Stop-out (margin protection)" }[payload.reason] || "Auto-close";
     const pnl = Number(payload.order.realized_pnl || 0);
     const pnlText = `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}`;
     const message = `${label} triggered on ${compactSymbol(payload.order.symbol)}. P&L: ${pnlText}.`;
@@ -6186,4 +6188,22 @@ startVersionCheck();
     script.async = true;
     document.head.appendChild(script);
   }
+})();
+
+// ---------- Landing page: phone menu (hamburger) ----------
+(function setupHomeMenu() {
+  const header = document.querySelector(".home-header");
+  const button = document.querySelector(".home-menu-button");
+  if (!header || !button) return;
+  const setOpen = (open) => {
+    header.classList.toggle("menu-open", open);
+    button.setAttribute("aria-expanded", String(open));
+    button.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+  };
+  button.addEventListener("click", () => setOpen(!header.classList.contains("menu-open")));
+  document.querySelectorAll("#homeMobileMenu a").forEach((link) => link.addEventListener("click", () => setOpen(false)));
+  // The menu's Login / Open Account reuse the desktop buttons' own handlers.
+  document.querySelector("#homeMobileLogin")?.addEventListener("click", () => { setOpen(false); document.querySelector("#homeLogin")?.click(); });
+  document.querySelector("#homeMobileOpen")?.addEventListener("click", () => { setOpen(false); document.querySelector("#homeOpenAccount")?.click(); });
+  window.matchMedia("(min-width: 681px)").addEventListener?.("change", () => setOpen(false));
 })();

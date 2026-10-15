@@ -886,8 +886,11 @@ async function seedDefaults() {
     for (const instrument of defaultInstruments) await seedInstrument(instrument);
   }
 
-  if (!(await findUserByEmail("admin@fxcc.capital"))) {
-    await createUser({ email: "admin@fxcc.capital", password: "Admin@12345", name: "FXCM Admin", role: "admin" });
+  // The default admin is only for a brand-new, empty install. Once any admin
+  // exists (here or after the owner renamed/replaced it) nothing is re-created,
+  // so a known default password never reappears on a live site.
+  if (!(await listUsers()).some((user) => user.role === "admin")) {
+    await createUser({ email: "admin@fxcaptialmarket.online", password: "Admin@12345", name: "FXCM Admin", role: "admin" });
   }
 }
 
@@ -1486,14 +1489,17 @@ app.get("/api/admin/users/:id/orders", requireAuth, attachUser, requireRole("adm
 });
 
 async function setUserPassword(userId, passwordHash, { revokeSessions = false } = {}) {
+  // The cut-off uses this server's clock (the same one that stamps token iat), so a
+  // token issued right after the change is never judged older than it.
+  const revokedAt = revokeSessions ? new Date() : null;
   if (pool) {
-    await query(`UPDATE users SET password_hash = $2${revokeSessions ? ", tokens_valid_after = NOW()" : ""} WHERE id = $1`, [userId, passwordHash]);
+    await query(`UPDATE users SET password_hash = $2${revokeSessions ? ", tokens_valid_after = $3" : ""} WHERE id = $1`, revokeSessions ? [userId, passwordHash, revokedAt] : [userId, passwordHash]);
     return;
   }
   const user = memory.users.find((item) => item.id === userId);
   if (user) {
     user.passwordHash = passwordHash;
-    if (revokeSessions) user.tokensValidAfter = new Date().toISOString();
+    if (revokeSessions) user.tokensValidAfter = revokedAt.toISOString();
   }
 }
 
@@ -1505,8 +1511,9 @@ app.post("/api/auth/change-password", requireAuth, attachUser, async (request, r
   if (!(await bcrypt.compare(currentPassword, request.user.passwordHash))) {
     return response.status(401).json({ error: "Current password is incorrect" });
   }
-  await setUserPassword(request.user.id, await bcrypt.hash(newPassword, 12));
-  response.json({ ok: true });
+  // Every other device is signed out; this one gets a fresh token so it stays signed in.
+  await setUserPassword(request.user.id, await bcrypt.hash(newPassword, 12), { revokeSessions: true });
+  response.json({ ok: true, token: signToken(request.user) });
 });
 
 app.get("/api/referrals", requireAuth, attachUser, async (request, response) => {
@@ -3189,6 +3196,53 @@ async function checkStopLossTakeProfit() {
 setInterval(() => {
   checkStopLossTakeProfit().catch((error) => console.warn("SL/TP sweep failed:", error.message));
 }, stopLossTakeProfitIntervalMs);
+
+// Automatic stop-out (margin protection). Equity = free balance + margin held
+// + floating P&L (the same figure the dashboard shows). When margin level
+// (equity / margin held) falls to STOP_OUT_LEVEL_PCT or below, the position with
+// the biggest floating loss is closed, and the check repeats until the account
+// is back above the level or has no positions - so a loss can't run past the
+// account's own money. Per-position Stop Loss / Take Profit (above) still apply.
+const stopOutLevelPct = Number(process.env.STOP_OUT_LEVEL_PCT || 20);
+const stopOutCheckIntervalMs = Number(process.env.STOP_OUT_CHECK_INTERVAL_MS || 3000);
+
+async function listAllOpenOrders() {
+  if (pool) return query("SELECT * FROM orders WHERE status = 'open'");
+  return memory.orders.filter((order) => order.status === "open");
+}
+
+async function checkStopOut() {
+  const byUser = new Map();
+  for (const order of await listAllOpenOrders()) {
+    if (!byUser.has(order.user_id)) byUser.set(order.user_id, []);
+    byUser.get(order.user_id).push(order);
+  }
+  for (const [userId, orders] of byUser) {
+    let remaining = orders;
+    for (let guard = 0; guard < 50 && remaining.length; guard += 1) {
+      const user = await findUserById(userId);
+      if (!user) break;
+      const priced = remaining.map((order) => ({ order, pnl: floatingPnl(order, getCurrentPrice(order.symbol)) }));
+      if (priced.some((item) => !Number.isFinite(item.pnl))) break; // no usable price right now
+      const marginHeld = priced.reduce((sum, item) => sum + Number(item.order.margin_held), 0);
+      const equity = Number(user.balance) + marginHeld + priced.reduce((sum, item) => sum + item.pnl, 0);
+      const level = marginHeld > 0 ? (equity / marginHeld) * 100 : Infinity;
+      if (level > stopOutLevelPct) break;
+      const worst = priced.reduce((a, b) => (b.pnl < a.pnl ? b : a));
+      try {
+        await closeOrder(worst.order, { closedBy: null, reason: "stop_out" });
+      } catch (error) {
+        console.warn(`Stop-out failed for order ${worst.order.id}:`, error.message);
+        break;
+      }
+      remaining = remaining.filter((order) => order.id !== worst.order.id);
+    }
+  }
+}
+
+setInterval(() => {
+  checkStopOut().catch((error) => console.warn("Stop-out sweep failed:", error.message));
+}, stopOutCheckIntervalMs);
 
 app.get("/api/markets/quotes", async (request, response) => {
   const requestedSymbols = String(request.query.symbols || "")
