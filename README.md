@@ -1,13 +1,13 @@
-# FXCC Capitals Trading Platform
+# FXCM Capitals Trading Platform
 
-Frontend design is complete and backend development has started. The project now runs as a Node/Express app that serves the completed FXCC frontend and exposes APIs for user management, online service chat, deposits, withdrawals, KYC, and admin-controlled tradable instruments.
+Frontend design is complete and backend development has started. The project now runs as a Node/Express app that serves the completed FXCM frontend and exposes APIs for user management, online service chat, deposits, withdrawals, KYC, and admin-controlled tradable instruments.
 
 ## Current Features
 
-- FXCC-inspired public home page
-- FXCC-inspired sign-in screen
-- FXCC-inspired register screen with password confirmation
-- FXCC-inspired client dashboard after login
+- FXCM-inspired public home page
+- FXCM-inspired sign-in screen
+- FXCM-inspired register screen with password confirmation
+- FXCM-inspired client dashboard after login
 - Trade/quotes page with searchable market instruments and category filters
 - Dedicated trade terminal with market watch, candlestick chart, and order ticket
 - Online service chat popup with image uploads

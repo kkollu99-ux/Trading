@@ -7044,7 +7044,7 @@ body.is-demo .quick-access-block {
   display: none;
 }
 
-/* On a phone the header is full, so the DEMO tag moves under the FXCC logo. */
+/* On a phone the header is full, so the DEMO tag moves under the FXCM logo. */
 @media (max-width: 680px) {
   body.is-demo .demo-badge {
     display: none;
