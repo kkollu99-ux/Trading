@@ -1,3 +1,10 @@
+// Theme is applied before anything renders so a saved choice never flashes.
+(function applySavedTheme() {
+  let theme = "dark";
+  try { theme = localStorage.getItem("fxccTheme") === "light" ? "light" : "dark"; } catch {}
+  document.documentElement.dataset.theme = theme;
+})();
+
 const homeView = document.querySelector("#homeView");
 const loginView = document.querySelector("#loginView");
 const registerView = document.querySelector("#registerView");
@@ -189,6 +196,8 @@ function renderDashboardGreeting() {
   sectionTitle.innerHTML = `${getGreeting()}, <strong>${escapeHtml(currentDisplayName())}</strong> 👋`;
 }
 
+let balanceHidden = false;
+
 function renderAccountSummary() {
   const user = currentSession?.user;
   // Demo accounts hide everything money- and identity-related (see the
@@ -228,6 +237,9 @@ function renderAccountSummary() {
 
   const pnlValue = document.querySelector("#dashboardPnl");
   if (pnlValue) pnlValue.textContent = `${formatCurrency(floatingPnl)} (${equity > 0 ? ((floatingPnl / equity) * 100).toFixed(2) : "0.00"}%)`;
+
+  const pmBalance = document.querySelector("#pmBalance");
+  if (pmBalance) pmBalance.textContent = balanceHidden ? "••••••" : formatCurrency(balance);
 
   const walletButton = document.querySelector("#walletBalance");
   if (walletButton) walletButton.textContent = `▣ ${formatCurrency(balance)}`;
@@ -6062,4 +6074,103 @@ startVersionCheck();
     closeProfileModal?.();
     window.openKycModal?.(withdraw ? "Withdrawals" : "Deposits");
   }, true);
+})();
+
+// ---------- Mobile account page: Dark Mode, Language, balance, quick actions ----------
+(function setupAccountPageExtras() {
+  const root = document.documentElement;
+  const themeRow = document.querySelector('[data-pm-row="theme"]');
+  const sun = document.querySelector("#themeToggle");
+  function renderTheme() {
+    const dark = root.dataset.theme !== "light";
+    themeRow?.setAttribute("aria-checked", String(dark));
+    themeRow?.classList.toggle("is-on", dark);
+    sun?.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+    if (sun) sun.textContent = dark ? "☼" : "☾";
+  }
+  function setTheme(theme) {
+    root.dataset.theme = theme;
+    try { localStorage.setItem("fxccTheme", theme); } catch {}
+    renderTheme();
+  }
+  const toggle = () => setTheme(root.dataset.theme === "light" ? "dark" : "light");
+  themeRow?.addEventListener("click", toggle);
+  sun?.addEventListener("click", toggle);
+  renderTheme();
+
+  const languageModal = document.querySelector("#languageModal");
+  document.querySelector('[data-pm-row="language"]')?.addEventListener("click", () => languageModal?.classList.remove("is-hidden"));
+  document.querySelector("#languageToggle")?.addEventListener("click", () => languageModal?.classList.remove("is-hidden"));
+  document.querySelector("#languageClose")?.addEventListener("click", () => languageModal?.classList.add("is-hidden"));
+  languageModal?.addEventListener("click", (event) => { if (event.target === languageModal || event.target.closest("[data-language]")) languageModal.classList.add("is-hidden"); });
+
+  document.querySelector('[data-pm-row="service"]')?.addEventListener("click", () => {
+    closeProfileModal();
+    moveSection("service");
+  });
+
+  document.querySelectorAll("[data-pm-go]").forEach((button) => {
+    // Forward to the menu item so the verified-account gate and pane logic apply.
+    button.addEventListener("click", () => document.querySelector(`#profileModalMenu [data-profile-pane="${button.dataset.pmGo}"]`)?.click());
+  });
+
+  document.querySelector("#profileBalanceEye")?.addEventListener("click", (event) => {
+    balanceHidden = !balanceHidden;
+    event.currentTarget.setAttribute("aria-pressed", String(balanceHidden));
+    event.currentTarget.classList.toggle("is-off", balanceHidden);
+    renderAccountSummary();
+  });
+})();
+
+// ---------- Language: English by default, the rest through Google Website Translate ----------
+(function setupLanguage() {
+  const LANGS = [
+    ["en", "English"], ["hi", "हिन्दी"], ["ar", "العربية"], ["zh-CN", "中文 (简体)"], ["es", "Español"], ["fr", "Français"],
+    ["de", "Deutsch"], ["pt", "Português"], ["ru", "Русский"], ["id", "Bahasa Indonesia"], ["tr", "Türkçe"], ["ja", "日本語"],
+    ["ko", "한국어"], ["ur", "اردو"], ["bn", "বাংলা"], ["te", "తెలుగు"], ["ta", "தமிழ்"], ["vi", "Tiếng Việt"], ["it", "Italiano"], ["th", "ไทย"],
+  ];
+  let current = "en";
+  try { current = localStorage.getItem("fxccLang") || "en"; } catch {}
+  if (!LANGS.some(([code]) => code === current)) current = "en";
+
+  function writeCookie(value) {
+    const host = location.hostname;
+    const expiry = value ? "" : "; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    const base = `googtrans=${value}; path=/${expiry}`;
+    document.cookie = base;
+    if (host.includes(".")) document.cookie = `${base}; domain=.${host}`;
+  }
+
+  function setLanguage(code) {
+    try { localStorage.setItem("fxccLang", code); } catch {}
+    writeCookie(code === "en" ? "" : `/en/${code}`);
+    location.reload();
+  }
+
+  const list = document.querySelector("#languageList");
+  if (list) {
+    list.innerHTML = LANGS.map(([code, name]) => `<button type="button" data-language="${code}" class="${code === current ? "is-selected" : ""}">${name}${code === current ? " <span>✓</span>" : ""}</button>`).join("");
+    list.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-language]");
+      if (!button) return;
+      if (button.dataset.language === current) return document.querySelector("#languageModal")?.classList.add("is-hidden");
+      setLanguage(button.dataset.language);
+    });
+  }
+  const valueLabel = document.querySelector("#pmLanguageValue");
+  if (valueLabel) { valueLabel.textContent = LANGS.find(([code]) => code === current)[1]; valueLabel.classList.add("notranslate"); }
+
+  if (current !== "en") {
+    writeCookie(`/en/${current}`);
+    document.documentElement.lang = current;
+    if (["ar", "ur"].includes(current)) document.documentElement.dir = "rtl";
+    window.googleTranslateInit = () => {
+      // eslint-disable-next-line no-new
+      new window.google.translate.TranslateElement({ pageLanguage: "en", autoDisplay: false }, "google_translate_element");
+    };
+    const script = document.createElement("script");
+    script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateInit";
+    script.async = true;
+    document.head.appendChild(script);
+  }
 })();
