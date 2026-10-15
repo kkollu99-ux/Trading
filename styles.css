@@ -7422,3 +7422,8 @@ body { top: 0 !important; }
   #profileModal .profile-modal-kyc-badge { background: #fff !important; }
   :root:not([data-theme="light"]) #profileModal .profile-modal-kyc-badge { color: #c27a00; }
 }
+
+.user-management-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: flex-end; }
+.danger-action { border: 1px solid rgba(232, 61, 48, 0.55); border-radius: var(--radius); background: transparent; color: var(--red); font-weight: 800; cursor: pointer; padding: 0.6rem 0.9rem; }
+.danger-action:hover { background: var(--red); color: #fff; }
+@media (max-width: 560px) { .user-management-actions { flex-direction: column; align-items: stretch; width: 100%; } .user-management-head { flex-direction: column !important; } }
