@@ -3628,6 +3628,12 @@ async function loadChartForCurrentSymbol() {
 function selectTradeSymbol(row) {
   Object.assign(tradeChartState, readTradeRow(row));
   tradeChartState.userPickedTimeframe = false;
+  // On a phone the product list sits above the chart: once a product is picked,
+  // fold the list away so the chart is what's on screen.
+  if (!isDesktopLayout() && row.closest("#tradeWatchTable")) {
+    collapseWatchPanel();
+    window.setTimeout(() => document.querySelector(".chart-terminal")?.scrollIntoView({ block: "start" }), 50);
+  }
   // Mirrors fxccActiveSection below (see hydrateSession) - without this, a
   // refresh always comes back to the chart's hardcoded default symbol
   // (XAUUSD), not whatever was actually being viewed/simulated, so a
@@ -6331,4 +6337,24 @@ startVersionCheck();
   }
   refresh();
   setInterval(refresh, 20000);
+})();
+
+// ---------- Trade page on phones/tablets: chart first, product list on demand ----------
+(function setupMobileWatchToggle() {
+  const button = document.querySelector("#mobileWatchToggle");
+  const terminal = document.querySelector(".trade-terminal");
+  if (!button || !terminal) return;
+  const sync = () => {
+    const collapsed = terminal.classList.contains("is-watch-collapsed");
+    button.setAttribute("aria-expanded", String(!collapsed));
+    button.textContent = collapsed ? "☰ Markets" : "✕ Close list";
+  };
+  button.addEventListener("click", () => {
+    terminal.classList.toggle("is-watch-collapsed");
+    sync();
+    if (!terminal.classList.contains("is-watch-collapsed")) terminal.querySelector(".watch-panel")?.scrollIntoView({ block: "start" });
+    else window.setTimeout(renderTradeCandles, 50);
+  });
+  new MutationObserver(sync).observe(terminal, { attributes: true, attributeFilter: ["class"] });
+  sync();
 })();

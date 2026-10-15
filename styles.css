@@ -7448,3 +7448,28 @@ body { top: 0 !important; }
 
 #tradeSecondsSelect { min-width: 4.2rem; }
 #tradeSecondsSelect.is-active { border-color: var(--gold); color: var(--gold); background: rgba(255, 176, 0, 0.14); }
+
+/* Trade page on phones/tablets: the chart comes first, the product list opens on demand. */
+.mobile-watch-toggle { display: none; }
+@media (max-width: 1050px) {
+  .trade-terminal.is-watch-collapsed .watch-panel { display: none; }
+  .chart-symbol-head { position: relative; }
+  .mobile-watch-toggle {
+    display: inline-flex; align-items: center; position: absolute; top: 0.55rem; right: 0.6rem; z-index: 3;
+    min-height: 2rem; padding: 0.2rem 0.7rem; border: 1px solid var(--trade-border); border-radius: 0.4rem;
+    background: var(--trade-panel-soft); color: var(--text); font-size: 0.78rem; font-weight: 800; cursor: pointer;
+  }
+}
+
+/* Phones: keep the readouts above the chart compact so the chart gets the screen. */
+@media (max-width: 680px) {
+  #trade .chart-symbol-head { min-height: 0; padding: 0.6rem 0.75rem 0.3rem; }
+  #trade .chart-symbol-head p { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: 0.15rem 0.7rem; margin: 0.35rem 0 0; font-size: 0.72rem; }
+  #trade .trade-price-stats { display: grid; grid-template-columns: repeat(3, 1fr); }
+  #trade .trade-price-stats > div { display: grid; justify-items: center; gap: 0.1rem; padding: 0.35rem 0.4rem; border-bottom: 0; border-right: 1px solid var(--trade-border); }
+  #trade .trade-price-stats > div:last-child { border-right: 0; }
+  #trade .trade-price-stats span { font-size: 0.6rem; }
+  #trade .trade-price-stats strong { font-size: 0.82rem; }
+  #trade .timeframes { padding: 0.3rem 0.5rem; gap: 0.3rem; }
+  #trade .timeframes button, #trade .timeframes select { min-height: 1.9rem; padding: 0.15rem 0.6rem; }
+}
