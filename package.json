@@ -2,7 +2,7 @@
   "name": "fxcc-capitals-platform",
   "version": "0.1.0",
   "private": true,
-  "description": "FXCC Capitals trading platform frontend with backend APIs for user management, support chat, KYC, payments, and controlled instruments.",
+  "description": "FXCM Capitals trading platform frontend with backend APIs for user management, support chat, KYC, payments, and controlled instruments.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

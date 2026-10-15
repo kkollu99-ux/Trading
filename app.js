@@ -1841,9 +1841,9 @@ function trackServiceChatNotification(message) {
 
 const processChatTopics = {
   support: {
-    title: "FXCC Support",
+    title: "FXCM Support",
     subtitle: "Online · Typically replies in minutes",
-    message: "Hello! You are now connected to FXCC Capitals Support. Please type a message to begin.",
+    message: "Hello! You are now connected to FXCM Capitals Support. Please type a message to begin.",
   },
   deposit: {
     title: "Deposit Support",

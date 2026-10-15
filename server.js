@@ -887,7 +887,7 @@ async function seedDefaults() {
   }
 
   if (!(await findUserByEmail("admin@fxcc.capital"))) {
-    await createUser({ email: "admin@fxcc.capital", password: "Admin@12345", name: "FXCC Admin", role: "admin" });
+    await createUser({ email: "admin@fxcc.capital", password: "Admin@12345", name: "FXCM Admin", role: "admin" });
   }
 }
 
@@ -985,17 +985,17 @@ async function sendEmailViaResend({ to, subject, text, html }) {
 // deliberately doesn't reuse the app's own stylesheet or brand-mark markup.
 function otpEmailTemplate(code, purpose = "register") {
   const reset = purpose === "reset";
-  const subject = reset ? "Reset your FXCC Capitals password" : "Your FXCC Capitals verification code";
+  const subject = reset ? "Reset your FXCM Capitals password" : "Your FXCM Capitals verification code";
   const heading = reset ? "Reset your password" : "Verify your email address";
   const intro = reset
-    ? "Enter this code to choose a new password for your FXCC Capitals account. It expires in 10 minutes."
-    : "Enter this code to finish creating your FXCC Capitals account. It expires in 10 minutes.";
+    ? "Enter this code to choose a new password for your FXCM Capitals account. It expires in 10 minutes."
+    : "Enter this code to finish creating your FXCM Capitals account. It expires in 10 minutes.";
   const footerNote = reset
     ? "If you didn't ask to reset your password, you can safely ignore this email — your password will not change."
     : "If you didn't request this code, you can safely ignore this email — no account will be created without it.";
   const text = reset
-    ? `Your FXCC Capitals password reset code is ${code}. It expires in 10 minutes. If you didn't ask for this, ignore this email - your password will not change.`
-    : `Your FXCC Capitals verification code is ${code}. It expires in 10 minutes. If you didn't request this, you can safely ignore this email.`;
+    ? `Your FXCM Capitals password reset code is ${code}. It expires in 10 minutes. If you didn't ask for this, ignore this email - your password will not change.`
+    : `Your FXCM Capitals verification code is ${code}. It expires in 10 minutes. If you didn't request this, you can safely ignore this email.`;
   const html = `<!doctype html>
 <html>
   <body style="margin:0; padding:0; background:#05080f; font-family:Arial, Helvetica, sans-serif;">
@@ -1005,7 +1005,7 @@ function otpEmailTemplate(code, purpose = "register") {
           <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="max-width:480px; width:100%; background:#0c1424; border:1px solid #1c2434; border-radius:12px; overflow:hidden;">
             <tr>
               <td style="padding:28px 32px 0;">
-                <span style="display:inline-block; font-size:20px; font-weight:900; letter-spacing:0.06em; color:#ffb000;">FXCC</span>
+                <span style="display:inline-block; font-size:20px; font-weight:900; letter-spacing:0.06em; color:#ffb000;">FXCM</span>
                 <div style="font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:#7b879d; margin-top:2px;">A Broker On Your Side</div>
               </td>
             </tr>
@@ -1033,7 +1033,7 @@ function otpEmailTemplate(code, purpose = "register") {
             </tr>
             <tr>
               <td style="padding:16px 32px; background:#080c14; color:#4b5568; font-size:11px; text-align:center;">
-                © ${new Date().getFullYear()} FXCC Capitals. This is an automated message — please don't reply.
+                © ${new Date().getFullYear()} FXCM Capitals. This is an automated message — please don't reply.
               </td>
             </tr>
           </table>
@@ -2058,7 +2058,7 @@ function historySourceFor(symbol, category) {
 }
 
 async function fetchHistoryJson(url) {
-  const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (FXCC price history)" }, signal: AbortSignal.timeout(15000) });
+  const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (FXCM price history)" }, signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
@@ -3395,7 +3395,7 @@ function broadcast(payload) {
 }
 
 wss.on("connection", (socket) => {
-  socket.send(JSON.stringify({ type: "connected", message: "FXCC realtime channel connected" }));
+  socket.send(JSON.stringify({ type: "connected", message: "FXCM realtime channel connected" }));
   // A freshly-connected client would otherwise wait up to the next
   // tickSyntheticQuotes cycle for its first market-status update, so hand
   // it whatever's already known now.
@@ -3410,7 +3410,7 @@ seedDefaults()
     // where it was before this restart (see seedBasisPrice).
     await loadCandleSnapshotsFromDb();
     server.listen(port, () => {
-      console.log(`FXCC platform running on http://127.0.0.1:${port}`);
+      console.log(`FXCM platform running on http://127.0.0.1:${port}`);
     });
     await restoreSimulations();
     startRealPriceFetching();
@@ -3427,7 +3427,7 @@ seedDefaults()
     }, seriesPersistIntervalMs);
   })
   .catch((error) => {
-    console.error("Failed to start FXCC platform", error);
+    console.error("Failed to start FXCM platform", error);
     process.exit(1);
   });
 
