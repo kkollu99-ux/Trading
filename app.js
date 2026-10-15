@@ -1,6 +1,7 @@
 const homeView = document.querySelector("#homeView");
 const loginView = document.querySelector("#loginView");
 const registerView = document.querySelector("#registerView");
+const forgotView = document.querySelector("#forgotView");
 const appView = document.querySelector("#appView");
 const sectionTitle = document.querySelector("#sectionTitle");
 const navItems = [...document.querySelectorAll(".nav-item")];
@@ -190,6 +191,9 @@ function renderDashboardGreeting() {
 
 function renderAccountSummary() {
   const user = currentSession?.user;
+  // Demo accounts hide everything money- and identity-related (see the
+  // body.is-demo rules in styles.css).
+  document.body.classList.toggle("is-demo", Boolean(user?.isDemo));
   const balance = Number(user?.balance || 0);
   const uid = user?.referralCode || user?.id || "—";
   const name = currentDisplayName();
@@ -251,6 +255,11 @@ function renderAccountSummary() {
     kycBadgeValue.classList.toggle("is-rejected", user?.kycStatus === "rejected");
   }
 
+  if (user?.isDemo && kycBadgeValue) {
+    kycBadgeValue.textContent = "Demo";
+    kycBadgeValue.classList.remove("is-pending", "is-rejected");
+  }
+
   const avatarInitial = document.querySelector("#profileModalAvatar");
   if (avatarInitial) avatarInitial.textContent = name.charAt(0).toUpperCase() || "?";
 
@@ -267,20 +276,25 @@ function renderAccountSummary() {
 // The profile window's Account Details page: who the account is and where it
 // stands. Identity documents live on the separate KYC Verification page.
 function renderAccountDetails(user, uid, balance, marginUsed, kyc) {
+  kyc = { ...kyc };
   const card = document.querySelector("#accountDetailsCard");
   if (!card) return;
-  const roleLabel = { admin: "Administrator", team: "Team", user: "Trader" }[user?.role] || user?.role || "—";
+  let roleLabel = { admin: "Administrator", team: "Team", user: "Trader" }[user?.role] || user?.role || "—";
   const status = user?.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : "Active";
   const since = user?.createdAt ? new Date(user.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+  if (user?.isDemo) {
+    kyc = { text: "Demo", className: "" };
+    roleLabel = "Demo (virtual funds)";
+  }
   const row = (label, value, className = "") => `<div class="account-detail-row"><dt>${label}</dt><dd class="${className}">${value}</dd></div>`;
   card.innerHTML = `
     <div class="account-detail-hero">
       <span class="account-detail-avatar">${escapeHtml((user?.name || user?.email || "?").charAt(0).toUpperCase())}</span>
       <div>
         <strong>${user?.name ? escapeHtml(user.name) : "<em>Name not set</em>"}</strong>
-        <small>${escapeHtml(user?.email || "—")}</small>
+        <small>${escapeHtml(user?.isDemo ? "Practice account" : user?.email || "—")}</small>
       </div>
-      <span class="status-pill ${user?.kycStatus === "verified" ? "" : user?.kycStatus === "rejected" ? "is-rejected" : "is-pending"}">${escapeHtml(kyc.text)}</span>
+      <span class="status-pill ${user?.isDemo || user?.kycStatus === "verified" ? "" : user?.kycStatus === "rejected" ? "is-rejected" : "is-pending"}">${escapeHtml(kyc.text)}</span>
     </div>
     <dl class="account-detail-list">
       ${row("Account ID", escapeHtml(uid))}
@@ -697,6 +711,7 @@ function showAuthView(view) {
   appView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
+  forgotView.classList.add("is-hidden");
   view.classList.remove("is-hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -705,6 +720,7 @@ function showHomeView() {
   appView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
+  forgotView.classList.add("is-hidden");
   homeView.classList.remove("is-hidden");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -716,6 +732,7 @@ function enterWorkspace(session = null) {
   homeView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
   registerView.classList.add("is-hidden");
+  forgotView.classList.add("is-hidden");
   appView.classList.remove("is-hidden");
   updateRoleAccess();
   drawCharts();
@@ -735,6 +752,8 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
   const data = Object.fromEntries(new FormData(event.target).entries());
   const error = document.querySelector("#loginError");
   if (error) error.textContent = "";
+  const notice = document.querySelector("#loginNotice");
+  if (notice) notice.textContent = "";
   try {
     const response = await fetch(`${apiBase}/api/auth/login`, {
       method: "POST",
@@ -758,8 +777,42 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
   }
 });
 
-document.querySelector("#demoAccountButton")?.addEventListener("click", () => {
-  enterWorkspace({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcc.capital", balance: 10000 } });
+// "Try Demo": a real practice account on the server (pre-funded with 10,000
+// virtual USD, no deposit/withdraw/KYC), so orders work like any client's.
+let demoStarting = false;
+async function startDemoAccount(button) {
+  if (demoStarting) return;
+  demoStarting = true;
+  const label = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Setting up your demo…";
+  }
+  const error = document.querySelector("#loginError");
+  try {
+    const response = await fetch(`${apiBase}/api/auth/demo`, { method: "POST" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Could not start a demo account right now.");
+    enterWorkspace(result);
+  } catch (demoError) {
+    showAuthView(loginView);
+    if (error) error.textContent = demoError.message;
+  } finally {
+    demoStarting = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
+}
+
+document.querySelectorAll("#demoAccountButton, #heroDemo, #ctaDemo").forEach((button) => {
+  button.addEventListener("click", () => startDemoAccount(button));
+});
+
+document.querySelector("#demoCreateAccount")?.addEventListener("click", () => {
+  clearSession();
+  showAuthView(registerView);
 });
 
 document.querySelector("#signOut").addEventListener("click", () => {
@@ -910,9 +963,13 @@ function renderKycSubmissionSummary(submission) {
         <dt>Full Name</dt><dd>${escapeHtml(submission.full_name)}</dd>
         <dt>Document Number</dt><dd>${escapeHtml(submission.document_number)}</dd>
         <dt>Address</dt><dd>${escapeHtml(submission.address)}</dd>
+        ${submission.date_of_birth ? `<dt>Date of Birth</dt><dd>${escapeHtml(submission.date_of_birth)}</dd>` : ""}
+        ${submission.country ? `<dt>Country</dt><dd>${escapeHtml(submission.country)}</dd>` : ""}
         <dt>Submitted</dt><dd>${new Date(submission.submitted_at).toLocaleString()}</dd>
       </dl>
-      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document" />
+      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document (front)" />
+      ${submission.document_back_url ? `<img src="${escapeHtml(submission.document_back_url)}" alt="Submitted document (back)" />` : ""}
+      ${submission.selfie_url ? `<img src="${escapeHtml(submission.selfie_url)}" alt="Selfie" />` : ""}
     </div>`;
   // A verified submission has nothing left to resubmit; pending/rejected can
   // still resubmit (e.g. to fix a rejected document), so keep the form visible.
@@ -1147,10 +1204,6 @@ document.querySelectorAll("#homeOpenAccount, #heroStart, #trustOpen, #ctaCreate,
   button.addEventListener("click", () => showAuthView(registerView));
 });
 
-document.querySelectorAll("#heroDemo, #ctaDemo").forEach((button) => {
-  button.addEventListener("click", () => enterWorkspace());
-});
-
 document.querySelectorAll(".ghost-icon").forEach((button) => {
   button.addEventListener("click", () => {
     const input = button.closest(".password-line")?.querySelector("input");
@@ -1159,6 +1212,110 @@ document.querySelectorAll(".ghost-icon").forEach((button) => {
     button.setAttribute("aria-label", input.type === "password" ? "Show password" : "Hide password");
   });
 });
+
+// ---------- Forgot password ----------
+// Email -> 6-digit code -> new password, all on one screen.
+(function setupForgotPassword() {
+  const form = document.querySelector("#forgotForm");
+  if (!form) return;
+  const emailInput = form.querySelector('input[name="email"]');
+  const otpInput = form.querySelector("#forgotOtpInput");
+  const sendButton = form.querySelector("#forgotSendButton");
+  const statusEl = form.querySelector("#forgotStatus");
+  const errorEl = form.querySelector("#forgotError");
+  let cooldownTimer = null;
+
+  function setStatus(message, kind) {
+    statusEl.textContent = message || "";
+    statusEl.classList.toggle("is-error", kind === "error");
+    statusEl.classList.toggle("is-success", kind === "success");
+  }
+
+  function startCooldown(seconds = 60) {
+    window.clearInterval(cooldownTimer);
+    sendButton.disabled = true;
+    sendButton.textContent = `Resend (${seconds}s)`;
+    cooldownTimer = window.setInterval(() => {
+      seconds -= 1;
+      if (seconds <= 0) {
+        window.clearInterval(cooldownTimer);
+        sendButton.textContent = "Send";
+        sendButton.disabled = false;
+      } else sendButton.textContent = `Resend (${seconds}s)`;
+    }, 1000);
+  }
+
+  document.querySelector("#openForgot")?.addEventListener("click", () => {
+    const typed = document.querySelector('#loginForm input[name="email"]')?.value.trim();
+    form.reset();
+    window.clearInterval(cooldownTimer);
+    sendButton.textContent = "Send";
+    sendButton.disabled = false;
+    setStatus("");
+    errorEl.textContent = "";
+    if (typed) emailInput.value = typed;
+    showAuthView(forgotView);
+  });
+
+  document.querySelector("#forgotBackToLogin")?.addEventListener("click", () => showAuthView(loginView));
+
+  sendButton.addEventListener("click", async () => {
+    const email = emailInput.value.trim();
+    if (!email) return setStatus("Enter your email address first.", "error");
+    sendButton.disabled = true;
+    setStatus("Sending code…");
+    try {
+      const response = await fetch(`${apiBase}/api/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Could not send a reset code");
+      // The same message whether or not the address has an account.
+      setStatus(result.devOtp ? `Dev mode — code: ${result.devOtp}` : "If that email has an account, a code is on its way. It expires in 10 minutes.", "success");
+      otpInput.focus();
+      startCooldown();
+    } catch (error) {
+      setStatus(error.message, "error");
+      sendButton.disabled = false;
+    }
+  });
+
+  otpInput.addEventListener("input", () => {
+    otpInput.value = otpInput.value.replace(/\D/g, "").slice(0, 6);
+  });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    errorEl.textContent = "";
+    const data = new FormData(form);
+    const password = String(data.get("password") || "");
+    if (password !== data.get("confirmPassword")) {
+      errorEl.textContent = "Passwords do not match. Please re-enter them.";
+      return;
+    }
+    try {
+      const response = await fetch(`${apiBase}/api/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: String(data.get("email") || "").trim(), otp: String(data.get("otp") || "").trim(), password }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Could not reset the password");
+      const loginEmail = document.querySelector('#loginForm input[name="email"]');
+      if (loginEmail) loginEmail.value = String(data.get("email") || "").trim();
+      const loginPassword = document.querySelector('#loginForm input[name="password"]');
+      if (loginPassword) loginPassword.value = "";
+      const notice = document.querySelector("#loginNotice");
+      if (notice) notice.textContent = "Password updated — sign in with your new password.";
+      form.reset();
+      showAuthView(loginView);
+    } catch (error) {
+      errorEl.textContent = error.message;
+    }
+  });
+})();
 
 // Email OTP verification, gating the Register button until the code the
 // user typed is confirmed against the one just emailed to them.
@@ -1212,7 +1369,7 @@ document.querySelectorAll(".ghost-icon").forEach((button) => {
       if (!response.ok) throw new Error(result.error || "Could not send verification code");
       setStatus(result.devOtp ? `Dev mode — OTP: ${result.devOtp}` : "Code sent — check your email.", "success");
       otpInput.focus();
-      let seconds = 30;
+      let seconds = 60;
       sendButton.textContent = `Resend (${seconds}s)`;
       cooldownTimer = window.setInterval(() => {
         seconds -= 1;
@@ -5185,9 +5342,13 @@ function renderUserDetailKyc(submission) {
         <dt>Full Name</dt><dd>${escapeHtml(submission.full_name)}</dd>
         <dt>Document Number</dt><dd>${escapeHtml(submission.document_number)}</dd>
         <dt>Address</dt><dd>${escapeHtml(submission.address)}</dd>
+        ${submission.date_of_birth ? `<dt>Date of Birth</dt><dd>${escapeHtml(submission.date_of_birth)}</dd>` : ""}
+        ${submission.country ? `<dt>Country</dt><dd>${escapeHtml(submission.country)}</dd>` : ""}
         <dt>Submitted</dt><dd>${new Date(submission.submitted_at).toLocaleString()}</dd>
       </dl>
-      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document" />
+      <img src="${escapeHtml(submission.document_image_url)}" alt="Submitted document (front)" />
+      ${submission.document_back_url ? `<img src="${escapeHtml(submission.document_back_url)}" alt="Submitted document (back)" />` : ""}
+      ${submission.selfie_url ? `<img src="${escapeHtml(submission.selfie_url)}" alt="Selfie" />` : ""}
     </div>
     ${actions}`;
 }
@@ -5655,3 +5816,180 @@ setInterval(refreshLivePositions, 3000);
 setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);
 startVersionCheck();
+
+// ---------- Mobile Trade page: Buy/Sell bar opens the order ticket as a sheet ----------
+(function setupMobileTicketSheet() {
+  const terminal = document.querySelector(".trade-terminal");
+  const open = () => {
+    if (!terminal) return;
+    terminal.classList.add("is-ticket-open");
+    document.body.classList.add("ticket-sheet-open");
+    document.querySelector("#orderTicket")?.scrollTo?.(0, 0);
+  };
+  const close = () => {
+    terminal?.classList.remove("is-ticket-open");
+    document.body.classList.remove("ticket-sheet-open");
+  };
+  document.querySelector("#mobileBuyButton")?.addEventListener("click", open);
+  document.querySelector("#mobileSellButton")?.addEventListener("click", open);
+  document.querySelector("#ticketBackButton")?.addEventListener("click", close);
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+  // Leaving the Trade page or growing to the desktop layout drops the sheet.
+  document.addEventListener("click", (event) => { if (event.target.closest("[data-section]")) close(); });
+  window.matchMedia("(min-width: 1051px)").addEventListener?.("change", close);
+})();
+
+// ---------- KYC Identity Verification popup ----------
+(function setupKycModal() {
+  const modal = document.querySelector("#kycModal");
+  const form = document.querySelector("#kycWizard");
+  if (!modal || !form) return;
+  const MAX_BYTES = 5 * 1024 * 1024;
+  const labels = { passport: "Passport", id_card: "National ID Card", drivers_license: "Driver's License" };
+  const nextButton = document.querySelector("#kycNext");
+  const backButton = document.querySelector("#kycBack");
+  const message = document.querySelector("#kycWizardMessage");
+  const note = document.querySelector("#kycStatusNote");
+  let step = 1;
+  let submitted = false;
+
+  const field = (name) => form.elements[name];
+  const needsBack = () => field("documentType").value !== "passport";
+  const say = (text, type) => { message.textContent = text || ""; message.classList.toggle("is-error", type === "error"); message.classList.toggle("is-success", type === "success"); };
+
+  function showStep(n) {
+    step = n;
+    form.querySelectorAll("[data-kyc-step]").forEach((el) => el.classList.toggle("is-active", Number(el.dataset.kycStep) === n));
+    modal.querySelectorAll("[data-kyc-step-dot]").forEach((el) => {
+      const i = Number(el.dataset.kycStepDot);
+      el.classList.toggle("is-done", i < n || submitted);
+      el.classList.toggle("is-current", i === n && !submitted);
+    });
+    backButton.classList.toggle("is-hidden", n === 1 || submitted);
+    nextButton.textContent = submitted ? "Close" : n === 4 ? "Submit for Review" : "Next";
+    document.querySelector("#kycBackUpload").classList.toggle("is-hidden", !needsBack());
+    if (n === 4) renderReview();
+    say("");
+  }
+
+  function renderReview() {
+    const rows = [
+      ["Full Name", field("fullName").value], ["Date of Birth", field("dateOfBirth").value], ["Country", field("country").value],
+      ["Address", field("address").value], ["Document", labels[field("documentType").value]], ["Document Number", field("documentNumber").value],
+      ["Front Side", field("document").files[0]?.name || "—"], ["Back Side", needsBack() ? field("documentBack").files[0]?.name || "—" : "Not required"],
+      ["Selfie", field("selfie").files[0]?.name || "—"],
+    ];
+    document.querySelector("#kycReview").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join("");
+  }
+
+  function validate(n) {
+    const filled = (name) => String(field(name).value || "").trim();
+    if (n === 1) {
+      if (!filled("fullName") || !filled("dateOfBirth") || !filled("country") || !filled("address")) return "Please fill in all personal details.";
+      const age = (Date.now() - new Date(field("dateOfBirth").value).getTime()) / 31557600000;
+      if (!(age >= 18 && age < 120)) return "You must be at least 18 years old.";
+    }
+    if (n === 2) {
+      if (!filled("documentNumber")) return "Enter your document number.";
+      if (!field("document").files[0]) return "Upload the front side of your document.";
+      if (needsBack() && !field("documentBack").files[0]) return "Upload the back side of your document.";
+    }
+    if (n === 3 && !field("selfie").files[0]) return "Upload a selfie.";
+    return "";
+  }
+
+  function setFile(name, file) {
+    const box = form.querySelector(`[data-kyc-upload="${name}"]`);
+    const input = field(name);
+    const preview = box.querySelector(".kyc-preview");
+    if (!file) { input.value = ""; preview.classList.add("is-hidden"); box.classList.remove("has-file"); return; }
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { say("Only JPEG, PNG or WEBP images are accepted.", "error"); return; }
+    if (file.size > MAX_BYTES) { say("That file is larger than 5 MB.", "error"); return; }
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    preview.src = URL.createObjectURL(file);
+    preview.classList.remove("is-hidden");
+    box.classList.add("has-file");
+    box.querySelector(".kyc-drop-text strong").textContent = file.name;
+    say("");
+  }
+
+  form.querySelectorAll("[data-kyc-upload]").forEach((box) => {
+    const name = box.dataset.kycUpload;
+    box.querySelector("input").addEventListener("change", (e) => setFile(name, e.target.files[0]));
+    const drop = box.querySelector(".kyc-drop");
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("is-over"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("is-over"));
+    drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("is-over"); setFile(name, e.dataTransfer.files[0]); });
+  });
+  field("documentType").addEventListener("change", () => document.querySelector("#kycBackUpload").classList.toggle("is-hidden", !needsBack()));
+
+  async function submit() {
+    nextButton.disabled = true;
+    nextButton.textContent = "Submitting…";
+    try {
+      const data = new FormData();
+      ["fullName", "dateOfBirth", "country", "address", "documentType", "documentNumber"].forEach((n) => data.append(n, field(n).value.trim()));
+      data.append("document", field("document").files[0]);
+      if (needsBack()) data.append("documentBack", field("documentBack").files[0]);
+      data.append("selfie", field("selfie").files[0]);
+      const response = await fetch(`${apiBase}/api/kyc/submit`, { method: "POST", headers: { Authorization: `Bearer ${currentSession.token}` }, body: data });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Submission failed");
+      currentSession.user.kycStatus = result.user.kycStatus;
+      localStorage.setItem("fxccUser", JSON.stringify(currentSession.user));
+      renderAccountSummary();
+      renderKycSubmissionSummary?.(result.submission);
+      submitted = true;
+      showStep(4);
+      say("KYC submitted — we will review it shortly.", "success");
+    } catch (error) {
+      say(error.message, "error");
+      nextButton.textContent = "Submit for Review";
+    } finally {
+      nextButton.disabled = false;
+    }
+  }
+
+  nextButton.addEventListener("click", () => {
+    if (submitted) return closeModal();
+    const problem = validate(step);
+    if (problem) return say(problem, "error");
+    if (step < 4) showStep(step + 1); else submit();
+  });
+  backButton.addEventListener("click", () => step > 1 && showStep(step - 1));
+
+  function closeModal() { modal.classList.add("is-hidden"); document.body.classList.remove("kyc-open"); }
+  async function openModal() {
+    if (!currentSession?.token) return;
+    submitted = false;
+    note.classList.add("is-hidden");
+    form.classList.remove("is-hidden");
+    modal.classList.remove("is-hidden");
+    document.body.classList.add("kyc-open");
+    const status = currentSession.user?.kycStatus;
+    if (status === "verified") {
+      form.classList.add("is-hidden");
+      note.textContent = "Your identity is verified ✓";
+      note.classList.remove("is-hidden");
+      return;
+    }
+    if (status === "pending") {
+      const result = await authFetch("/api/kyc/me").catch(() => null);
+      if (result?.submission) {
+        note.textContent = "Your documents are under review. You can submit again if something needs fixing.";
+        note.classList.remove("is-hidden");
+      }
+    } else if (status === "rejected") {
+      note.textContent = "Your last submission was rejected. Please submit clearer documents.";
+      note.classList.remove("is-hidden");
+    }
+    showStep(1);
+  }
+
+  document.querySelector("#openKycModal")?.addEventListener("click", openModal);
+  document.querySelector("#kycModalClose")?.addEventListener("click", closeModal);
+  modal.addEventListener("click", (event) => { if (event.target === modal) closeModal(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !modal.classList.contains("is-hidden")) closeModal(); });
+})();

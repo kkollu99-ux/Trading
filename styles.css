@@ -6977,3 +6977,190 @@ input[type="checkbox"] {
     font-size: 1.3rem;
   }
 }
+
+
+/* ---------- Demo accounts ----------
+   A demo login trades with virtual money only: no deposit, withdrawal, KYC,
+   bank, password or referral screens. */
+.demo-badge,
+.demo-banner {
+  display: none;
+}
+
+body.is-demo .demo-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 176, 0, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 176, 0, 0.14);
+  color: var(--gold, #ffb000);
+  padding: 0.25rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+body.is-demo .demo-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  border: 1px solid rgba(255, 176, 0, 0.4);
+  border-radius: 0.75rem;
+  background: rgba(255, 176, 0, 0.1);
+  color: var(--text);
+  padding: 0.75rem 1rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+body.is-demo .demo-banner button {
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--blue);
+  color: #fff;
+  padding: 0.5rem 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+body.is-demo [data-chat-topic="deposit"],
+body.is-demo [data-chat-topic="withdrawal"],
+body.is-demo [data-chat-topic="verification"],
+body.is-demo [data-profile-pane="kyc"],
+body.is-demo [data-profile-pane="bank"],
+body.is-demo [data-profile-pane="deposit"],
+body.is-demo [data-profile-pane="withdraw"],
+body.is-demo [data-profile-pane="password"],
+body.is-demo [data-profile-pane="referrals"],
+body.is-demo [data-profile-goto-pane="kyc"] {
+  display: none !important;
+}
+
+/* The Quick Access block only holds Deposit / Withdrawal / KYC. */
+body.is-demo .quick-access-block {
+  display: none;
+}
+
+/* On a phone the header is full, so the DEMO tag moves under the FXCC logo. */
+@media (max-width: 680px) {
+  body.is-demo .demo-badge {
+    display: none;
+  }
+
+  body.is-demo .client-topbar .app-logo small {
+    display: block;
+    font-size: 0;
+    letter-spacing: 0;
+  }
+
+  body.is-demo .client-topbar .app-logo small::after {
+    content: "DEMO";
+    color: var(--gold, #ffb000);
+    font-size: 0.56rem;
+    font-weight: 900;
+    letter-spacing: 0.24em;
+  }
+
+  /* A long balance ($10,000.00 and up) must not push the buttons over the
+     logo: the row may shrink, the hidden search box takes no room, the wallet
+     text is a little smaller and the currency picker keeps a readable width. */
+  .client-topbar .client-actions {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .client-topbar #globalSearch {
+    display: none;
+  }
+
+  .client-topbar .wallet-button {
+    padding-inline: 0.55rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  .client-topbar .currency-select {
+    min-width: 4.4rem;
+  }
+}
+
+/* ---------- KYC Identity Verification popup ---------- */
+body.is-demo #openKycModal { display: none; }
+body.kyc-open { overflow: hidden; }
+.kyc-modal-backdrop { z-index: 130; }
+.kyc-modal {
+  width: min(32rem, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+.kyc-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.kyc-modal-head h2 { margin: 0; font-size: 1.1rem; }
+.kyc-modal-x { border: 0; background: none; color: var(--muted); font-size: 1.1rem; cursor: pointer; padding: 0.25rem 0.4rem; }
+.kyc-steps { display: flex; list-style: none; margin: 0 0 1.1rem; padding: 0; gap: 0.25rem; }
+.kyc-steps li { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; font-size: 0.72rem; color: var(--muted); position: relative; }
+.kyc-steps li b { display: grid; place-items: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-2); font-size: 0.8rem; }
+.kyc-steps li.is-current b { border-color: var(--blue); background: var(--blue); color: #fff; }
+.kyc-steps li.is-current { color: var(--text); }
+.kyc-steps li.is-done b { border-color: var(--green); background: var(--green); color: #fff; font-size: 0; }
+.kyc-steps li.is-done b::before { content: "✓"; font-size: 0.85rem; }
+.kyc-status-note { margin-bottom: 0.9rem; padding: 0.6rem 0.8rem; border-radius: 0.4rem; background: var(--panel-2); color: var(--gold); font-size: 0.85rem; }
+.kyc-step { display: none; }
+.kyc-step.is-active { display: block; }
+.kyc-hint { margin: 0 0 0.9rem; color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
+.kyc-step > label { display: grid; gap: 0.3rem; margin-bottom: 0.8rem; font-size: 0.82rem; color: var(--muted); }
+.kyc-step input:not([type="file"]), .kyc-step select { width: 100%; box-sizing: border-box; min-height: 2.6rem; border: 1px solid var(--line); border-radius: 0.4rem; background: var(--bg-deep); color: var(--text); padding: 0 0.7rem; font: inherit; font-size: 1rem; }
+.kyc-upload { margin-bottom: 0.9rem; }
+.kyc-upload-label { display: block; margin-bottom: 0.3rem; font-size: 0.82rem; color: var(--muted); }
+.kyc-drop { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 1.1rem 0.8rem; border: 1.5px dashed var(--line); border-radius: 0.5rem; background: var(--bg-deep); text-align: center; cursor: pointer; }
+.kyc-drop.is-over, .kyc-upload.has-file .kyc-drop { border-color: var(--blue); }
+.kyc-drop-text { display: grid; gap: 0.2rem; word-break: break-all; }
+.kyc-drop-text strong { font-size: 0.9rem; color: var(--text); }
+.kyc-drop-text small { color: var(--muted); font-size: 0.75rem; }
+.kyc-choose { padding: 0.35rem 0.9rem; border-radius: 0.35rem; background: var(--panel-2); border: 1px solid var(--line); font-size: 0.82rem; color: var(--text); }
+.kyc-preview { max-width: 100%; max-height: 8rem; border-radius: 0.3rem; object-fit: contain; }
+.kyc-preview.is-hidden, .kyc-actions .is-hidden { display: none; }
+.kyc-review { display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1rem; margin: 0; font-size: 0.88rem; }
+.kyc-review dt { color: var(--muted); }
+.kyc-review dd { margin: 0; text-align: right; word-break: break-word; }
+.kyc-actions { display: flex; justify-content: space-between; gap: 0.6rem; margin-top: 1rem; }
+.kyc-actions button { flex: 1; min-height: 2.7rem; }
+#kycWizard.is-hidden { display: none; }
+@media (max-width: 680px) {
+  .kyc-modal-backdrop { padding: 0; align-items: end; }
+  .kyc-modal { max-height: 94vh; border-radius: 0.8rem 0.8rem 0 0; width: 100%; }
+}
+
+/* ---------- Mobile Trade page: full-height chart, Buy/Sell bar, order sheet ---------- */
+.mobile-trade-bar, .ticket-mobile-head { display: none; }
+@media (max-width: 1050px) {
+  #trade.is-active .mobile-trade-bar {
+    position: fixed; left: 0; right: 0; bottom: 4rem; z-index: 45;
+    display: flex; gap: 0.6rem; padding: 0.55rem 0.75rem;
+    background: var(--panel); border-top: 1px solid var(--line);
+  }
+  .mobile-trade-bar button { flex: 1; min-height: 2.8rem; border: 0; border-radius: 0.45rem; font-size: 1rem; font-weight: 700; color: #fff; cursor: pointer; }
+  .mobile-trade-buy { background: var(--trade-buy); }
+  .mobile-trade-sell { background: var(--trade-sell); }
+  #trade .trade-terminal { min-height: 0; padding-bottom: 3.8rem; }
+  #trade .chart-terminal { min-height: calc(100vh - 14rem); }
+  #trade .candlestick-chart, #trade .tv-widget-container { min-height: calc(100vh - 21rem); }
+  #trade .order-ticket {
+    display: none; position: fixed; inset: 0; z-index: 120;
+    overflow-y: auto; background: var(--panel); padding: 0 1rem 2rem;
+  }
+  #trade .trade-terminal.is-ticket-open .order-ticket { display: block; }
+  .ticket-mobile-head {
+    display: flex; align-items: center; gap: 0.8rem; position: sticky; top: 0; z-index: 2;
+    margin: 0 -1rem 0.8rem; padding: 0.7rem 1rem; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .ticket-back { border: 0; background: none; color: var(--blue); font-size: 1rem; font-weight: 600; cursor: pointer; padding: 0.3rem 0.2rem; }
+  body.ticket-sheet-open { overflow: hidden; }
+}

@@ -229,7 +229,8 @@
               <button class="ghost-icon" type="button" aria-label="Show password">◎</button>
             </span>
           </label>
-          <button class="forgot-link" type="button">Forgot Password?</button>
+          <button id="openForgot" class="forgot-link" type="button">Forgot Password?</button>
+          <p id="loginNotice" class="otp-status is-success" aria-live="polite"></p>
           <p id="loginError" class="form-error" aria-live="polite"></p>
           <button class="primary-action" type="submit">Sign In</button>
           <div class="account-row">
@@ -240,6 +241,65 @@
           <button id="demoAccountButton" class="demo-action" type="button">Try Demo Account — $10,000 Free</button>
           <p class="demo-note">No registration required. Virtual funds only — practice risk-free.</p>
           <button id="loginBackHome" class="back-link" type="button">← Back to Home</button>
+        </form>
+      </section>
+    </main>
+
+    <main id="forgotView" class="login-shell is-hidden">
+      <section class="brand-panel" aria-label="FXCC Capitals">
+        <div class="brand-mark">
+          <span>FXCC</span>
+          <small>A Broker On Your Side</small>
+        </div>
+        <div class="welcome-copy">
+          <h1>Forgot your <strong>password?</strong></h1>
+          <p>
+            Enter the email on your account and we'll send you a one-time code
+            to choose a new password.
+          </p>
+        </div>
+        <p class="copyright">© 2026 FXCC CAPITALS. A Broker On Your Side.</p>
+      </section>
+
+      <section class="signin-panel" aria-label="Reset password form">
+        <form id="forgotForm" class="signin-card">
+          <div class="auth-form-logo brand-mark">
+            <span>FXCC</span>
+            <small>A Broker On Your Side</small>
+          </div>
+          <div>
+            <h2>Reset Password</h2>
+            <p>We'll email you a 6-digit code</p>
+          </div>
+          <label>
+            Email Address
+            <input name="email" type="email" placeholder="you@example.com" autocomplete="email" required />
+          </label>
+          <label>
+            Email Code
+            <span class="password-line">
+              <input id="forgotOtpInput" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Enter 6-digit code" required />
+              <button id="forgotSendButton" class="otp-send-button" type="button">Send</button>
+            </span>
+          </label>
+          <p id="forgotStatus" class="otp-status" aria-live="polite"></p>
+          <label>
+            New Password
+            <span class="password-line">
+              <input name="password" type="password" placeholder="Minimum 6 characters" minlength="6" autocomplete="new-password" required />
+              <button class="ghost-icon" type="button" aria-label="Show password">◎</button>
+            </span>
+          </label>
+          <label>
+            Confirm New Password
+            <span class="password-line">
+              <input name="confirmPassword" type="password" placeholder="Re-enter your new password" minlength="6" autocomplete="new-password" required />
+              <button class="ghost-icon" type="button" aria-label="Show password">◎</button>
+            </span>
+          </label>
+          <p id="forgotError" class="form-error" aria-live="polite"></p>
+          <button class="primary-action" type="submit">Reset Password</button>
+          <button id="forgotBackToLogin" class="back-link" type="button">← Back to Sign In</button>
         </form>
       </section>
     </main>
@@ -340,6 +400,7 @@
           </div>
         </div>
         <div class="topbar-actions client-actions">
+          <span class="demo-badge" title="Practice account - virtual money only">DEMO</span>
           <input id="globalSearch" class="visually-hidden" type="search" aria-label="Search" />
           <select id="displayCurrencySelect" class="currency-select" aria-label="Display currency">
             <option value="USD">USD</option>
@@ -408,6 +469,11 @@
               <button class="client-avatar" id="dashboardAvatar" type="button" aria-label="Client profile">G</button>
             </div>
 
+            <div class="demo-banner" role="note">
+              <span><strong>Demo account</strong> — you're trading with virtual USD. No deposits, withdrawals or verification needed.</span>
+              <button id="demoCreateAccount" type="button">Open a real account</button>
+            </div>
+
             <article class="balance-panel">
               <span class="balance-label">▣ Account Balance</span>
               <strong id="dashboardBalance">$0.00</strong>
@@ -422,12 +488,12 @@
               </div>
             </article>
 
-            <section class="dashboard-block">
+            <section class="dashboard-block quick-access-block">
               <h3 class="block-title">⌁ Quick Access</h3>
               <div class="quick-grid">
                 <button class="quick-card deposit" type="button" data-chat-topic="deposit"><span>↓</span><strong>Deposit</strong><small>Add funds</small></button>
                 <button class="quick-card withdraw" type="button" data-chat-topic="withdrawal"><span>↑</span><strong>Withdrawal</strong><small>Cash out</small></button>
-                <button class="quick-card kyc" type="button" data-chat-topic="verification"><span>◈</span><strong>KYC</strong><small>Verify identity</small></button>
+                <button class="quick-card kyc" type="button" id="openKycModal"><span>◈</span><strong>KYC</strong><small>Verify identity</small></button>
               </div>
             </section>
 
@@ -647,7 +713,11 @@
               </div>
             </section>
 
-            <aside class="order-ticket">
+            <aside class="order-ticket" id="orderTicket">
+              <div class="ticket-mobile-head">
+                <button id="ticketBackButton" class="ticket-back" type="button" aria-label="Back to chart">‹ Back</button>
+                <strong>Place Order</strong>
+              </div>
               <div id="ticketKindNote" class="ticket-context">Spot order · BTCUSD settlement</div>
               <div class="ticket-funds-banner">
                 <span>Available funds</span>
@@ -692,6 +762,10 @@
               <div class="trade-actions"><button id="buyOrderButton" class="buy-button" type="button">Buy</button><button id="sellOrderButton" class="sell-button" type="button">Sell</button></div>
               <p id="ticketOrderMessage" class="managed-user-message" role="status"></p>
             </aside>
+          </div>
+          <div class="mobile-trade-bar" id="mobileTradeBar">
+            <button id="mobileBuyButton" class="mobile-trade-buy" type="button">Buy</button>
+            <button id="mobileSellButton" class="mobile-trade-sell" type="button">Sell</button>
           </div>
         </section>
 
@@ -875,6 +949,72 @@
         <button class="nav-item" data-section="profile" data-label="Profile"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 10h16"/><path d="M8 15h4"/></svg></span><span class="nav-label">Profile</span></button>
         <button class="nav-item" data-section="service" data-label="Online Service"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M5 13h3v6H5z"/><path d="M16 13h3v6h-3z"/><path d="M19 19a4 4 0 0 1-4 3h-3"/></svg></span><span class="nav-label">Online Service</span></button>
       </nav>
+          <div id="kycModal" class="modal-backdrop kyc-modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="kycModalTitle">
+      <div class="kyc-modal">
+        <header class="kyc-modal-head">
+          <h2 id="kycModalTitle"><span aria-hidden="true">🛡</span> KYC Identity Verification</h2>
+          <button id="kycModalClose" class="kyc-modal-x" type="button" aria-label="Close">✕</button>
+        </header>
+        <ol class="kyc-steps" id="kycSteps">
+          <li data-kyc-step-dot="1"><b>1</b><span>Personal</span></li>
+          <li data-kyc-step-dot="2"><b>2</b><span>Documents</span></li>
+          <li data-kyc-step-dot="3"><b>3</b><span>Selfie</span></li>
+          <li data-kyc-step-dot="4"><b>4</b><span>Review</span></li>
+        </ol>
+        <div id="kycStatusNote" class="kyc-status-note is-hidden"></div>
+        <form id="kycWizard" novalidate>
+          <section class="kyc-step" data-kyc-step="1">
+            <p class="kyc-hint">Enter your details exactly as they appear on your identity document.</p>
+            <label>Full Name *<input name="fullName" type="text" autocomplete="name" placeholder="Full legal name" /></label>
+            <label>Date of Birth *<input name="dateOfBirth" type="date" autocomplete="bday" /></label>
+            <label>Country *<input name="country" type="text" autocomplete="country-name" placeholder="Country of residence" /></label>
+            <label>Address *<input name="address" type="text" autocomplete="street-address" placeholder="Complete residential address" /></label>
+          </section>
+          <section class="kyc-step" data-kyc-step="2">
+            <p class="kyc-hint">Upload clear photos of your government-issued identity document. All edges must be visible.</p>
+            <label>Document Type *<select name="documentType" id="kycDocType">
+              <option value="id_card">National ID Card</option>
+              <option value="passport">Passport</option>
+              <option value="drivers_license">Driver's License</option>
+            </select></label>
+            <label>Document Number *<input name="documentNumber" type="text" placeholder="Document number" /></label>
+            <div class="kyc-upload" data-kyc-upload="document">
+              <span class="kyc-upload-label">Front Side *</span>
+              <label class="kyc-drop"><input type="file" name="document" accept="image/jpeg,image/png,image/webp" hidden />
+                <img class="kyc-preview is-hidden" alt="" />
+                <span class="kyc-drop-text"><strong>Drop image or click to upload</strong><small>JPEG, PNG, WEBP — max 5 MB</small></span>
+                <span class="kyc-choose">Choose File</span></label>
+            </div>
+            <div class="kyc-upload" data-kyc-upload="documentBack" id="kycBackUpload">
+              <span class="kyc-upload-label">Back Side *</span>
+              <label class="kyc-drop"><input type="file" name="documentBack" accept="image/jpeg,image/png,image/webp" hidden />
+                <img class="kyc-preview is-hidden" alt="" />
+                <span class="kyc-drop-text"><strong>Drop image or click to upload</strong><small>JPEG, PNG, WEBP — max 5 MB</small></span>
+                <span class="kyc-choose">Choose File</span></label>
+            </div>
+          </section>
+          <section class="kyc-step" data-kyc-step="3">
+            <p class="kyc-hint">Upload a clear selfie of your face in good light. Do not wear sunglasses or a hat.</p>
+            <div class="kyc-upload" data-kyc-upload="selfie">
+              <span class="kyc-upload-label">Selfie *</span>
+              <label class="kyc-drop"><input type="file" name="selfie" accept="image/jpeg,image/png,image/webp" capture="user" hidden />
+                <img class="kyc-preview is-hidden" alt="" />
+                <span class="kyc-drop-text"><strong>Take or upload a selfie</strong><small>JPEG, PNG, WEBP — max 5 MB</small></span>
+                <span class="kyc-choose">Choose File</span></label>
+            </div>
+          </section>
+          <section class="kyc-step" data-kyc-step="4">
+            <p class="kyc-hint">Check your details, then submit for review.</p>
+            <dl id="kycReview" class="kyc-review"></dl>
+          </section>
+          <p id="kycWizardMessage" class="managed-user-message" role="status"></p>
+          <footer class="kyc-actions">
+            <button id="kycBack" class="secondary-action" type="button">Back</button>
+            <button id="kycNext" class="primary-action" type="button">Next</button>
+          </footer>
+        </form>
+      </div>
+    </div>
       <div id="processChatWindow" class="support-window process-chat-window is-hidden" aria-live="polite">
         <header>
           <div><span>☏</span><strong id="processChatTitle">FXCC Support</strong><small id="processChatSubtitle">Online · Typically replies in minutes</small></div>

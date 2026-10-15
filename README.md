@@ -95,6 +95,11 @@ Charts are generated locally; only each product's latest real price is fetched, 
 
 Without a key (or if a source is down) that product keeps its generated price.
 
+## Accounts
+
+- **Email verification:** sign-up needs a 6-digit code emailed to the address, and **Forgot Password?** emails a code to choose a new password. Codes last 10 minutes, allow 5 tries, and can be requested once a minute per address. Set `RESEND_API_KEY` and `EMAIL_FROM` (or SMTP) in production; without a provider a deployed server refuses to send codes instead of returning them. Locally, with nothing set, the code is shown on screen for testing.
+- **Demo accounts:** **Try Demo** creates a real practice account with 10,000 virtual USD that trades like any client's, with no deposit, withdrawal, KYC, bank or password screens. They are hidden from the admin Users list and cleared after 14 days.
+
 A simulation chart also shows each product's real last week, in 1-minute candles (5s, 1M, 5M, 15M, 1H, 4H and 1D views), fetched at startup and topped up every 5 minutes, held in memory only:
 
 - Crypto: Coinbase public candles (no key)

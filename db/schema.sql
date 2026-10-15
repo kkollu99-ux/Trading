@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   kyc_status TEXT NOT NULL DEFAULT 'pending',
   balance NUMERIC(14, 2) NOT NULL DEFAULT 0,
   margin_used NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  is_demo BOOLEAN NOT NULL DEFAULT FALSE,
   preferences JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -94,6 +95,10 @@ CREATE TABLE IF NOT EXISTS kyc_submissions (
   document_number TEXT NOT NULL,
   address TEXT NOT NULL,
   document_image_url TEXT NOT NULL,
+  document_back_url TEXT,
+  selfie_url TEXT,
+  date_of_birth TEXT,
+  country TEXT,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'verified', 'rejected')),
   reviewed_by UUID REFERENCES users(id),
   reviewed_at TIMESTAMPTZ,
