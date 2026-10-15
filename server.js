@@ -2172,11 +2172,11 @@ function startRealPriceFetching() {
 // everything else from Yahoo Finance's chart API (unofficial, no key;
 // commodities come from their futures, whose level can sit a little off the
 // spot price - only the shape is used, rescaled to join the live price).
-// Kept in memory: fetched in full at boot, topped up every few minutes and
-// trimmed to 7 days. Prices themselves still come from the sources above.
+// Kept in memory, per product, fetched only when that product runs a simulation
+// (see ensureMarketHistory) and trimmed to 7 days. Prices themselves still come
+// from the sources above.
 const historyMinuteMs = 60000;
 const historyKeepMs = 7 * 86400000;
-const historyRefreshMs = 5 * 60 * 1000;
 const coinbaseHistoryPageMinutes = 300;
 const marketHistory = new Map(); // symbol -> [{ t, open, high, low, close, volume }], ascending 1-minute bars
 const marketHistoryErrors = new Map();
@@ -2243,39 +2243,63 @@ function mergeHistory(symbol, bars) {
   marketHistory.set(symbol, sorted.filter((bar) => bar.t >= cutoff));
 }
 
-async function refreshMarketHistory() {
-  const instruments = await listInstruments({ includeDisabled: true });
-  for (const instrument of instruments) {
-    const source = historySourceFor(instrument.symbol, instrument.category);
-    if (!source) continue;
-    const known = marketHistory.get(instrument.symbol);
-    // A top-up re-reads the last few minutes too, since the newest candle
-    // is usually still forming when it's first fetched.
-    const sinceMs = known?.length ? known.at(-1).t - 10 * historyMinuteMs : Date.now() - historyKeepMs;
-    try {
-      const bars = source.kind === "coinbase" ? await fetchCoinbaseHistory(source.id, sinceMs) : await fetchYahooHistory(source.id, sinceMs);
-      if (!bars.length && !known?.length) throw new Error("no candles returned");
-      mergeHistory(instrument.symbol, bars);
-      if (marketHistoryErrors.has(instrument.symbol)) console.log(`Price history for ${instrument.symbol} recovered.`);
-      marketHistoryErrors.delete(instrument.symbol);
-    } catch (error) {
-      if (marketHistoryErrors.get(instrument.symbol) !== error.message) {
-        console.warn(`Price history for ${instrument.symbol} (${source.kind} ${source.id}) failed: ${error.message}`);
-      }
-      marketHistoryErrors.set(instrument.symbol, error.message);
+// Price history is fetched only for a product that actually has a simulation
+// (started, scheduled, or restored after a restart), never for every product on
+// a schedule. The first call fetches just enough recent history to seed the
+// simulation chart and returns; the rest of the week is filled in behind it.
+const historyFetchInFlight = new Map(); // symbol -> Promise
+const historyFetchedAt = new Map(); // symbol -> ms of the last completed full-week fetch
+const historyTopUpAfterMs = 30 * 60 * 1000;
+
+async function fetchHistoryFor(instrument, { quick = false, full = false } = {}) {
+  const source = historySourceFor(instrument.symbol, instrument.category);
+  if (!source) return;
+  const known = marketHistory.get(instrument.symbol);
+  // A top-up re-reads the last few minutes too, since the newest candle
+  // is usually still forming when it's first fetched.
+  let sinceMs = known?.length && !full ? known.at(-1).t - 10 * historyMinuteMs : Date.now() - historyKeepMs;
+  if (quick && !known?.length && source.kind === "coinbase") sinceMs = Date.now() - 3 * 3600000;
+  try {
+    const bars = source.kind === "coinbase" ? await fetchCoinbaseHistory(source.id, sinceMs) : await fetchYahooHistory(source.id, sinceMs);
+    if (!bars.length && !known?.length) throw new Error("no candles returned");
+    mergeHistory(instrument.symbol, bars);
+    if (marketHistoryErrors.has(instrument.symbol)) console.log(`Price history for ${instrument.symbol} recovered.`);
+    marketHistoryErrors.delete(instrument.symbol);
+  } catch (error) {
+    if (marketHistoryErrors.get(instrument.symbol) !== error.message) {
+      console.warn(`Price history for ${instrument.symbol} (${source.kind} ${source.id}) failed: ${error.message}`);
     }
-    await pause(200);
+    marketHistoryErrors.set(instrument.symbol, error.message);
   }
 }
 
-function startMarketHistoryFetching() {
-  if (process.env.MARKET_HISTORY === "off") return;
-  const run = () =>
-    refreshMarketHistory()
-      .catch((error) => console.warn("Refreshing price history failed:", error.message))
-      .finally(() => setTimeout(run, historyRefreshMs));
-  run();
+function ensureMarketHistory(symbol) {
+  if (process.env.MARKET_HISTORY === "off") return Promise.resolve();
+  const last = historyFetchedAt.get(symbol);
+  if ((marketHistory.get(symbol)?.length || 0) >= 60 && last && Date.now() - last < historyTopUpAfterMs) return Promise.resolve();
+  if (historyFetchInFlight.has(symbol)) return historyFetchInFlight.get(symbol);
+  const task = (async () => {
+    const instrument = (await listInstruments({ includeDisabled: true })).find((item) => item.symbol === symbol);
+    if (!instrument) return;
+    const hadHistory = (marketHistory.get(symbol)?.length || 0) >= 60;
+    await fetchHistoryFor(instrument, { quick: !hadHistory });
+    historyFetchedAt.set(symbol, Date.now());
+    // The rest of the week (beyond the quick first fetch) fills in behind.
+    if (!hadHistory) {
+      historyFetchedAt.delete(symbol);
+      fetchHistoryFor(instrument, { full: true })
+        .then(() => historyFetchedAt.set(symbol, Date.now()))
+        .catch(() => {});
+    }
+  })()
+    .catch((error) => console.warn(`Fetching price history for ${symbol} failed:`, error.message))
+    .finally(() => historyFetchInFlight.delete(symbol));
+  historyFetchInFlight.set(symbol, task);
+  return task;
 }
+
+// Waits for the first history fetch, but never longer than ms.
+const ensureMarketHistoryWithin = (symbol, ms = 20000) => Promise.race([ensureMarketHistory(symbol), pause(ms)]);
 
 // The real hour leading up to a fresh simulation, as 5-second bars: the last
 // 60 minutes of history, moved forward in time (by whole minutes) so they end
@@ -2612,6 +2636,7 @@ async function restoreSimulations() {
   for (const { symbol, kind, state } of rows) {
     try {
       if (state?.candleSeconds) setSimulationCandleSeconds(symbol, state.candleSeconds);
+      ensureMarketHistory(symbol).catch(() => {});
       if (kind === "active") restoreActiveSimulation(symbol, state);
       else if (kind === "scheduled" && Date.parse(state.toISO) > Date.now()) {
         schedulePriceSimulation(symbol, state.direction, state.stepPercent, state.fromISO, state.toISO, state.startedBy, state.targetPrice, state.startPrice);
@@ -2934,7 +2959,7 @@ setInterval(() => {
   }
 }, priceSimulationTickMs);
 
-app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("admin"), (request, response) => {
+app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   const direction = String(request.body.direction || "").toLowerCase();
   const stepPercent = Number(request.body.stepPercent);
@@ -2943,6 +2968,7 @@ app.post("/api/admin/price-simulation", requireAuth, attachUser, requireRole("ad
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
   setSimulationCandleSeconds(symbol, request.body.candleSeconds);
+  await ensureMarketHistoryWithin(symbol);
   // A new run starts fresh (see startPriceSimulation), so with no start price
   // given it opens at the market price, not wherever a previous run ended.
   const startPrice = Number.isFinite(startPriceRaw) && startPriceRaw > 0 ? startPriceRaw : simulationResetPrice(symbol);
@@ -3088,7 +3114,7 @@ app.get("/api/admin/price-simulation/auto", requireAuth, attachUser, requireRole
   response.json({ autoSymbols });
 });
 
-app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requireRole("admin"), (request, response) => {
+app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
   const symbol = String(request.body.symbol || "").trim().toUpperCase();
   const direction = String(request.body.direction || "").toLowerCase();
   const stepPercent = Number(request.body.stepPercent);
@@ -3099,6 +3125,7 @@ app.post("/api/admin/price-simulation/schedule", requireAuth, attachUser, requir
   if (!symbol) return response.status(400).json({ error: "Symbol is required" });
   if (!["up", "down"].includes(direction)) return response.status(400).json({ error: "Direction must be up or down" });
   setSimulationCandleSeconds(symbol, request.body.candleSeconds);
+  await ensureMarketHistoryWithin(symbol);
 
   const fromMs = new Date(from).getTime();
   const toMs = new Date(to).getTime();
@@ -3505,6 +3532,8 @@ app.get("/api/markets/series", async (request, response) => {
   if (!bucketMs) return response.status(400).json({ error: "Unknown timeframe" });
   const series = getSeries(symbol);
   advanceSeries(symbol, series);
+  // Only a product that has run a simulation has the real week to draw behind its series.
+  if (bucketMs >= 60000 && Number.isFinite(series.historyOffsetMs) && !marketHistory.has(symbol)) await ensureMarketHistoryWithin(symbol, 15000);
   if (bucketMs === seriesBucketMs) {
     return response.json({ symbol, timeframe, bucketMs, bars: serializeBars(series.bars.slice(-seriesChartBars)) });
   }
@@ -3646,7 +3675,6 @@ seedDefaults()
     });
     await restoreSimulations();
     startRealPriceFetching();
-    startMarketHistoryFetching();
     if (isProduction && !emailDeliveryAvailable()) {
       console.warn("No email provider configured (set RESEND_API_KEY and EMAIL_FROM): sign-up and password-reset codes can't be sent.");
     }
