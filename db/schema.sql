@@ -161,3 +161,14 @@ CREATE INDEX IF NOT EXISTS idx_ledger_user_id ON ledger(user_id);
 CREATE INDEX IF NOT EXISTS idx_kyc_submissions_user_id ON kyc_submissions(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category);
+
+-- Each product's pre-simulation history, generated once and then reused (re-timed
+-- and rescaled) so the chart before a simulation looks the same after every
+-- refresh, restart and fresh simulation start. bars = [[t, o, h, l, c, v], ...].
+CREATE TABLE IF NOT EXISTS history_baselines (
+  symbol TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  offset_ms BIGINT,
+  bars JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

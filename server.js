@@ -1611,10 +1611,32 @@ function seriesBucket(ms) {
   return Math.floor(ms / seriesBucketMs) * seriesBucketMs;
 }
 
+// Random source for the synthetic walk. It is Math.random for live ticks, but
+// while a product's history is being generated (seedSeries) it is a seeded
+// generator, so the same product always gets the same-looking history instead
+// of a different one every time it is rebuilt (a restart, a new simulation).
+let seriesRandom = Math.random;
+
+function seededRandom(text) {
+  let h = 1779033703 ^ text.length;
+  for (let i = 0; i < text.length; i += 1) {
+    h = Math.imul(h ^ text.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let state = h >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function gaussian() {
   let u = 0;
-  while (u === 0) u = Math.random();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+  while (u === 0) u = seriesRandom();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * seriesRandom());
 }
 
 // Where a symbol's series starts the first time this process uses it: its
@@ -1641,7 +1663,7 @@ function seedBasisPrice(symbol) {
 // market without drifting off without bound. fraction is how much of one
 // 5-second bar this step represents (a 2.5s tick is half a bar).
 function syntheticStep(series, price, fraction = 1) {
-  series.volLevel = Math.max(0.5, Math.min(2.2, series.volLevel * (1 + (Math.random() - 0.5) * 0.12)));
+  series.volLevel = Math.max(0.5, Math.min(2.2, series.volLevel * (1 + (seriesRandom() - 0.5) * 0.12)));
   series.anchor = Math.max(0.00001, series.anchor * (1 + series.sigma * 0.25 * gaussian() * Math.sqrt(fraction)));
   const pull = (series.anchor - price) * (series.pullPerBar || 0.015) * fraction;
   const shock = price * series.sigma * series.volLevel * gaussian() * Math.sqrt(fraction);
@@ -1657,7 +1679,7 @@ function generatedBar(series, t, open) {
     close,
     high: Math.max(open, close) + Math.abs(gaussian()) * wick,
     low: Math.max(0.00001, Math.min(open, close) - Math.abs(gaussian()) * wick),
-    volume: 20 + Math.random() * 60 * series.volLevel,
+    volume: 20 + seriesRandom() * 60 * series.volLevel,
     simulated: false,
   };
 }
@@ -1775,38 +1797,95 @@ function getSeries(symbol) {
     return restored;
   }
   const series = { bars: [], sigma, volLevel: 1, anchor: 0 };
-  seedSeries(series, seedBasisPrice(symbol), seriesBucket(Date.now()) - seriesBucketMs);
+  seedSeries(series, seedBasisPrice(symbol), seriesBucket(Date.now()) - seriesBucketMs, null, symbol);
   priceSeries.set(symbol, series);
   return series;
 }
 
-// Fills a series with a fresh hour of history whose last bar sits in
+// Each product's pre-simulation history is generated once and then kept (in
+// memory and in the database), so every refresh, restart and fresh simulation
+// start shows the same candles - re-timed to end now and rescaled to the start
+// price - instead of a newly invented history each time. A baseline made from
+// a generated walk is replaced once, by the product's real last hour, as soon
+// as that history has been fetched; after that it stays.
+const historyBaselines = new Map(); // key -> { source: "real" | "synthetic", offsetMs, bars: [[t, o, h, l, c, v], ...] }
+
+async function loadHistoryBaselinesFromDb() {
+  if (!pool) return;
+  try {
+    for (const row of await query("SELECT symbol, source, offset_ms, bars FROM history_baselines")) {
+      historyBaselines.set(row.symbol, { source: row.source, offsetMs: row.offset_ms == null ? null : Number(row.offset_ms), bars: row.bars });
+    }
+  } catch (error) {
+    console.warn("Loading history baselines failed:", error.message);
+  }
+}
+
+function rememberHistoryBaseline(key, source, series) {
+  const baseline = {
+    source,
+    offsetMs: Number.isFinite(series.historyOffsetMs) ? series.historyOffsetMs : null,
+    bars: series.bars.map((bar) => [bar.t, bar.open, bar.high, bar.low, bar.close, bar.volume]),
+  };
+  historyBaselines.set(key, baseline);
+  if (!pool) return;
+  query(
+    `INSERT INTO history_baselines (symbol, source, offset_ms, bars, created_at) VALUES ($1, $2, $3, $4::jsonb, NOW())
+     ON CONFLICT (symbol) DO UPDATE SET source = EXCLUDED.source, offset_ms = EXCLUDED.offset_ms, bars = EXCLUDED.bars, created_at = NOW()`,
+    [key, source, baseline.offsetMs, JSON.stringify(baseline.bars)],
+  ).catch((error) => console.warn("Saving history baseline failed:", error.message));
+}
+
+function applyHistoryBaseline(series, baseline, basis, lastBucketMs) {
+  const delta = lastBucketMs - baseline.bars.at(-1)[0];
+  series.bars = baseline.bars.map(([t, open, high, low, close, volume]) => ({ t: t + delta, open, high, low, close, volume, simulated: false }));
+  if (Number.isFinite(baseline.offsetMs)) series.historyOffsetMs = baseline.offsetMs + delta;
+  scaleSeries(series, basis / series.bars.at(-1).close);
+  series.anchor = basis;
+}
+
+// Fills a series with the product's hour of history so that its last bar sits in
 // lastBucketMs and closes exactly on basis, replacing whatever was there: the
-// product's real last hour when its week of history is loaded (pass symbol),
-// otherwise a generated one.
-function seedSeries(series, basis, lastBucketMs, symbol = null) {
+// kept baseline if there is one, otherwise the product's real last hour when
+// its week of history is loaded (pass symbol), otherwise a generated one.
+function seedSeries(series, basis, lastBucketMs, symbol = null, seedKey = null) {
   series.bars = [];
   series.volLevel = 1;
   series.anchor = basis;
   delete series.pullPerBar;
   delete series.historyOffsetMs;
+  const key = symbol || seedKey;
+  const baseline = key ? historyBaselines.get(key) : null;
+  const realReady = Boolean(symbol) && (marketHistory.get(symbol)?.length || 0) >= 60;
+  if (baseline && !(baseline.source === "synthetic" && realReady)) {
+    applyHistoryBaseline(series, baseline, basis, lastBucketMs);
+    return;
+  }
   const real = symbol ? realSeedBars(symbol, lastBucketMs) : null;
   if (real) {
     series.bars = real.bars;
     series.historyOffsetMs = real.offsetMs;
     scaleSeries(series, basis / series.bars.at(-1).close);
     series.anchor = basis;
+    if (key) rememberHistoryBaseline(key, "real", series);
     return;
   }
   let price = basis;
-  for (let index = seriesSeedBars - 1; index >= 0; index -= 1) {
-    const bar = generatedBar(series, lastBucketMs - index * seriesBucketMs, price);
-    series.bars.push(bar);
-    price = bar.close;
+  const liveRandom = seriesRandom;
+  seriesRandom = seededRandom(`${key || "series"}:history`);
+  try {
+    for (let index = seriesSeedBars - 1; index >= 0; index -= 1) {
+      const bar = generatedBar(series, lastBucketMs - index * seriesBucketMs, price);
+      series.bars.push(bar);
+      price = bar.close;
+    }
+  } finally {
+    seriesRandom = liveRandom;
   }
   // The walk wanders off basis; rescale so the history ends exactly on it.
   scaleSeries(series, basis / price);
   series.anchor = basis;
+  if (key) rememberHistoryBaseline(key, "synthetic", series);
 }
 
 // Where a fresh simulation opens when admin gives no start price: the real
@@ -2238,11 +2317,21 @@ function realSeedBars(symbol, lastBucketMs) {
       while (i < 2 && along > legs[i]) along -= legs[i++];
       points.push(legs[i] > 0 ? path[i] + ((path[i + 1] - path[i]) * along) / legs[i] : path[i + 1]);
     }
-    const volume = minute.volume > 0 ? minute.volume / subBars : 20 + Math.random() * 60;
+    // The straight legs above would draw a perfectly regular saw-tooth. Give the
+    // twelve points a little deterministic noise (same minute, same bars, every
+    // time) and real-looking wicks, kept inside the minute's own low-high range.
+    const rand = seededRandom(`${symbol}:${minute.t}`);
+    const span = Math.max(minute.high - minute.low, minute.close * 0.000005);
+    for (let k = 1; k < subBars; k += 1) {
+      points[k] = Math.min(minute.high, Math.max(minute.low, points[k] + (rand() - 0.5) * span * 0.18));
+    }
+    const volume = minute.volume > 0 ? minute.volume / subBars : 20 + rand() * 60;
     for (let k = 0; k < subBars; k += 1) {
       const open = points[k];
       const close = points[k + 1];
-      bars.push({ t: minute.t + offsetMs + k * seriesBucketMs, open, high: Math.max(open, close), low: Math.min(open, close), close, volume, simulated: false });
+      const high = Math.min(minute.high, Math.max(open, close) + rand() * span * 0.08);
+      const low = Math.max(minute.low, Math.min(open, close) - rand() * span * 0.08);
+      bars.push({ t: minute.t + offsetMs + k * seriesBucketMs, open, high: Math.max(high, open, close), low: Math.min(low, open, close), close, volume: volume * (0.6 + rand() * 0.8), simulated: false });
     }
     previous = minute;
   }
@@ -3551,6 +3640,7 @@ seedDefaults()
     // Loaded before anything prices a product, so every series resumes from
     // where it was before this restart (see seedBasisPrice).
     await loadCandleSnapshotsFromDb();
+    await loadHistoryBaselinesFromDb();
     server.listen(port, () => {
       console.log(`FXCM platform running on http://127.0.0.1:${port}`);
     });
