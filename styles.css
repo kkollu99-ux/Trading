@@ -5309,6 +5309,9 @@ input[type="checkbox"] {
 
 /* ---------- Order confirm modal ---------- */
 
+/* Must sit above the mobile Spot Order sheet (z-index 120) so Confirm Order opens on top of the order ticket, not behind it over the chart. */
+#orderConfirmModal { z-index: 140; }
+
 .order-confirm-modal {
   position: relative;
   display: flex;
