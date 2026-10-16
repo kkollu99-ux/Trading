@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS instruments (
   category TEXT NOT NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   trade_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

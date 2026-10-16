@@ -850,10 +850,22 @@ document.querySelector("#loginBackHome").addEventListener("click", () => {
   showHomeView();
 });
 
+// The one Refresh button, in the header: ticks the markets and reloads whatever page is open.
 document.querySelector("#refreshDashboard").addEventListener("click", () => {
   volatilityBoost = 3;
   tickMarkets();
   updateDashboardTime();
+  const section = document.querySelector(".view-section.is-active")?.id;
+  const reload = {
+    markets: () => loadMarketsInstruments(),
+    trade: () => loadTradeInstruments(),
+    orders: () => loadOrders(),
+    users: () => loadManagedUsers(),
+    products: () => loadManagedInstruments(),
+    logs: () => loadAuditLogs(),
+    service: () => loadServiceInbox(),
+  }[section];
+  try { reload?.(); } catch { /* the page's own loader reports its errors */ }
 });
 
 document.querySelector("#copyReferralCode")?.addEventListener("click", async (event) => {
@@ -1752,7 +1764,6 @@ function setOrdersMessage(message, type = "") {
   element.classList.toggle("is-error", type === "error");
 }
 
-document.querySelector("#refreshOrders")?.addEventListener("click", loadOrders);
 
 document.querySelector('[data-orders-panel="positions"]')?.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-close-order]");
@@ -2308,7 +2319,6 @@ document.querySelector("#serviceInboxList")?.addEventListener("click", (event) =
   openAdminChatThread(item, client ? client.name || client.email : item.user_id);
 });
 
-document.querySelector("#refreshServiceInbox")?.addEventListener("click", loadServiceInbox);
 
 document.querySelector("#closeProcessChat")?.addEventListener("click", () => {
   processChatWindow?.classList.add("is-hidden");
@@ -4818,9 +4828,13 @@ function livePriceText(symbol) {
   return parts.join(" · ");
 }
 
+let productDragActive = false;
+
 function renderManagedInstruments() {
   const list = document.querySelector("#managedInstrumentList");
   if (!list) return;
+  // A drag is in progress: re-rendering (simulation broadcasts do it constantly) would drop the card being moved.
+  if (productDragActive) return;
 
   if (!managedInstruments.length) {
     list.innerHTML = `<div class="product-card"><span>No configured instruments.</span></div>`;
@@ -4901,6 +4915,7 @@ function renderManagedInstruments() {
       return `<article class="product-card" data-instrument="${escapeHtml(instrument.id)}" data-instrument-category="${escapeHtml(categoryKey)}">
         <header class="product-card-head">
           <div class="product-card-identity">
+            ${canEditManagedUsers() ? `<button type="button" class="product-drag-handle" aria-label="Drag to reorder ${escapeHtml(symbol)}" title="Drag to change the order users see">⋮⋮</button>` : ""}
             <strong class="product-symbol">${escapeHtml(symbol)}</strong>
             <span class="product-category-pill cat-${escapeHtml(categoryKey)}">${escapeHtml(displayCategory(instrument.category))}</span>
           </div>
@@ -4929,6 +4944,57 @@ function filterManagedInstruments() {
     row.classList.toggle("is-filtered-out", !matches);
   });
 }
+
+// Drag a product by its handle to set the order every user sees (Quotes and Market Watch).
+// Pointer events, so it works with a finger as well as a mouse.
+(function setupProductReorder() {
+  const list = document.querySelector("#managedInstrumentList");
+  if (!list) return;
+  let dragged = null;
+
+  list.addEventListener("pointerdown", (event) => {
+    const handle = event.target.closest(".product-drag-handle");
+    if (!handle || !canEditManagedUsers()) return;
+    dragged = handle.closest(".product-card");
+    if (!dragged) return;
+    event.preventDefault();
+    productDragActive = true;
+    dragged.classList.add("is-dragging");
+    handle.setPointerCapture?.(event.pointerId);
+  });
+
+  list.addEventListener("pointermove", (event) => {
+    if (!dragged) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".product-card");
+    if (!target || target === dragged || target.classList.contains("is-filtered-out")) return;
+    const box = target.getBoundingClientRect();
+    const after = event.clientY > box.top + box.height / 2;
+    list.insertBefore(dragged, after ? target.nextSibling : target);
+  });
+
+  async function finish() {
+    if (!dragged) return;
+    dragged.classList.remove("is-dragging");
+    dragged = null;
+    const ids = [...list.querySelectorAll(".product-card[data-instrument]")].map((card) => card.dataset.instrument);
+    const bySymbol = new Map(managedInstruments.map((item) => [item.id, item]));
+    const ordered = ids.map((id) => bySymbol.get(id)).filter(Boolean);
+    const changed = ordered.some((item, index) => item !== managedInstruments[index]);
+    productDragActive = false;
+    if (!changed) return renderManagedInstruments();
+    const previous = managedInstruments;
+    managedInstruments = ordered;
+    try {
+      await adminFetch("/api/admin/instruments/order", { method: "POST", body: JSON.stringify({ symbols: ordered.map((item) => item.symbol) }) });
+    } catch (error) {
+      managedInstruments = previous;
+      window.alert(`Could not save the new order: ${error.message}`);
+    }
+    renderManagedInstruments();
+  }
+  list.addEventListener("pointerup", finish);
+  list.addEventListener("pointercancel", finish);
+})();
 
 document.querySelectorAll(".product-filter-tabs button").forEach((button) => {
   button.addEventListener("click", () => {
@@ -5026,7 +5092,6 @@ document.querySelectorAll(".log-filter-tabs button").forEach((button) => {
   });
 });
 
-document.querySelector("#refreshAuditLogs")?.addEventListener("click", loadAuditLogs);
 
 async function loadManagedUsers() {
   if (!document.querySelector("#managedUserTable")) return;
@@ -5091,7 +5156,6 @@ async function loadManagedInstruments() {
 }
 
 document.querySelector("#managedUserSearch")?.addEventListener("input", renderManagedUsers);
-document.querySelector("#refreshManagedUsers")?.addEventListener("click", loadManagedUsers);
 document.querySelector("#purgeNonAdminUsers")?.addEventListener("click", async () => {
   if (!canEditManagedUsers()) return;
   const typed = window.prompt("This permanently deletes EVERY account that is not an admin (clients, team, test and demo accounts) together with their orders, balances, ledger, chats and KYC records.\n\nType DELETE to confirm.");
@@ -5105,7 +5169,6 @@ document.querySelector("#purgeNonAdminUsers")?.addEventListener("click", async (
     setManagedMessage(error.message, "error");
   }
 });
-document.querySelector("#refreshManagedInstruments")?.addEventListener("click", loadManagedInstruments);
 
 // Admin/team support requests: the real client-facing chat (see
 // loadOrCreateServiceRequestChat above) persists to the same service_requests/

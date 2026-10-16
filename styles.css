@@ -7288,8 +7288,17 @@ body.kyc-open { overflow: hidden; }
 :root[data-theme="light"] .chart-terminal {
   --text: #e4e9f1; --muted: #8b97ad; --line: #252d41; --panel: #111827; --panel-2: #181f2f;
   --trade-border: #252d41; --trade-muted: #8b97ad;
+  --trade-panel: #111827; --trade-panel-soft: #1a2133;
   color: var(--text);
 }
+
+/* Light theme: the Place Order sheet and its summary read in dark text, not grey. */
+:root[data-theme="light"] .order-ticket label,
+:root[data-theme="light"] .order-ticket .ticket-summary span,
+:root[data-theme="light"] .order-ticket .ticket-summary small,
+:root[data-theme="light"] .order-ticket .ticket-context { color: var(--text); }
+:root[data-theme="light"] .order-confirm-price-row span,
+:root[data-theme="light"] .order-confirm-summary span { color: var(--text); }
 
 .language-list { overflow-y: auto; display: flex; flex-direction: column; }
 .language-list > button { display: flex; justify-content: space-between; align-items: center; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); padding: 0.9rem 1rem; font: inherit; text-align: left; cursor: pointer; }
@@ -7482,3 +7491,15 @@ body { top: 0 !important; }
 
 /* No dashed line across the chart at the current price; the price tag stays. */
 .price-marker::before { display: none !important; }
+
+/* ---------- Drag-to-reorder products (admin Products page) ---------- */
+.product-drag-handle {
+  display: inline-grid; place-items: center; width: 1.7rem; height: 2rem; margin-right: 0.35rem;
+  border: 0; border-radius: 0.4rem; background: transparent; color: var(--muted);
+  font-size: 1.1rem; font-weight: 900; letter-spacing: -0.2em; line-height: 1;
+  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.product-drag-handle:hover { background: color-mix(in srgb, var(--blue, #2f7bff) 14%, transparent); color: var(--text); }
+.product-card.is-dragging { opacity: 0.85; border-color: var(--blue, #2f7bff); box-shadow: 0 0.6rem 1.6rem rgba(0, 0, 0, 0.3); }
+.product-card.is-dragging .product-drag-handle { cursor: grabbing; }
+.product-card-identity { display: flex; align-items: center; }
