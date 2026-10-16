@@ -7476,3 +7476,6 @@ body { top: 0 !important; }
 
 /* The "5s · Scroll/drag to zoom & pan" hint on the chart is not shown. */
 .chart-note { display: none !important; }
+
+/* No dashed line across the chart at the current price; the price tag stays. */
+.price-marker::before { display: none !important; }
