@@ -164,6 +164,7 @@ function normalizeInstrument(row) {
     category: row.category,
     enabled: Boolean(row.enabled),
     tradeEnabled: Boolean(row.trade_enabled ?? row.tradeEnabled),
+    sortOrder: row.sort_order ?? row.sortOrder ?? null,
   };
 }
 
@@ -576,11 +577,32 @@ async function listInstruments({ tradeOnly = false, includeDisabled = false } = 
     const rows = await query(
       `SELECT * FROM instruments
        WHERE ${includeDisabled ? "true" : "enabled = true"} ${tradeOnly ? "AND trade_enabled = true" : ""}
-       ORDER BY category, symbol`,
+       ORDER BY sort_order NULLS LAST, category, symbol`,
     );
     return rows.map(normalizeInstrument);
   }
-  return memory.instruments.filter((instrument) => (includeDisabled || instrument.enabled) && (!tradeOnly || instrument.tradeEnabled));
+  const rank = (instrument) => (Number.isFinite(instrument.sortOrder) ? instrument.sortOrder : Infinity);
+  return memory.instruments
+    .filter((instrument) => (includeDisabled || instrument.enabled) && (!tradeOnly || instrument.tradeEnabled))
+    .sort((a, b) => rank(a) - rank(b) || a.category.localeCompare(b.category) || a.symbol.localeCompare(b.symbol));
+}
+
+// The admin's drag-and-drop product order: position i in `symbols` becomes sort_order i,
+// and every list users see (Quotes, Market Watch) follows it.
+async function saveInstrumentOrder(symbols) {
+  if (pool) {
+    await query(
+      `UPDATE instruments SET sort_order = o.position
+       FROM (SELECT symbol, ordinality - 1 AS position FROM unnest($1::text[]) WITH ORDINALITY AS t(symbol, ordinality)) o
+       WHERE instruments.symbol = o.symbol`,
+      [symbols],
+    );
+    return;
+  }
+  symbols.forEach((symbol, index) => {
+    const instrument = memory.instruments.find((item) => item.symbol === symbol);
+    if (instrument) instrument.sortOrder = index;
+  });
 }
 
 async function upsertInstrument(instrument) {
@@ -839,6 +861,7 @@ async function seedDefaults() {
     // Practice accounts started from "Try Demo" - see POST /api/auth/demo.
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMPTZ`);
+    await query(`ALTER TABLE instruments ADD COLUMN IF NOT EXISTS sort_order INTEGER`);
     await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS document_back_url TEXT`);
     await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS selfie_url TEXT`);
     await query(`ALTER TABLE kyc_submissions ADD COLUMN IF NOT EXISTS date_of_birth TEXT`);
@@ -1552,6 +1575,21 @@ app.post("/api/admin/instruments", requireAuth, attachUser, requireRole("admin")
     details: { enabled: instrument.enabled, tradeEnabled: instrument.tradeEnabled, category: instrument.category },
   });
   response.status(201).json({ instrument });
+});
+
+app.post("/api/admin/instruments/order", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
+  const symbols = Array.isArray(request.body?.symbols) ? [...new Set(request.body.symbols.map((symbol) => String(symbol).toUpperCase()))] : [];
+  if (!symbols.length || symbols.length > 500) return response.status(400).json({ error: "symbols must be a list of product symbols" });
+  await saveInstrumentOrder(symbols);
+  logEvent({
+    category: "admin",
+    action: "instrument.reordered",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: "products",
+    details: { count: symbols.length },
+  });
+  response.json({ instruments: await listInstruments({ includeDisabled: true }) });
 });
 
 app.get("/api/admin/logs", requireAuth, attachUser, requireRole("admin"), async (request, response) => {
