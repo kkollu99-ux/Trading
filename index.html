@@ -461,6 +461,7 @@
             <button class="nav-item" data-section="orders" data-label="Orders"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="M4 6h1"/><path d="M4 12h1"/><path d="M4 18h1"/></svg></span><span class="nav-label">Orders</span></button>
             <button class="nav-item role-restricted-nav" data-section="users" data-label="Users" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6"/><path d="M19 8v6"/></svg></span><span class="nav-label">Users</span></button>
             <button class="nav-item role-restricted-nav" data-section="products" data-label="Products" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M21 8v8a2 2 0 0 1-1 1.73l-6 3.46a2 2 0 0 1-2 0l-6-3.46A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.73l6-3.46a2 2 0 0 1 2 0l6 3.46A2 2 0 0 1 21 8Z"/><path d="M3.27 6.96 12 12l8.73-5.04"/><path d="M12 22.08V12"/></svg></span><span class="nav-label">Products</span></button>
+            <button class="nav-item role-restricted-nav" data-section="calculator" data-label="Calculator" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01"/></svg></span><span class="nav-label">Calculator</span></button>
             <button class="nav-item role-restricted-nav" data-section="logs" data-label="Logs" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6"/><path d="M9 17h6"/><path d="M9 9h1"/></svg></span><span class="nav-label">Logs</span></button>
             <button class="nav-item" data-section="profile" data-label="Profile"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 10h16"/><path d="M8 15h4"/></svg></span><span class="nav-label">Profile</span></button>
             <button class="nav-item" data-section="service" data-label="Online Service"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M5 13h3v6H5z"/><path d="M16 13h3v6h-3z"/><path d="M19 19a4 4 0 0 1-4 3h-3"/></svg><span class="nav-badge" id="serviceNavBadge" hidden>0</span></span><span class="nav-label">Online Service</span></button>
@@ -877,6 +878,67 @@
           </div>
         </section>
 
+        <section id="calculator" class="view-section">
+          <div class="user-management-page calc-page">
+            <header class="user-management-head">
+              <div>
+                <span>Simulation Planner</span>
+                <h2>Calculator</h2>
+                <p>Type an amount and the hike you want: get the target for the simulation, how many lots to buy and the profit. Exact decimal maths, rounded to cents like the platform.</p>
+              </div>
+            </header>
+            <div class="calc-grid">
+              <form id="calcForm" class="calc-card" autocomplete="off" onsubmit="return false">
+                <h3>1 · Inputs</h3>
+                <label>Product<select id="calcProduct"><option value="">Custom</option></select></label>
+                <div class="calc-row">
+                  <label>Order side<select id="calcSide"><option>Buy</option><option>Sell</option></select></label>
+                  <label>Simulation direction<select id="calcDirection"><option>Up</option><option>Down</option></select></label>
+                </div>
+                <label>Start price <span class="calc-inline"><input id="calcStart" inputmode="decimal" value="4520" /><button type="button" id="calcLivePrice" class="secondary-action compact-action">Use live price</button></span></label>
+                <label>Amount to invest (margin budget)<input id="calcAmount" inputmode="decimal" value="1000" /></label>
+                <div class="calc-row">
+                  <label>Hike type<select id="calcHikeType"><option>Percent</option><option>Currency</option></select></label>
+                  <label>Hike value <small id="calcHikeHint">15 = +15 %</small><input id="calcHike" inputmode="decimal" value="15" /></label>
+                </div>
+                <div class="calc-row">
+                  <label>Multiplier<input id="calcMultiplier" inputmode="decimal" value="100" /></label>
+                  <label>Units per lot<input id="calcUnits" inputmode="decimal" value="100" /></label>
+                </div>
+                <div class="calc-row">
+                  <label>Fee rate (% of margin)<input id="calcFee" inputmode="decimal" value="0.1" /></label>
+                  <label>Max lots<input id="calcMaxLots" inputmode="decimal" value="100" /></label>
+                </div>
+                <label>Lot step<input id="calcStep" inputmode="decimal" value="0.01" /></label>
+                <label>Profit I want (currency) - for the reverse calculation<input id="calcWanted" inputmode="decimal" value="150" /></label>
+                <p id="calcError" class="calc-error" role="alert"></p>
+              </form>
+              <div class="calc-results">
+                <section class="calc-card">
+                  <h3>2 · Type this into the product's simulation</h3>
+                  <dl class="calc-list" id="calcSimOut"></dl>
+                </section>
+                <section class="calc-card">
+                  <h3>3 · Lots to purchase for your amount</h3>
+                  <dl class="calc-list" id="calcLotsOut"></dl>
+                </section>
+                <section class="calc-card">
+                  <h3>4 · Result when the target is reached</h3>
+                  <dl class="calc-list" id="calcResultOut"></dl>
+                </section>
+                <section class="calc-card">
+                  <h3>5 · Reverse: I want a profit of …</h3>
+                  <dl class="calc-list" id="calcReverseOut"></dl>
+                </section>
+              </div>
+            </div>
+            <section class="calc-card calc-scenarios">
+              <h3>Profit at different moves (uses the lots from section 3)</h3>
+              <div class="calc-table-wrap"><table class="calc-table"><thead><tr><th>Move</th><th>Target price</th><th>Price change</th><th>Profit</th><th>Profit after fee</th><th>Return on margin</th><th>Return on amount</th></tr></thead><tbody id="calcScenarios"></tbody></table></div>
+            </section>
+          </div>
+        </section>
+
         <section id="logs" class="view-section">
           <div class="user-management-page">
             <header class="user-management-head">
@@ -942,6 +1004,7 @@
         <button class="nav-item trade-nav" data-section="trade" data-label="Trade"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M17 3v12"/><path d="m21 11-4 4-4-4"/><path d="M7 21V9"/><path d="m3 13 4-4 4 4"/></svg></span><span class="nav-label">Trade</span></button>
         <button class="nav-item role-restricted-nav" data-section="users" data-label="Users" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11h-6"/><path d="M19 8v6"/></svg></span><span class="nav-label">Users</span></button>
         <button class="nav-item role-restricted-nav" data-section="products" data-label="Products" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M21 8v8a2 2 0 0 1-1 1.73l-6 3.46a2 2 0 0 1-2 0l-6-3.46A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.73l6-3.46a2 2 0 0 1 2 0l6 3.46A2 2 0 0 1 21 8Z"/><path d="M3.27 6.96 12 12l8.73-5.04"/><path d="M12 22.08V12"/></svg></span><span class="nav-label">Products</span></button>
+        <button class="nav-item role-restricted-nav" data-section="calculator" data-label="Calculator" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01"/></svg></span><span class="nav-label">Calculator</span></button>
         <button class="nav-item role-restricted-nav" data-section="logs" data-label="Logs" hidden><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6"/><path d="M9 17h6"/><path d="M9 9h1"/></svg></span><span class="nav-label">Logs</span></button>
         <button class="nav-item" data-section="profile" data-label="Profile"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z"/><path d="M4 10h16"/><path d="M8 15h4"/></svg></span><span class="nav-label">Profile</span></button>
         <button class="nav-item" data-section="service" data-label="Online Service"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><path d="M5 13h3v6H5z"/><path d="M16 13h3v6h-3z"/><path d="M19 19a4 4 0 0 1-4 3h-3"/></svg></span><span class="nav-label">Online Service</span></button>
