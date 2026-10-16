@@ -3294,13 +3294,6 @@ function renderTradeCandles() {
   const priceMarker = document.querySelector("#tradePriceMarker");
   if (priceMarker) priceMarker.style.top = `${Math.max(chart.top, Math.min(chart.top + height, priceY))}px`;
 
-  ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = "#ffb000";
-  ctx.beginPath();
-  ctx.moveTo(chart.left, priceY);
-  ctx.lineTo(rect.width - chart.right + 8, priceY);
-  ctx.stroke();
-  ctx.setLineDash([]);
 
   // Crosshair: hovering a candle shows its own OHLC in the readout above
   // (instead of the live candle's) and draws a vertical line through it plus
