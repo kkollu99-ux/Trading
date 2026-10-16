@@ -476,7 +476,9 @@ function moveSection(id) {
     loadAuditLogs();
   }
   if (id === "markets") {
-    refreshMarketsQuotes();
+    // Re-read the product list each time Quotes opens, so products the admin has
+    // enabled or disabled since the page loaded show up or drop out.
+    loadMarketsInstruments();
   }
   if (id === "orders") {
     loadOrders();
@@ -1543,7 +1545,8 @@ function renderMarketsList(instruments, quotes = {}) {
 
 async function loadMarketsInstruments() {
   try {
-    const response = await fetch(`${apiBase}/api/instruments`);
+    // Only products the admin has left enabled for trading - a disabled product disappears from Quotes too.
+    const response = await fetch(`${apiBase}/api/tradable-instruments`);
     const data = await response.json().catch(() => ({}));
     marketsInstruments = data.instruments || [];
   } catch {
@@ -1585,12 +1588,29 @@ document.querySelectorAll(".market-filter-tabs button").forEach((button) => {
   });
 });
 
-document.querySelector(".markets-page")?.addEventListener("click", (event) => {
+document.querySelector(".markets-page")?.addEventListener("click", async (event) => {
   const button = event.target.closest(".instrument-row button");
   if (!button) return;
   // Open the Trade page on the product that was clicked, not on whatever
   // was selected there last.
   const apiSymbol = button.closest(".instrument-row")?.dataset.apiSymbol;
+  if (apiSymbol) {
+    // Make sure the product is still tradable right now (an admin may have disabled it
+    // since this page was drawn); if not, refresh the lists instead of opening the Trade page.
+    let tradable = true;
+    try {
+      const response = await fetch(`${apiBase}/api/tradable-instruments`);
+      const data = await response.json();
+      tradable = (data.instruments || []).some((instrument) => instrument.symbol === apiSymbol);
+    } catch {
+      /* offline: fall through and open it */
+    }
+    if (!tradable) {
+      loadMarketsInstruments();
+      loadTradeInstruments();
+      return;
+    }
+  }
   const watchRow = apiSymbol ? [...document.querySelectorAll("#tradeWatchTable .watch-row")].find((row) => row.dataset.apiSymbol === apiSymbol) : null;
   if (watchRow) selectTradeSymbol(watchRow);
   moveSection("trade");
