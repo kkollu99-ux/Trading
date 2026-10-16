@@ -384,12 +384,13 @@ function updateRoleAccess() {
   renderAccountSummary();
   const allowed = canManageUsers();
   const editable = canEditManagedUsers();
-  document.querySelectorAll('[data-section="users"], [data-section="products"], [data-section="logs"]').forEach((item) => {
+  document.querySelectorAll('[data-section="users"], [data-section="products"], [data-section="calculator"], [data-section="logs"]').forEach((item) => {
     item.hidden = !allowed;
     item.classList.toggle("is-hidden", !allowed);
   });
   document.querySelector("#users")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector("#products")?.classList.toggle("is-role-hidden", !allowed);
+  document.querySelector("#calculator")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector("#logs")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector(".managed-form-card")?.classList.toggle("is-hidden", allowed && !editable);
   document.querySelector(".managed-instrument-card")?.classList.toggle("is-hidden", !allowed);
@@ -403,6 +404,7 @@ function updateRoleAccess() {
     renderManagedInstruments();
     if (document.querySelector("#users")?.classList.contains("is-active")) moveSection("dashboard");
     if (document.querySelector("#products")?.classList.contains("is-active")) moveSection("dashboard");
+    if (document.querySelector("#calculator")?.classList.contains("is-active")) moveSection("dashboard");
     if (document.querySelector("#logs")?.classList.contains("is-active")) moveSection("dashboard");
   }
 }
@@ -453,7 +455,7 @@ function getNavLabel(item) {
 }
 
 function moveSection(id) {
-  if ((id === "users" || id === "products" || id === "logs") && !canManageUsers()) id = "dashboard";
+  if ((id === "users" || id === "products" || id === "calculator" || id === "logs") && !canManageUsers()) id = "dashboard";
   // Tablets and phones show Profile as the account window, not a page.
   if (id === "profile" && !isDesktopLayout()) {
     openProfileModal();
@@ -471,6 +473,9 @@ function moveSection(id) {
   }
   if (id === "products" && canManageUsers()) {
     loadManagedInstruments();
+  }
+  if (id === "calculator" && canManageUsers()) {
+    window.openAdminCalculator?.();
   }
   if (id === "logs" && canManageUsers()) {
     loadAuditLogs();
@@ -5963,6 +5968,209 @@ setInterval(refreshLivePositions, 3000);
 setInterval(tickTradeCandles, 1500);
 setInterval(updateDashboardTime, 1000);
 startVersionCheck();
+
+
+// ---------- Admin Calculator: simulation planner ----------
+// All money maths here is exact decimal arithmetic (BigInt scaled by 10^12), never floating point,
+// so 0.1 + 0.2 style drift cannot creep in. Margin, fee and P&L are rounded to cents the same way the
+// platform rounds them when an order is placed (see /api/orders), so the numbers match what is charged.
+(function setupAdminCalculator() {
+  const form = document.querySelector("#calcForm");
+  if (!form) return;
+  const S = 10n ** 12n;
+  const $ = (id) => document.querySelector(id);
+  const abs = (a) => (a < 0n ? -a : a);
+  const rdiv = (n, d) => {
+    const neg = (n < 0n) !== (d < 0n);
+    const q = (abs(n) * 2n + abs(d)) / (2n * abs(d));
+    return neg ? -q : q;
+  };
+  const mul = (a, b) => rdiv(a * b, S);
+  const div = (a, b) => rdiv(a * S, b);
+  const round2 = (a) => rdiv(a, S / 100n) * (S / 100n);
+  const parse = (text) => {
+    const clean = String(text ?? "").replace(/[,\s]/g, "");
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(clean)) return null;
+    const neg = clean.startsWith("-");
+    const [whole, frac = ""] = clean.replace(/^[+-]/, "").split(".");
+    const value = BigInt(whole || "0") * S + BigInt((frac + "000000000000").slice(0, 12));
+    return neg ? -value : value;
+  };
+  function fmt(a, min = 2, max = 8) {
+    const neg = a < 0n;
+    const unit = S / 10n ** BigInt(max);
+    const scaled = rdiv(abs(a), unit); // integer count of 10^-max
+    let text = scaled.toString().padStart(max + 1, "0");
+    let whole = text.slice(0, text.length - max);
+    let frac = text.slice(text.length - max);
+    while (frac.length > min && frac.endsWith("0")) frac = frac.slice(0, -1);
+    whole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    const body = frac ? `${whole}.${frac}` : whole;
+    return (neg && scaled !== 0n ? "-" : "") + body;
+  }
+  const money = (a) => fmt(round2(a), 2, 2);
+  const pct = (fraction) => `${fmt(fraction * 100n, 2, 4)}%`;
+  const floorTo = (a, step) => (a / step) * step;
+  const ceilTo = (a, step) => ((a + step - 1n) / step) * step;
+
+  const read = () => {
+    const names = { start: "Start price", amount: "Amount to invest", hike: "Hike value", multiplier: "Multiplier", units: "Units per lot", fee: "Fee rate", maxLots: "Max lots", step: "Lot step", wanted: "Profit wanted" };
+    const ids = { start: "#calcStart", amount: "#calcAmount", hike: "#calcHike", multiplier: "#calcMultiplier", units: "#calcUnits", fee: "#calcFee", maxLots: "#calcMaxLots", step: "#calcStep", wanted: "#calcWanted" };
+    const v = {};
+    for (const key of Object.keys(ids)) {
+      v[key] = parse($(ids[key]).value);
+      if (v[key] === null) return { error: `${names[key]} must be a number.` };
+    }
+    if (v.start <= 0n) return { error: "Start price must be above 0." };
+    if (v.multiplier <= 0n) return { error: "Multiplier must be above 0." };
+    if (v.units <= 0n) return { error: "Units per lot must be above 0." };
+    if (v.step <= 0n) return { error: "Lot step must be above 0." };
+    if (v.maxLots < v.step) return { error: "Max lots must be at least one lot step." };
+    if (v.amount < 0n || v.hike < 0n || v.fee < 0n || v.wanted < 0n) return { error: "Amounts cannot be negative." };
+    v.feeRate = rdiv(v.fee, 100n); // percent -> fraction
+    v.side = $("#calcSide").value === "Buy" ? 1n : -1n;
+    v.up = $("#calcDirection").value === "Up";
+    v.percent = $("#calcHikeType").value === "Percent";
+    return v;
+  };
+
+  function costFor(lots, v) {
+    const margin = round2(div(mul(mul(lots, v.units), v.start), v.multiplier));
+    const fee = round2(mul(margin, v.feeRate));
+    return { margin, fee, total: margin + fee };
+  }
+
+  const row = (label, value, note = "", tone = "") =>
+    `<div><dt>${label}${note ? `<small>${note}</small>` : ""}</dt><dd class="${tone}">${value}</dd></div>`;
+  const tone = (a) => (a > 0n ? "calc-pos" : a < 0n ? "calc-neg" : "");
+
+  function render() {
+    const err = $("#calcError");
+    const hint = $("#calcHikeHint");
+    if (hint) hint.textContent = $("#calcHikeType").value === "Percent" ? "15 = +15 %" : "15 = +15 in currency";
+    const v = read();
+    const outs = ["#calcSimOut", "#calcLotsOut", "#calcResultOut", "#calcReverseOut", "#calcScenarios"].map((id) => $(id));
+    if (v.error) {
+      err.textContent = v.error;
+      outs.forEach((el) => (el.innerHTML = ""));
+      return;
+    }
+    err.textContent = "";
+    const sign = v.up ? 1n : -1n;
+    const change = v.percent ? rdiv(v.start * v.hike, 100n * S) : v.hike;
+    const target = v.start + sign * change;
+    if (target <= 0n) {
+      err.textContent = "That move would take the price to zero or below - lower the hike value.";
+      outs.forEach((el) => (el.innerHTML = ""));
+      return;
+    }
+    const hikePct = div(change, v.start);
+
+    // 2 · what to type into the admin simulation
+    $("#calcSimOut").innerHTML =
+      row("Direction button", v.up ? "↑ Up" : "↓ Down", "Press this on the product's simulation controls") +
+      row("Start price", fmt(v.start, 2, 8), "The 'Start price' box") +
+      row("Target as percent", pct(hikePct), "Target price box, unit %") +
+      row("Target as price", fmt(target, 2, 8), "…or unit $ and type this price") +
+      row("Hike as currency amount", fmt(change, 2, 8), "Target minus start price");
+
+    // 3 · lots for the amount, exactly as the platform would charge them
+    const perLotMargin = div(mul(v.units, v.start), v.multiplier);
+    const perLotCost = mul(perLotMargin, S + v.feeRate);
+    let lots = perLotCost > 0n ? floorTo(div(v.amount, perLotCost), v.step) : 0n;
+    const cap = floorTo(v.maxLots, v.step);
+    if (lots > cap) lots = cap;
+    while (lots > 0n && costFor(lots, v).total > v.amount) lots -= v.step;
+    while (lots + v.step <= cap && costFor(lots + v.step, v).total <= v.amount) lots += v.step;
+    const cost = costFor(lots, v);
+    const left = v.amount - cost.total;
+    $("#calcLotsOut").innerHTML =
+      row("Margin per 1 lot", money(perLotMargin), "units × price ÷ multiplier") +
+      row("Cost per 1 lot incl. fee", money(perLotCost), "margin + handling fee") +
+      row("LOTS TO PURCHASE", fmt(lots, 2, 6), lots === 0n ? "Amount is too small for one lot step" : "Largest size your amount covers", "calc-big") +
+      row("Margin held", money(cost.margin)) +
+      row("Handling fee", money(cost.fee)) +
+      row("Total cash needed", money(cost.total), "Must be ≤ your balance") +
+      row("Left over from your amount", money(left));
+
+    // 4 · result at the target
+    const pnl = round2(rdiv(v.side * (target - v.start) * lots * v.units, S * S));
+    const net = pnl - cost.fee;
+    const wipe = lots > 0n ? div(cost.margin, mul(lots, v.units)) : 0n;
+    $("#calcResultOut").innerHTML =
+      row("Profit / loss", money(pnl), "(target − start) × lots × units", tone(pnl) + " calc-big") +
+      row("Return on margin", cost.margin > 0n ? pct(div(pnl, cost.margin)) : "0%", "profit ÷ margin held", tone(pnl)) +
+      row("Profit after fee", money(net), "", tone(net)) +
+      row("Return on amount (after fee)", v.amount > 0n ? pct(div(net, v.amount)) : "0%", "", tone(net)) +
+      row("Balance after closing", money(v.amount + net), "your amount + profit after fee") +
+      row("Move that wipes out the margin", fmt(wipe, 2, 8), "The 20% stop-out closes the trade before this");
+
+    // 5 · reverse: lots needed for a wanted profit
+    const perLotProfit = mul(change, v.units);
+    let wantLots = 0n;
+    let reverseHtml;
+    if (perLotProfit <= 0n) {
+      reverseHtml = row("Lots needed", "–", "The hike value must be above 0");
+    } else {
+      wantLots = ceilTo(div(v.wanted, perLotProfit), v.step);
+      if (wantLots < v.step) wantLots = v.step;
+      const capped = wantLots > cap;
+      if (capped) wantLots = cap;
+      const wantCost = costFor(wantLots, v);
+      const reached = round2(mul(wantLots, perLotProfit));
+      const needMove = lots > 0n ? div(v.wanted, mul(lots, v.units)) : 0n;
+      reverseHtml =
+        row("Lots needed", fmt(wantLots, 2, 6), capped ? "Capped at Max lots" : "Rounded up to the lot step", "calc-big") +
+        row("Margin + fee needed", money(wantCost.total), "Cash you must have") +
+        row("Profit at those lots", money(reached), "At the hike above", tone(reached)) +
+        row("Move needed with the lots from section 3", fmt(needMove, 2, 8), lots > 0n ? `= ${pct(div(needMove, v.start))} of the start price` : "") ;
+    }
+    $("#calcReverseOut").innerHTML = reverseHtml;
+
+    // scenarios
+    $("#calcScenarios").innerHTML = [1, 2, 5, 10, 15, 20, 25, 30, 50, 100]
+      .map((m) => {
+        const fraction = BigInt(m) * (S / 100n);
+        const move = mul(v.start, fraction);
+        const t = v.start + sign * move;
+        const p = round2(rdiv(v.side * (t - v.start) * lots * v.units, S * S));
+        const after = p - cost.fee;
+        return `<tr><td>${m}%</td><td>${fmt(t, 2, 8)}</td><td>${fmt(move, 2, 8)}</td><td class="${tone(p)}">${money(p)}</td><td class="${tone(after)}">${money(after)}</td><td class="${tone(p)}">${cost.margin > 0n ? pct(div(p, cost.margin)) : "0%"}</td><td class="${tone(after)}">${v.amount > 0n ? pct(div(after, v.amount)) : "0%"}</td></tr>`;
+      })
+      .join("");
+  }
+
+  const productSelect = $("#calcProduct");
+  function fillProducts() {
+    const current = productSelect.value;
+    productSelect.innerHTML = `<option value="">Custom</option>` + managedInstruments
+      .filter((item) => item.enabled)
+      .map((item) => `<option value="${escapeHtml(item.symbol)}">${escapeHtml(compactSymbol(item.symbol))}</option>`)
+      .join("");
+    productSelect.value = [...productSelect.options].some((o) => o.value === current) ? current : "";
+  }
+  function useLivePrice() {
+    const live = managedLivePrices.get(productSelect.value);
+    if (!live || !Number.isFinite(live.price)) return;
+    $("#calcStart").value = String(live.price);
+    render();
+  }
+  productSelect.addEventListener("change", useLivePrice);
+  $("#calcLivePrice").addEventListener("click", useLivePrice);
+  form.addEventListener("input", render);
+  form.addEventListener("change", render);
+
+  window.openAdminCalculator = async () => {
+    render();
+    try {
+      await loadManagedInstruments();
+    } catch {
+      // The calculator works without the product list.
+    }
+    fillProducts();
+  };
+  render();
+})();
 
 // ---------- Mobile Trade page: Buy/Sell bar opens the order ticket as a sheet ----------
 (function setupMobileTicketSheet() {
