@@ -751,6 +751,19 @@ async function listChatMessages(requestId, viewerId = null) {
   return memory.chatMessages.filter((message) => message.request_id === requestId && message.created_at > clearedAt);
 }
 
+// Admin "Clear Chat": removes the whole conversation for everyone (client and staff).
+async function deleteChatThreadMessages(requestId) {
+  if (pool) {
+    const rows = await query("DELETE FROM chat_messages WHERE request_id = $1 RETURNING id", [requestId]);
+    await query("DELETE FROM chat_clears WHERE request_id = $1", [requestId]);
+    return rows.length;
+  }
+  const before = memory.chatMessages.length;
+  memory.chatMessages = memory.chatMessages.filter((message) => message.request_id !== requestId);
+  for (const key of [...memory.chatClears.keys()]) if (key.startsWith(`${requestId}:`)) memory.chatClears.delete(key);
+  return before - memory.chatMessages.length;
+}
+
 async function clearChatForViewer(requestId, viewerId) {
   if (pool) {
     await query(
@@ -3645,6 +3658,20 @@ async function requireRequestAccess(request, response, next) {
 
 app.get("/api/service-requests/:id/messages", requireAuth, attachUser, requireRequestAccess, async (request, response) => {
   response.json({ messages: await listChatMessages(request.params.id, request.user.id) });
+});
+
+app.delete("/api/service-requests/:id/messages", requireAuth, attachUser, requireRole("admin"), requireRequestAccess, async (request, response) => {
+  const removed = await deleteChatThreadMessages(request.params.id);
+  logEvent({
+    category: "admin",
+    action: "chat.cleared",
+    actorId: request.user.id,
+    actorLabel: request.user.email,
+    targetLabel: request.serviceRequest.type,
+    details: { requestId: request.params.id, clientId: request.serviceRequest.user_id, removed },
+  });
+  broadcast({ type: "chat.cleared", requestId: request.params.id });
+  response.json({ cleared: true, removed });
 });
 
 app.post("/api/service-requests/:id/messages/clear", requireAuth, attachUser, requireRequestAccess, async (request, response) => {
