@@ -7531,3 +7531,6 @@ body { top: 0 !important; }
   .calc-results { grid-template-columns: 1fr; }
   .calc-list dd.calc-big { font-size: 1.05rem; }
 }
+
+/* Clear-chat buttons */
+.support-window nav .chat-clear-btn { width: auto; padding: 0 0.6rem; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.02em; }

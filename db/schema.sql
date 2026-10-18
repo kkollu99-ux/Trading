@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS service_requests (
   last_message_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Per-viewer "Clear chat": messages older than cleared_at are hidden from that viewer only.
+CREATE TABLE IF NOT EXISTS chat_clears (
+  request_id UUID NOT NULL,
+  user_id UUID NOT NULL,
+  cleared_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (request_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS chat_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_id UUID REFERENCES service_requests(id),

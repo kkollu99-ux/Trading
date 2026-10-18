@@ -110,6 +110,7 @@ const memory = {
   instruments: defaultInstruments.map((instrument) => ({ id: crypto.randomUUID(), ...instrument })),
   serviceRequests: [],
   chatMessages: [],
+  chatClears: new Map(),
   orders: [],
   ledger: [],
   kycSubmissions: [],
@@ -734,11 +735,32 @@ async function createChatMessage({ requestId, senderId, body, attachmentUrl }) {
   return message;
 }
 
-async function listChatMessages(requestId) {
+// "Clear chat" hides the conversation for the person who pressed it only: each viewer has their own
+// cleared-at time per thread, and the messages themselves stay in the database for the other side and for audit.
+async function listChatMessages(requestId, viewerId = null) {
   if (pool) {
-    return query("SELECT * FROM chat_messages WHERE request_id = $1 ORDER BY created_at ASC", [requestId]);
+    return query(
+      `SELECT cm.* FROM chat_messages cm
+       WHERE cm.request_id = $1
+         AND cm.created_at > COALESCE((SELECT cleared_at FROM chat_clears WHERE request_id = $1 AND user_id = $2), '-infinity'::timestamptz)
+       ORDER BY cm.created_at ASC`,
+      [requestId, viewerId],
+    );
   }
-  return memory.chatMessages.filter((message) => message.request_id === requestId);
+  const clearedAt = memory.chatClears.get(`${requestId}:${viewerId}`) || "";
+  return memory.chatMessages.filter((message) => message.request_id === requestId && message.created_at > clearedAt);
+}
+
+async function clearChatForViewer(requestId, viewerId) {
+  if (pool) {
+    await query(
+      `INSERT INTO chat_clears (request_id, user_id, cleared_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (request_id, user_id) DO UPDATE SET cleared_at = NOW()`,
+      [requestId, viewerId],
+    );
+    return;
+  }
+  memory.chatClears.set(`${requestId}:${viewerId}`, new Date().toISOString());
 }
 
 async function createOrder({ userId, symbol, direction, lots, multiplier, entryPrice, marginHeld, fee, stopLoss = null, takeProfit = null }, client = null) {
@@ -3622,7 +3644,12 @@ async function requireRequestAccess(request, response, next) {
 }
 
 app.get("/api/service-requests/:id/messages", requireAuth, attachUser, requireRequestAccess, async (request, response) => {
-  response.json({ messages: await listChatMessages(request.params.id) });
+  response.json({ messages: await listChatMessages(request.params.id, request.user.id) });
+});
+
+app.post("/api/service-requests/:id/messages/clear", requireAuth, attachUser, requireRequestAccess, async (request, response) => {
+  await clearChatForViewer(request.params.id, request.user.id);
+  response.json({ cleared: true });
 });
 
 app.post(
