@@ -390,6 +390,10 @@ function updateRoleAccess() {
   });
   document.querySelector("#users")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector("#products")?.classList.toggle("is-role-hidden", !allowed);
+  document.querySelectorAll("#clearProcessChat, #userDetailRequestClear").forEach((button) => {
+    button.textContent = editable ? "Clear Chat" : button.id === "clearProcessChat" ? "Clear" : "Clear chat";
+    button.title = editable ? "Delete this conversation for everyone (admin and client)" : "Clear this conversation from your view";
+  });
   document.querySelector("#calculator")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector("#logs")?.classList.toggle("is-role-hidden", !allowed);
   document.querySelector(".managed-form-card")?.classList.toggle("is-hidden", allowed && !editable);
@@ -2234,17 +2238,37 @@ async function openProcessChat(topicName = "deposit") {
 }
 
 
-// "Clear" in a chat hides the conversation for the person who pressed it (the other side keeps their copy).
+// "Clear" in a chat: a client (or team member) hides the conversation from their own view only; an admin's
+// "Clear Chat" deletes the whole conversation for everyone, so the client's chat resets too.
 async function clearChatThread(requestId) {
   if (!requestId || !currentSession?.token) return false;
-  if (!window.confirm("Clear this conversation? It will be removed from your view only.")) return false;
+  const everyone = canEditManagedUsers();
+  const question = everyone
+    ? "Clear this chat for EVERYONE? The conversation is deleted on the admin side and on the client's chat too. This cannot be undone."
+    : "Clear this conversation? It will be removed from your view only.";
+  if (!window.confirm(question)) return false;
   try {
-    await authRequest(`/api/service-requests/${requestId}/messages/clear`, { method: "POST" });
+    await authRequest(`/api/service-requests/${requestId}/messages${everyone ? "" : "/clear"}`, { method: everyone ? "DELETE" : "POST" });
     return true;
   } catch (error) {
     window.alert(`Could not clear the chat: ${error.message}`);
     return false;
   }
+}
+
+// Shown to every open chat when an admin clears a conversation.
+function applyChatCleared(requestId) {
+  if (!requestId) return;
+  if (requestId === activeServiceRequestId && processChatMessages) {
+    processChatMessages.innerHTML = "";
+    const topic = processChatTopics[currentProcessChatTopic];
+    if (topic) appendProcessChatMessage(topic.message);
+  }
+  if (requestId === activeUserDetailRequestId) {
+    const messagesEl = document.querySelector("#userDetailRequestMessages");
+    if (messagesEl) messagesEl.innerHTML = "";
+  }
+  markServiceRequestRead(requestId);
 }
 
 document.querySelector("#clearProcessChat")?.addEventListener("click", async () => {
@@ -4118,7 +4142,8 @@ function connectPriceStream() {
       trackServiceChatNotification(payload.message);
       applyIncomingChatMessage(payload.message);
       applyIncomingRequestMessageForAdmin(payload.message);
-    } else if (payload.type === "service-request.status") applyIncomingRequestStatus(payload.serviceRequest);
+    } else if (payload.type === "chat.cleared") applyChatCleared(payload.requestId);
+    else if (payload.type === "service-request.status") applyIncomingRequestStatus(payload.serviceRequest);
     else if (payload.type === "user.balance") applyIncomingBalanceUpdate(payload);
     else if (payload.type === "user.updated") applyIncomingUserUpdate(payload);
     else if (payload.type === "order.update") applyIncomingOrderUpdate(payload);
