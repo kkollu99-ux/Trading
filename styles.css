@@ -2461,16 +2461,6 @@ select:focus {
   font-weight: 700;
 }
 
-.tv-logo-mask {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 7.5rem;
-  height: 5rem;
-  background: var(--panel-2);
-  z-index: 3;
-}
-
 .tv-widget-spinner {
   position: absolute;
   inset: 0;
