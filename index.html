@@ -1097,7 +1097,7 @@
       <div id="processChatWindow" class="support-window process-chat-window is-hidden" aria-live="polite">
         <header>
           <div><span>☏</span><strong id="processChatTitle">FXCM Support</strong><small id="processChatSubtitle">Online · Typically replies in minutes</small></div>
-          <nav><button id="minimizeProcessChat" type="button">↙</button><button id="closeProcessChat" type="button">×</button></nav>
+          <nav><button id="clearProcessChat" class="chat-clear-btn" type="button" title="Clear this conversation from your view">Clear</button><button id="minimizeProcessChat" type="button">↙</button><button id="closeProcessChat" type="button">×</button></nav>
         </header>
         <div id="processChatMessages" class="support-body process-chat-body">
           <div class="support-bubble"><span>☏</span><p>Hello! You are now connected to FXCM Capitals Support. Please type a message to begin.</p></div>
@@ -1328,6 +1328,7 @@
                     <p id="userDetailRequestSubtitle"></p>
                   </div>
                   <div id="userDetailRequestActions" class="request-detail-actions"></div>
+                  <button id="userDetailRequestClear" class="secondary-action compact-action chat-clear-btn" type="button" title="Clear this conversation from your view">Clear chat</button>
                 </div>
                 <div id="userDetailRequestMessages" class="support-body process-chat-body request-detail-messages"></div>
                 <form id="userDetailRequestForm" class="process-chat-form">

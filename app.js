@@ -2233,6 +2233,37 @@ async function openProcessChat(topicName = "deposit") {
   processChatInput?.focus();
 }
 
+
+// "Clear" in a chat hides the conversation for the person who pressed it (the other side keeps their copy).
+async function clearChatThread(requestId) {
+  if (!requestId || !currentSession?.token) return false;
+  if (!window.confirm("Clear this conversation? It will be removed from your view only.")) return false;
+  try {
+    await authRequest(`/api/service-requests/${requestId}/messages/clear`, { method: "POST" });
+    return true;
+  } catch (error) {
+    window.alert(`Could not clear the chat: ${error.message}`);
+    return false;
+  }
+}
+
+document.querySelector("#clearProcessChat")?.addEventListener("click", async () => {
+  if (!activeServiceRequestId) {
+    processChatMessages.innerHTML = "";
+    return;
+  }
+  if (!(await clearChatThread(activeServiceRequestId))) return;
+  processChatMessages.innerHTML = "";
+  const topic = processChatTopics[currentProcessChatTopic];
+  if (topic) appendProcessChatMessage(topic.message);
+});
+
+document.querySelector("#userDetailRequestClear")?.addEventListener("click", async () => {
+  if (!activeUserDetailRequestId) return;
+  if (!(await clearChatThread(activeUserDetailRequestId))) return;
+  document.querySelector("#userDetailRequestMessages").innerHTML = "";
+});
+
 document.querySelectorAll("[data-chat-topic]").forEach((button) => {
   button.addEventListener("click", () => {
     openProcessChat(button.dataset.chatTopic);
