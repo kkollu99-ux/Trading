@@ -406,7 +406,7 @@
           </div>
           <div class="client-update">
             <span>Updated: <time id="dashboardTime">10:25:04 PM</time></span>
-            <button id="refreshDashboard" class="secondary-action compact-action" type="button">⟳ Refresh</button>
+            <button id="refreshDashboard" class="secondary-action compact-action refresh-icon" type="button" aria-label="Refresh" title="Refresh">⟳</button>
           </div>
         </div>
         <div class="topbar-actions client-actions">
@@ -1262,6 +1262,10 @@
                 <div><small>Your Referral Code</small><strong id="profileReferralCode">—</strong></div>
                 <div><small>Total Invited</small><strong id="invitedFriendsTotal">0</strong></div>
                 <button id="copyReferralCode" type="button">▣ Copy</button>
+              </div>
+              <div class="referral-link-row">
+                <div><small>Your invite link - share it and the code fills in at sign-up</small><strong id="profileReferralLink">—</strong></div>
+                <button id="copyReferralLink" type="button">▣ Copy link</button>
               </div>
               <button id="openInvitedFriendsModal" class="invited-modal-trigger" type="button">
                 <span>♙</span>
