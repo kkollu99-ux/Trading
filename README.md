@@ -45,7 +45,9 @@ http://127.0.0.1:4173
 Default seeded accounts:
 
 ```text
-admin@fxcaptialmarket.online / Admin@12345 (only created on a brand-new, empty database)
+Local development: admin@fxcapitalmarket.online / Admin@12345 (only created on a brand-new, empty database)
+Deployed: set ADMIN_EMAIL and ADMIN_PASSWORD (8+ characters) before the first start. Without ADMIN_PASSWORD a deployed
+server creates the first admin with a random password and prints it once in its logs.
 (no separate support login; admins handle Online Service)
 ```
 
@@ -75,7 +77,7 @@ The app runs on Render as a Node web service (`render.yaml` describes the whole 
 - **Web service:** this repository, branch `main`, build `npm install`, start `npm start`, health check path `/api/health`. Use a paid plan (Starter or above) so it stays awake: the free plan sleeps after 15 minutes idle, which stops live quotes, WebSockets and running simulations.
 - **PostgreSQL:** create a Render Postgres in the same region and set the service's `DATABASE_URL` to its **Internal Database URL**. The schema is applied automatically on start.
 - **Persistent disk:** mount a disk at `/var/data` and set `UPLOAD_DIR=/var/data/uploads`, otherwise KYC documents and chat images are lost on every deploy.
-- **Custom domain:** service -> Settings -> Custom Domains -> add `www.fxcaptialmarket.online` and `fxcaptialmarket.online`, then add the DNS records Render shows (CNAME `www` -> the service's `onrender.com` address; ALIAS/ANAME or A `216.24.57.1` for the bare domain). Render issues the HTTPS certificate and redirects between the two names automatically.
+- **Custom domain:** service -> Settings -> Custom Domains -> add `www.fxcapitalmarket.online` and `fxcapitalmarket.online`, then add the DNS records Render shows (CNAME `www` -> the service's `onrender.com` address; ALIAS/ANAME or A `216.24.57.1` for the bare domain). Render issues the HTTPS certificate and redirects between the two names automatically.
 
 Required variables:
 
@@ -83,8 +85,10 @@ Required variables:
 JWT_SECRET=<strong random secret>
 DATABASE_URL=<Render Postgres Internal Database URL>
 UPLOAD_DIR=/var/data/uploads
+ADMIN_EMAIL=<first admin's email>
+ADMIN_PASSWORD=<first admin's password, 8+ characters>
 RESEND_API_KEY=<Resend key>
-EMAIL_FROM=FXCM Capitals <no-reply@fxcaptialmarket.online>
+EMAIL_FROM=FXCM Capitals <no-reply@fxcapitalmarket.online>
 ALLOWED_SYMBOLS=XAU/USD,XAG/USD,BTC/USD,EUR/USD,GBP/USD,USOIL
 ```
 

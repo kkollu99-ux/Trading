@@ -750,7 +750,7 @@ function showHomeView() {
 
 function enterWorkspace(session = null) {
   if (session) saveSession(session);
-  else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcaptialmarket.online", balance: 10000 } });
+  else if (!currentSession) saveSession({ token: null, user: { role: "user", name: "Demo Client", email: "demo@fxcapitalmarket.online", balance: 10000 } });
   applyServerPreferences(currentSession?.user);
   homeView.classList.add("is-hidden");
   loginView.classList.add("is-hidden");
