@@ -957,7 +957,21 @@ async function seedDefaults() {
   // exists (here or after the owner renamed/replaced it) nothing is re-created,
   // so a known default password never reappears on a live site.
   if (!(await listUsers()).some((user) => user.role === "admin")) {
-    await createUser({ email: "admin@fxcaptialmarket.online", password: "Admin@12345", name: "FXCM Admin", role: "admin" });
+    // The first admin's sign-in comes from ADMIN_EMAIL / ADMIN_PASSWORD. The publicly known default password
+    // is only for local development: a deployed server without ADMIN_PASSWORD makes a random one and prints it
+    // once in its logs, so a fresh live site never has a guessable admin login.
+    const email = String(process.env.ADMIN_EMAIL || "admin@fxcapitalmarket.online").trim().toLowerCase();
+    let password = process.env.ADMIN_PASSWORD;
+    if (!password || password.length < 8) {
+      if (password) console.warn("ADMIN_PASSWORD must be at least 8 characters - ignoring it.");
+      if (isProduction) {
+        password = crypto.randomBytes(12).toString("base64url");
+        console.warn(`First admin created - sign in with ${email} / ${password} and change the password straight away.`);
+      } else {
+        password = "Admin@12345";
+      }
+    }
+    await createUser({ email, password, name: "FXCM Admin", role: "admin" });
   }
 }
 
