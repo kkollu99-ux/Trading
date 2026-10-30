@@ -19,7 +19,8 @@ const server = http.createServer(app);
 const port = Number(process.env.PORT || 4173);
 const jwtSecret = process.env.JWT_SECRET || "dev-only-secret-change-me";
 const rootDir = __dirname;
-const uploadDir = path.join(rootDir, "uploads");
+// UPLOAD_DIR points at a persistent disk on hosts that wipe the app folder on every deploy (e.g. Render).
+const uploadDir = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(rootDir, "uploads");
 // Changes every deploy (the whole process restarts), so a long-lived
 // browser tab can tell its own already-loaded code apart from whatever the
 // server is serving now - see the client's startVersionCheck().
@@ -118,11 +119,19 @@ const memory = {
   auditLogs: [],
 };
 
+// Hosted Postgres (Render, Railway's public proxy, ...) wants TLS but presents a certificate we don't pin.
+// DATABASE_SSL=false turns TLS off for a database that doesn't offer it (local or private-network Postgres).
+function databaseSsl(url) {
+  if (String(process.env.DATABASE_SSL || "").toLowerCase() === "false") return false;
+  if (url.includes("railway.internal")) return false;
+  return { rejectUnauthorized: false };
+}
+
 let pool = null;
 if (process.env.DATABASE_URL) {
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL.includes("railway.internal") ? false : { rejectUnauthorized: false },
+    ssl: databaseSsl(process.env.DATABASE_URL),
   });
 }
 
@@ -965,12 +974,12 @@ const resetStore = new Map(); // email -> { code, expiresAt, attempts } for pass
 const otpExpiryMs = 10 * 60 * 1000;
 const otpMaxAttempts = 5;
 
-// A deployed server (Railway sets RAILWAY_ENVIRONMENT) must never hand a
+// A deployed server (Render sets RENDER, Railway sets RAILWAY_ENVIRONMENT) must never hand a
 // verification code back to the browser: whoever received it could "verify"
 // any address, or take over an account through the password-reset flow.
 // Without a mail provider it refuses instead; only local development, with
 // nothing configured, still returns the code so the flow can be tried.
-const isProduction = process.env.NODE_ENV === "production" || Boolean(process.env.RAILWAY_ENVIRONMENT);
+const isProduction = process.env.NODE_ENV === "production" || Boolean(process.env.RENDER) || Boolean(process.env.RAILWAY_ENVIRONMENT);
 if (isProduction) app.set("trust proxy", 1); // one proxy hop, so request.ip is the visitor, not the proxy
 
 // Fixed-window counters kept in memory, used to stop the code, reset and demo
@@ -1002,9 +1011,8 @@ function otpMatches(input, expected) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-// Railway (and most PaaS free/hobby tiers) block outbound SMTP entirely to
-// prevent spam abuse - see https://docs.railway.com/networking/outbound-networking.
-// Their own recommendation, Resend's HTTPS API, isn't subject to that block
+// Render and Railway (and most PaaS free/hobby tiers) block outbound SMTP entirely to
+// prevent spam abuse. Resend's HTTPS API isn't subject to that block
 // since it's just a regular HTTPS request, so it's tried first; SMTP (e.g. for
 // a Pro-plan host, or local dev against a real mail server) is a fallback for
 // anyone who's set it up instead, and logging the code server-side is the
@@ -1020,7 +1028,7 @@ const mailTransport = smtpConfigured
       port: Number(process.env.SMTP_PORT || 587),
       secure: Number(process.env.SMTP_PORT) === 465,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      // Some hosts (Railway included) only have IPv4 egress, but SMTP hosts
+      // Some hosts (Railway and Render included) only have IPv4 egress, but SMTP hosts
       // like Gmail's resolve an IPv6 address first - without forcing IPv4
       // here the connection attempt fails with ENETUNREACH before it ever
       // gets to the TLS/auth handshake.
@@ -3763,7 +3771,7 @@ seedDefaults()
     await loadCandleSnapshotsFromDb();
     await loadHistoryBaselinesFromDb();
     server.listen(port, () => {
-      console.log(`FXCM platform running on http://127.0.0.1:${port}`);
+      console.log(`FXCM platform running on port ${port}`);
     });
     await restoreSimulations();
     startRealPriceFetching();
