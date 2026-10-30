@@ -195,6 +195,14 @@ async function findUserByEmail(email) {
   return memory.users.find((user) => user.email.toLowerCase() === email.toLowerCase()) || null;
 }
 
+async function findUserByReferralCode(code) {
+  if (pool) {
+    const rows = await query("SELECT * FROM users WHERE referral_code = $1 LIMIT 1", [code]);
+    return normalizeUser(rows[0]);
+  }
+  return memory.users.find((user) => user.referralCode === code) || null;
+}
+
 async function findUserById(id) {
   if (pool) {
     const rows = await query("SELECT * FROM users WHERE id = $1 LIMIT 1", [id]);
@@ -1250,7 +1258,14 @@ app.post("/api/auth/register", async (request, response) => {
   if (await findUserByEmail(email)) return response.status(409).json({ error: "Email already registered" });
   const otpEntry = otpStore.get(String(email).trim().toLowerCase());
   if (!otpEntry?.verified) return response.status(400).json({ error: "Please verify your email before registering" });
-  const user = await createUser({ email, password, name: name || email.split("@")[0], referredBy: referralCode || null });
+  // Codes are stored upper-case, so "ab12cd34" typed by hand still finds its owner (and still shows up in their
+  // invited list); a code that belongs to nobody is refused instead of being recorded against no one.
+  const referredBy = String(referralCode || "").trim().toUpperCase();
+  if (referredBy) {
+    const inviter = await findUserByReferralCode(referredBy);
+    if (!inviter || inviter.isDemo) return response.status(400).json({ error: "That referral code doesn't exist. Check it, or leave it blank." });
+  }
+  const user = await createUser({ email, password, name: name || email.split("@")[0], referredBy: referredBy || null });
   otpStore.delete(String(email).trim().toLowerCase());
   response.status(201).json({ token: signToken(user), user: publicUser(user) });
 });

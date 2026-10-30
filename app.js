@@ -255,6 +255,8 @@ function renderAccountSummary() {
 
   const referralCodeValue = document.querySelector("#profileReferralCode");
   if (referralCodeValue) referralCodeValue.textContent = uid;
+  const referralLinkValue = document.querySelector("#profileReferralLink");
+  if (referralLinkValue) referralLinkValue.textContent = user?.referralCode ? `${window.location.origin}/?ref=${user.referralCode}` : "—";
 
   const profileBalanceValue = document.querySelector("#profileBalance");
   if (profileBalanceValue) profileBalanceValue.textContent = formatCurrency(balance);
@@ -876,6 +878,32 @@ document.querySelector("#refreshDashboard").addEventListener("click", () => {
   }[section];
   try { reload?.(); } catch { /* the page's own loader reports its errors */ }
 });
+
+document.querySelector("#copyReferralLink")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const link = document.querySelector("#profileReferralLink")?.textContent || "";
+  if (!link.startsWith("http")) return;
+  try {
+    await navigator.clipboard.writeText(link);
+    button.textContent = "✓ Copied";
+  } catch {
+    button.textContent = "Copy it from the box";
+  }
+  setTimeout(() => {
+    button.textContent = "▣ Copy link";
+  }, 1400);
+});
+
+// An invite link (https://site/?ref=CODE) opens Create Account with the referral code already filled in.
+(function openInviteLink() {
+  let code = "";
+  try { code = new URLSearchParams(window.location.search).get("ref") || ""; } catch {}
+  code = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 16);
+  const field = document.querySelector('#registerView input[name="referral"]');
+  if (!code || !field) return;
+  field.value = code;
+  if (!currentSession?.token) showAuthView(registerView);
+})();
 
 document.querySelector("#copyReferralCode")?.addEventListener("click", async (event) => {
   const button = event.currentTarget;
