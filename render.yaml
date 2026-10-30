@@ -1,0 +1,46 @@
+# Render Blueprint for the FXCM platform: one web service plus its PostgreSQL database.
+# The live service was created by hand in the dashboard; this file documents the same
+# setup so a new environment (staging, a fresh account) can be created with one click:
+# Dashboard -> New -> Blueprint -> pick this repository.
+services:
+  - type: web
+    name: fxcm-platform
+    runtime: node
+    plan: starter            # always on (the free plan sleeps after 15 min idle, which stops quotes/WebSockets/simulations)
+    region: oregon
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:                    # KYC documents and chat images live here, so they survive deploys
+      name: uploads
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: fxcm-db
+          property: connectionString
+      - key: ALLOWED_SYMBOLS
+        value: XAU/USD,XAG/USD,BTC/USD,EUR/USD,GBP/USD,USOIL
+      # Set these by hand in the dashboard (secrets, never committed):
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: MARKET_DATA_API_KEY
+        sync: false
+
+databases:
+  - name: fxcm-db
+    plan: basic-256mb
+    region: oregon
