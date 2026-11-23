@@ -2145,25 +2145,12 @@ function applySimulationStatus(payload) {
 // distinct from the Products-page badge, which is about picking a symbol to
 // simulate rather than watching the one currently open.
 function updateTradeSimulationBadge() {
+  // The Trade-page chart never shows a "Simulating" badge, for any role
+  // (admins manage simulations from the Products page instead).
   const badge = document.querySelector("#tradeSimulationBadge");
   if (!badge) return;
-  const simulation = activeSimulationsBySymbol.get(tradeChartState.apiSymbol);
-  if (!simulation) {
-    badge.classList.add("is-hidden");
-    badge.removeAttribute("data-sim-expires");
-    return;
-  }
-  badge.classList.remove("is-hidden");
-  badge.classList.toggle("is-up", simulation.direction === "up");
-  badge.classList.toggle("is-down", simulation.direction === "down");
-  const arrow = simulation.direction === "up" ? "↑" : simulation.direction === "down" ? "↓" : "";
-  if (simulation.expiresAt) {
-    badge.dataset.simExpires = simulation.expiresAt;
-    renderSimulationCountdowns();
-  } else {
-    badge.removeAttribute("data-sim-expires");
-    badge.textContent = `Simulating ${arrow}`.trim();
-  }
+  badge.classList.add("is-hidden");
+  badge.removeAttribute("data-sim-expires");
 }
 
 // Mirrors the server's pending scheduled window for a symbol. When the
